@@ -1,0 +1,119 @@
+# inspectarr — example configuration
+# Copy this file to config.yaml and fill in your values.
+# config.yaml is gitignored; this file is safe to commit.
+
+# ---------------------------------------------------------------------------
+# qBittorrent Web API v2
+# ---------------------------------------------------------------------------
+qbittorrent:
+  url: http://192.168.1.100:8080
+  username: admin
+  password: changeme
+
+# ---------------------------------------------------------------------------
+# *arr clients
+# Set enabled: true for each one you use and provide credentials.
+# Rules reference arr clients by name (app: sonarr / app: radarr).
+# ---------------------------------------------------------------------------
+arrs:
+  sonarr:
+    enabled: true
+    url: http://192.168.1.100:8989
+    api_key: your_sonarr_api_key_here
+  radarr:
+    enabled: false                    # Not implemented in v1
+    url: http://192.168.1.100:7878
+    api_key: ~
+
+# ---------------------------------------------------------------------------
+# Rules
+# Each rule targets one qBittorrent category and one arr app.
+# Multiple rules are supported — e.g. separate rules for TV vs Anime.
+# ---------------------------------------------------------------------------
+rules:
+  - name: "TV Bad Extensions"
+    category: "tv-sonarr"             # Must match exactly in qBittorrent
+    app: sonarr
+    conditions:
+      match_mode: any                 # "any"     = flag if ANY file has a bad ext (default)
+                                      # "primary" = flag only if the LARGEST file is bad
+      bad_extensions:
+        - ".exe"
+        - ".zip"
+        - ".bat"
+        - ".msi"
+        - ".js"
+        - ".vbs"
+        - ".dmg"
+        - ".rar"
+      # Future conditions (not evaluated in v1 — reserved config keys):
+      # min_file_size_mb: ~
+      # bad_filename_patterns: []
+
+  # Example: second rule for an anime category
+  # - name: "Anime Bad Extensions"
+  #   category: "anime-sonarr"
+  #   app: sonarr
+  #   conditions:
+  #     match_mode: any
+  #     bad_extensions: [".exe", ".bat", ".msi"]
+
+# ---------------------------------------------------------------------------
+# Failure handling
+# What to do if the arr API call fails:
+#   delete — delete from qBittorrent anyway, log + notify the arr failure
+#   abort  — skip qBittorrent deletion, queue for retry
+# ---------------------------------------------------------------------------
+on_arr_failure: delete
+
+# ---------------------------------------------------------------------------
+# Retry
+# On any failure, inspectarr queues the torrent for retry.
+# Each startup processes any retries that are now due.
+# ---------------------------------------------------------------------------
+retry:
+  enabled: true
+  max_attempts: 10
+  interval_seconds: 600             # 10 minutes between attempts
+
+# ---------------------------------------------------------------------------
+# Logging
+# JSON Lines format. One event object per line.
+# Retention prunes both the log file and the SQLite state on every startup.
+# ---------------------------------------------------------------------------
+logging:
+  log_file: ./data/inspectarr.log.json
+  retention_days: 30
+  level: INFO                       # DEBUG for verbose output
+
+# ---------------------------------------------------------------------------
+# State (SQLite)
+# Tracks processed hashes and the retry queue.
+# ---------------------------------------------------------------------------
+state:
+  db_file: ./data/inspectarr.db
+
+# ---------------------------------------------------------------------------
+# Notifications — Pushover
+# Remove any event types from notify_on that you don't want alerts for.
+# Priority: -2=silent, -1=quiet, 0=normal, 1=high, 2=emergency
+# ---------------------------------------------------------------------------
+notifications:
+  pushover:
+    enabled: false                  # Set to true and fill credentials to activate
+    app_token: your_pushover_app_token
+    user_key:  your_pushover_user_key
+    notify_on:
+      - action                      # A torrent was deleted and blocklisted
+      - error                       # Any API failure or unhandled exception
+      - startup                     # inspectarr started successfully
+      - dry_run                     # A match was found but dry_run prevented action
+    priority: 0
+
+# ---------------------------------------------------------------------------
+# Dry run
+# true  = log and notify matches but do NOT delete or blocklist anything
+# false = live mode (default)
+# Can also be set at runtime with: python watchdog.py --dry-run
+# ---------------------------------------------------------------------------
+dry_run: false
