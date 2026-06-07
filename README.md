@@ -12,8 +12,8 @@ files, logs all events to JSON Lines, and notifies via Pushover.
 ```bash
 cp config.example.yaml config.yaml
 # edit config.yaml with your URLs, credentials, and rules
-python watchdog.py --dry-run    # confirm matches without deleting
-python watchdog.py              # live run
+python inspectarr.py --dry-run    # confirm matches without deleting
+python inspectarr.py              # live run
 ```
 
 ## Requirements
@@ -56,11 +56,11 @@ Key settings:
 ## CLI Flags
 
 ```
-python watchdog.py                    # single scan run
-python watchdog.py --config /path     # alternate config location
-python watchdog.py --dry-run          # override config dry_run=true
-python watchdog.py --daemon           # (v2) continuous loop
-python watchdog.py --retry-now        # (v2) force flush retry queue
+python inspectarr.py                    # single scan run
+python inspectarr.py --config /path     # alternate config location
+python inspectarr.py --dry-run          # override config dry_run=true
+python inspectarr.py --daemon           # (v2) continuous loop
+python inspectarr.py --retry-now        # (v2) force flush retry queue
 ```
 
 ## Persistent Data
@@ -83,7 +83,7 @@ Everything in `data/` — mount as a Docker volume:
 
 ```
 inspectarr/
-├── watchdog.py              # CLI entry point
+├── inspectarr.py              # CLI entry point
 ├── core/
 │   ├── config.py            # Config loader + dataclasses
 │   ├── scanner.py           # Main orchestrator
