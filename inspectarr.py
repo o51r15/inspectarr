@@ -7,11 +7,11 @@ blocklists bad releases in Sonarr (and future *arrs), deletes torrents + files,
 logs all actions to JSON Lines, and notifies via Pushover.
 
 Usage:
-  python watchdog.py                     # single scan run (default)
-  python watchdog.py --config /path      # alternate config file
-  python watchdog.py --dry-run           # flag matches, take no action
-  python watchdog.py --daemon            # (v2) continuous loop mode
-  python watchdog.py --retry-now         # (v2) force flush retry queue
+  python inspectarr.py                     # single scan run (default)
+  python inspectarr.py --config /path      # alternate config file
+  python inspectarr.py --dry-run           # flag matches, take no action
+
+For the web UI with a built-in scheduler daemon, run web.py instead.
 """
 import argparse
 import os
@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dry-run",   action="store_true",
                    help="Flag matches but take no action (overrides config)")
     p.add_argument("--daemon",    action="store_true",
-                   help="[Not implemented in v1] Continuous loop mode")
+                   help="Not in the CLI — use web.py for the scheduler daemon")
     p.add_argument("--retry-now", action="store_true",
                    help="[Not implemented in v1] Force flush retry queue now")
     return p.parse_args()
@@ -38,8 +38,8 @@ def main():
     args = parse_args()
 
     if args.daemon:
-        print("ERROR: --daemon is not implemented in v1.")
-        print("       Use a cron job or systemd timer to schedule repeated runs.")
+        print("The CLI runs a single scan. For a continuous scheduler daemon,")
+        print("run the web UI instead:  python web.py")
         sys.exit(1)
 
     if args.retry_now:
@@ -55,7 +55,7 @@ def main():
 
     try:
         config = load_config(args.config)
-    except (ValueError, KeyError, Exception) as exc:
+    except Exception as exc:
         print(f"ERROR: Failed to load config: {exc}")
         sys.exit(1)
 

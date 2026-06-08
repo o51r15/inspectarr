@@ -79,6 +79,11 @@ class NotificationsConfig:
 
 
 @dataclass
+class WebConfig:
+    port: int = 8585
+
+
+@dataclass
 class AppConfig:
     qbittorrent: QBittorrentConfig
     arrs: ArrsConfig
@@ -88,6 +93,8 @@ class AppConfig:
     logging: LoggingConfig
     state: StateConfig
     notifications: NotificationsConfig
+    web: WebConfig = field(default_factory=WebConfig)
+    poll_interval_seconds: int = 300
     dry_run: bool = False
 
 
@@ -183,6 +190,8 @@ def _parse_config(raw: dict) -> AppConfig:
         logging=logging_cfg,
         state=state_cfg,
         notifications=notif_cfg,
+        web=WebConfig(port=raw.get("web", {}).get("port", 8585)),
+        poll_interval_seconds=raw.get("poll_interval_seconds", 300),
         dry_run=raw.get("dry_run", False),
     )
 

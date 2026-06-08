@@ -120,13 +120,33 @@ class StateManager:
             conn.commit()
         return count
 
-    def get_due_retries(self) -> list[dict]:
+    def get_due_retries(self, max_attempts: int) -> list[dict]:
+        """
+        Return retry entries that are due and NOT yet exhausted.
+        Exhausted entries (attempt_count >= max_attempts) are excluded so we
+        stop hammering them — they remain in the table as a permanent record.
+        """
         with self._conn() as conn:
             rows = conn.execute("""
                 SELECT * FROM retry_queue
-                WHERE resolved = 0 AND next_attempt <= ?
-            """, (_now_iso(),)).fetchall()
+                WHERE resolved = 0
+                  AND next_attempt <= ?
+                  AND attempt_count < ?
+            """, (_now_iso(), max_attempts)).fetchall()
         return [dict(r) for r in rows]
+
+    def has_active_retry(self, hash: str) -> bool:
+        """
+        True if an unresolved retry entry exists for this hash (pending OR
+        exhausted). Used so the normal scan skips it and lets the retry queue
+        own the timing — preventing reprocessing on every poll cycle.
+        """
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM retry_queue WHERE hash = ? AND resolved = 0",
+                (hash,)
+            ).fetchone()
+        return row is not None
 
     def get_retry_count(self, hash: str) -> int:
         with self._conn() as conn:

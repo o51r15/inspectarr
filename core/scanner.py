@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from .config import AppConfig, Rule
 from .qbit import QBittorrentClient
 from .arrs.base import AbstractArrClient
@@ -51,8 +52,10 @@ class Scanner:
     # ------------------------------------------------------------------
 
     def startup(self):
+        """Full startup: prune, log, and fire the startup notification.
+        Used by the CLI and once by the daemon when it launches."""
         self.log.info("inspectarr starting up")
-        self.state.prune_old_records()
+        self.prepare()
         self.state.write_log({
             "level": "INFO",
             "event": "startup",
@@ -61,15 +64,26 @@ class Scanner:
         })
         self.notifier.notify_startup(len(self.config.rules), self.config.dry_run)
 
+    def prepare(self):
+        """Lightweight pre-scan: prune old records only. No notification.
+        Safe to call before every scan cycle in the daemon."""
+        self.state.prune_old_records()
+
     def process_retries(self):
-        due = self.state.get_due_retries()
+        due = self.state.get_due_retries(self.config.retry.max_attempts)
         if not due:
             return
         self.log.info(f"Processing {len(due)} retry queue entry/entries")
         for entry in due:
             self._process_one_retry(entry)
 
-    def run_scan(self):
+    def run_scan(self) -> dict:
+        stats = {
+            "torrents_checked": 0,
+            "flagged": 0,
+            "actioned": 0,
+            "last_flagged": None,
+        }
         for rule in self.config.rules:
             self.log.debug(f"Scanning rule '{rule.name}' (category: {rule.category})")
             try:
@@ -85,37 +99,60 @@ class Scanner:
 
             self.log.debug(f"  {len(torrents)} torrent(s) found")
             for torrent in torrents:
-                self._evaluate_torrent(torrent, rule)
+                flagged, actioned = self._evaluate_torrent(torrent, rule)
+                stats["torrents_checked"] += 1
+                if flagged:
+                    stats["flagged"] += 1
+                    if actioned:
+                        stats["actioned"] += 1
+                        stats["last_flagged"] = {
+                            "torrent_name": torrent.get("name", torrent["hash"]),
+                            "rule": rule.name,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+
+        self.state.write_log({
+            "level": "INFO", "event": "scan_complete", **stats
+        })
+        return stats
 
     # ------------------------------------------------------------------
     # Per-torrent evaluation
     # ------------------------------------------------------------------
 
-    def _evaluate_torrent(self, torrent: dict, rule: Rule):
+    def _evaluate_torrent(self, torrent: dict, rule: Rule) -> tuple[bool, bool]:
+        """Returns (flagged, actioned)."""
         h    = torrent["hash"]
         name = torrent.get("name", h)
 
         if self.state.is_processed(h):
             self.log.debug(f"  Skip (already actioned): {name}")
-            return
+            return False, False
+
+        # If retry is enabled and this hash has an unresolved retry entry,
+        # let the retry queue own its timing — don't reprocess every poll cycle.
+        if self.config.retry.enabled and self.state.has_active_retry(h):
+            self.log.debug(f"  Skip (retry queue owns it): {name}")
+            return False, False
 
         try:
             files = self.qbit.get_torrent_files(h)
         except Exception as exc:
             self.log.warning(f"  Could not get files for {name}: {exc}")
-            return
+            return False, False
 
         flagged, bad_files = evaluate_rule(rule, files)
         if not flagged:
-            return
+            return False, False
 
         self.log.info(f"FLAGGED [{rule.name}] {name} | bad: {bad_files}")
 
         if self.config.dry_run:
             self._handle_dry_run(h, name, rule, bad_files)
-            return
+            return True, False
 
-        self._attempt_action(h, name, rule, bad_files)
+        actioned = self._attempt_action(h, name, rule, bad_files)
+        return True, actioned
 
 
     # ------------------------------------------------------------------
@@ -159,13 +196,14 @@ class Scanner:
             })
             self.notifier.notify_error(f"Arr failure ({rule.app}): {name}", reason)
             if self.config.on_arr_failure == "abort":
-                count = self.state.queue_retry(
-                    hash, name, rule.category, rule.name,
-                    reason, self.config.retry.interval_seconds,
-                )
                 self.state.record_action(hash, name, rule.category, rule.name,
                                           "failed", False, False)
-                self._check_retry_limit(hash, name, count)
+                if self.config.retry.enabled:
+                    count = self.state.queue_retry(
+                        hash, name, rule.category, rule.name,
+                        reason, self.config.retry.interval_seconds,
+                    )
+                    self._check_retry_limit(hash, name, count)
                 return False
             # on_arr_failure == "delete": fall through
 
@@ -177,13 +215,14 @@ class Scanner:
             reason  = str(exc)
             self.log.error(f"  qBit delete failed: {reason}")
             self.notifier.notify_error(f"qBit delete failed: {name}", reason)
-            count = self.state.queue_retry(
-                hash, name, rule.category, rule.name,
-                reason, self.config.retry.interval_seconds,
-            )
             self.state.record_action(hash, name, rule.category, rule.name,
                                       "failed", arr_success, False)
-            self._check_retry_limit(hash, name, count)
+            if self.config.retry.enabled:
+                count = self.state.queue_retry(
+                    hash, name, rule.category, rule.name,
+                    reason, self.config.retry.interval_seconds,
+                )
+                self._check_retry_limit(hash, name, count)
             return False
 
         # Step 3 — record success

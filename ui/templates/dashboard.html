@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — inspectarr{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block topbar_actions %}
+  <form method="post" action="/scheduler/run" style="display:inline">
+    <button class="btn btn-ghost btn-sm" {% if status.scanning %}disabled{% endif %}>
+      ▶ Run Now
+    </button>
+  </form>
+  <form method="post" action="/scheduler/toggle" style="display:inline">
+    {% if status.running %}
+      <button class="btn btn-warning btn-sm">⏹ Stop Scheduler</button>
+    {% else %}
+      <button class="btn btn-success btn-sm">▶ Start Scheduler</button>
+    {% endif %}
+  </form>
+{% endblock %}
+
+{% block content %}
+<div id="dashboard-status">
+
+  <!-- Stat row -->
+  <div class="grid grid-4 mb-16">
+    <div class="card">
+      <div class="card-title">Scheduler</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span class="status-dot {{ 'scanning' if status.scanning else ('running' if status.running else 'stopped') }}"
+              id="status-dot"></span>
+        <span style="font-size:15px;font-weight:600" id="status-label">
+          {{ 'Scanning' if status.scanning else ('Running' if status.running else 'Stopped') }}
+        </span>
+      </div>
+      <div class="stat-label">Next run: <span id="next-run">{{ status.next_run or '—' }}</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Last Scan — Checked</div>
+      <div class="stat-value" id="stat-checked">
+        {{ status.last_result.torrents_checked if status.last_result else '—' }}
+      </div>
+      <div class="stat-label">torrents evaluated</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Flagged</div>
+      <div class="stat-value text-warning" id="stat-flagged">
+        {{ status.last_result.flagged if status.last_result else '—' }}
+      </div>
+      <div class="stat-label">bad files detected</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Actioned</div>
+      <div class="stat-value text-success" id="stat-actioned">
+        {{ status.last_result.actioned if status.last_result else '—' }}
+      </div>
+      <div class="stat-label">deleted &amp; blocklisted</div>
+    </div>
+  </div>
+
+  <!-- Last scan info + last flagged -->
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="card-title">Last Scan</div>
+      {% if status.last_result %}
+        {% set r = status.last_result %}
+        <table style="width:100%">
+          <tr><td class="text-muted" style="width:140px">Started</td>
+              <td id="stat-last-run" class="mono">{{ r.scan_start[:19].replace('T',' ') if r.scan_start else '—' }}</td></tr>
+          <tr><td class="text-muted">Duration</td>
+              <td class="mono">{{ r.duration_seconds }}s</td></tr>
+          <tr><td class="text-muted">Status</td>
+              <td>{% if r.error %}<span class="text-error">{{ r.error }}</span>
+                  {% else %}<span class="text-success">OK</span>{% endif %}</td></tr>
+        </table>
+      {% else %}
+        <p class="text-muted" style="font-size:13px">No scans run yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Last Flagged Torrent</div>
+      {% if status.last_result and status.last_result.last_flagged %}
+        {% set lf = status.last_result.last_flagged %}
+        <div style="font-weight:600;margin-bottom:8px" id="last-flagged-name">{{ lf.torrent_name }}</div>
+        <div class="text-muted" style="font-size:12px">
+          Rule: <span id="last-flagged-rule">{{ lf.rule }}</span><br>
+          Time: <span id="last-flagged-time">{{ lf.timestamp[:19].replace('T',' ') if lf.timestamp else '—' }}</span>
+        </div>
+      {% else %}
+        <p class="text-muted" style="font-size:13px">No bad torrents detected yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Recent run history -->
+  {% if status.run_history %}
+  <div class="card mt-16">
+    <div class="card-title">Recent Runs</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Started</th><th>Duration</th><th>Checked</th>
+          <th>Flagged</th><th>Actioned</th><th>Status</th>
+        </tr></thead>
+        <tbody>
+        {% for r in status.run_history %}
+        <tr>
+          <td class="mono text-muted">{{ r.scan_start[:19].replace('T',' ') if r.scan_start else '—' }}</td>
+          <td class="mono">{{ r.duration_seconds }}s</td>
+          <td>{{ r.torrents_checked }}</td>
+          <td>{{ r.flagged }}</td>
+          <td>{{ r.actioned }}</td>
+          <td>{% if r.error %}<span class="text-error">Error</span>
+              {% else %}<span class="text-success">OK</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

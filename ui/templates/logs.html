@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Logs — inspectarr{% endblock %}
+{% block page_title %}Logs{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn btn-ghost btn-sm" id="refresh-btn" onclick="toggleLogRefresh(this)">
+    Auto-refresh: Off
+  </button>
+  <form method="post" action="/logs/clear"
+        onsubmit="return confirm('Clear the entire log file? This cannot be undone.')">
+    <button class="btn btn-danger btn-sm">Clear Log</button>
+  </form>
+{% endblock %}
+
+{% block content %}
+
+<!-- Level filter -->
+<div class="flex gap-8 items-center mb-16">
+  <span class="text-muted" style="font-size:12px">Filter:</span>
+  {% for lvl in levels %}
+  <a href="/logs?level={{ lvl }}&page=1"
+     class="btn btn-sm {{ 'btn-primary' if level_filter == lvl else 'btn-ghost' }}">
+    {{ lvl }}
+  </a>
+  {% endfor %}
+  <span class="text-muted" style="font-size:12px;margin-left:8px">{{ total }} entries</span>
+</div>
+
+<input type="hidden" id="level-filter" value="{{ level_filter }}">
+
+<!-- Log table -->
+<div class="card" style="padding:0;overflow:hidden">
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th style="width:160px">Timestamp</th>
+        <th style="width:90px">Level</th>
+        <th style="width:160px">Event</th>
+        <th>Torrent / Detail</th>
+        <th>Bad Files</th>
+      </tr></thead>
+      <tbody id="log-tbody">
+        {% for e in entries %}
+        <tr>
+          <td class="mono text-muted">{{ e.timestamp[:19].replace('T',' ') if e.timestamp else '—' }}</td>
+          <td>
+            {% set level = e.get('level','INFO') %}
+            {% if level == 'ACTION' %}
+              <span class="badge badge-action">ACTION</span>
+            {% elif level == 'ERROR' %}
+              <span class="badge badge-error">ERROR</span>
+            {% elif level == 'DRY_RUN' %}
+              <span class="badge badge-dry-run">DRY RUN</span>
+            {% elif level == 'DEBUG' %}
+              <span class="badge badge-debug">DEBUG</span>
+            {% else %}
+              <span class="badge badge-info">{{ level }}</span>
+            {% endif %}
+          </td>
+          <td class="mono" style="font-size:12px">{{ e.get('event','') }}</td>
+          <td>
+            {% if e.get('torrent_name') %}
+              <span>{{ e.torrent_name }}</span>
+            {% elif e.get('reason') %}
+              <span class="text-error">{{ e.reason }}</span>
+            {% elif e.get('category') %}
+              <span class="text-muted">category: {{ e.category }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if e.get('bad_files') %}
+              {% for f in e.bad_files %}
+                <code style="font-size:11px;background:var(--surface);padding:1px 5px;border-radius:3px;margin-right:4px">{{ f }}</code>
+              {% endfor %}
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted" style="text-align:center;padding:32px">No log entries found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}
+    <a href="/logs?level={{ level_filter }}&page={{ page - 1 }}">← Prev</a>
+  {% endif %}
+  {% for p in range(1, total_pages + 1) %}
+    {% if p == page %}
+      <span class="current">{{ p }}</span>
+    {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+      <a href="/logs?level={{ level_filter }}&page={{ p }}">{{ p }}</a>
+    {% elif p == page - 3 or p == page + 3 %}
+      <span>…</span>
+    {% endif %}
+  {% endfor %}
+  {% if page < total_pages %}
+    <a href="/logs?level={{ level_filter }}&page={{ page + 1 }}">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

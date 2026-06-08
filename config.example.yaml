@@ -117,3 +117,18 @@ notifications:
 # Can also be set at runtime with: python watchdog.py --dry-run
 # ---------------------------------------------------------------------------
 dry_run: false
+
+# ---------------------------------------------------------------------------
+# Poll interval (seconds) — used by the web UI scheduler daemon
+# The CLI single-shot mode ignores this value.
+# ---------------------------------------------------------------------------
+poll_interval_seconds: 300
+
+# ---------------------------------------------------------------------------
+# Web UI
+# ---------------------------------------------------------------------------
+web:
+  port: 8585
+  # Auth planned for v2:
+  # username: ~
+  # password: ~

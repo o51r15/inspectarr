@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}inspectarr{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>inspectarr</h1>
+      <span>torrent watchdog</span>
+    </div>
+    <nav class="nav">
+      <a href="/" class="{{ 'active' if request.path == '/' else '' }}">
+        <span class="icon">⬡</span> Dashboard
+      </a>
+      <a href="/scheduler" class="{{ 'active' if request.path.startswith('/scheduler') else '' }}">
+        <span class="icon">⏱</span> Scheduler
+      </a>
+      <a href="/logs" class="{{ 'active' if request.path.startswith('/logs') else '' }}">
+        <span class="icon">≡</span> Logs
+      </a>
+      <a href="/config" class="{{ 'active' if request.path.startswith('/config') else '' }}">
+        <span class="icon">⚙</span> Config
+      </a>
+    </nav>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <h2>{% block page_title %}{% endblock %}</h2>
+      <div class="flex gap-8 items-center">{% block topbar_actions %}{% endblock %}</div>
+    </div>
+    <div class="page">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+</div>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

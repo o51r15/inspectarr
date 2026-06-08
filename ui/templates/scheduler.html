@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Scheduler — inspectarr{% endblock %}
+{% block page_title %}Scheduler{% endblock %}
+
+{% block topbar_actions %}
+  <form method="post" action="/scheduler/run" style="display:inline">
+    <button class="btn btn-ghost btn-sm" {{ 'disabled' if status.scanning else '' }}>
+      ▶ Run Now
+    </button>
+  </form>
+  <form method="post" action="/scheduler/toggle" style="display:inline">
+    {% if status.running %}
+      <button class="btn btn-warning btn-sm">⏹ Stop</button>
+    {% else %}
+      <button class="btn btn-success btn-sm">▶ Start</button>
+    {% endif %}
+  </form>
+{% endblock %}
+
+{% block content %}
+
+<div class="grid grid-2 mb-16">
+
+  <!-- Status card -->
+  <div class="card">
+    <div class="card-title">Daemon Status</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <span class="status-dot {{ 'scanning' if status.scanning else ('running' if status.running else 'stopped') }}"></span>
+      <span style="font-size:18px;font-weight:700">
+        {% if status.scanning %}Scanning{% elif status.running %}Running{% else %}Stopped{% endif %}
+      </span>
+    </div>
+    <table style="width:100%;font-size:13px">
+      <tr>
+        <td class="text-muted" style="width:130px;padding:4px 0">Poll interval</td>
+        <td>{{ interval }}s
+          <span class="text-muted" style="font-size:11px">({{ (interval // 60) }}m {{ interval % 60 }}s)</span>
+        </td>
+      </tr>
+      <tr>
+        <td class="text-muted" style="padding:4px 0">Last run</td>
+        <td class="mono">{{ status.last_run[:19].replace('T',' ') if status.last_run else '—' }}</td>
+      </tr>
+      <tr>
+        <td class="text-muted" style="padding:4px 0">Next run</td>
+        <td class="mono">{{ status.next_run[:19].replace('T',' ') if status.next_run else '—' }}</td>
+      </tr>
+    </table>
+    <div class="hint mt-8">
+      Poll interval is set in Config → Behavior → Poll Interval.
+      Changes take effect on the next scan cycle.
+    </div>
+  </div>
+
+  <!-- Last result card -->
+  <div class="card">
+    <div class="card-title">Last Scan Result</div>
+    {% if status.last_result %}
+      {% set r = status.last_result %}
+      {% if r.error %}
+        <div class="alert alert-error" style="margin-bottom:12px">{{ r.error }}</div>
+      {% endif %}
+      <div class="grid grid-2" style="gap:12px;margin-bottom:12px">
+        <div>
+          <div class="stat-value">{{ r.torrents_checked }}</div>
+          <div class="stat-label">checked</div>
+        </div>
+        <div>
+          <div class="stat-value text-warning">{{ r.flagged }}</div>
+          <div class="stat-label">flagged</div>
+        </div>
+        <div>
+          <div class="stat-value text-success">{{ r.actioned }}</div>
+          <div class="stat-label">actioned</div>
+        </div>
+        <div>
+          <div class="stat-value">{{ r.duration_seconds }}s</div>
+          <div class="stat-label">duration</div>
+        </div>
+      </div>
+      {% if r.last_flagged %}
+        <div style="font-size:12px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:10px">
+          Last flagged: <span style="color:var(--text)">{{ r.last_flagged.torrent_name }}</span>
+        </div>
+      {% endif %}
+    {% else %}
+      <p class="text-muted" style="font-size:13px">No scans completed yet.</p>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- Run history -->
+{% if status.run_history %}
+<div class="card">
+  <div class="card-title">Run History (last 10)</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Started</th>
+        <th>Ended</th>
+        <th>Duration</th>
+        <th>Checked</th>
+        <th>Flagged</th>
+        <th>Actioned</th>
+        <th>Result</th>
+      </tr></thead>
+      <tbody>
+      {% for r in status.run_history %}
+      <tr>
+        <td class="mono text-muted">{{ r.scan_start[:19].replace('T',' ') if r.scan_start else '—' }}</td>
+        <td class="mono text-muted">{{ r.scan_end[:19].replace('T',' ') if r.scan_end else '—' }}</td>
+        <td class="mono">{{ r.duration_seconds }}s</td>
+        <td>{{ r.torrents_checked }}</td>
+        <td>{{ r.flagged }}</td>
+        <td>{{ r.actioned }}</td>
+        <td>
+          {% if r.error %}
+            <span class="badge badge-error">Error</span>
+          {% else %}
+            <span class="badge badge-action">OK</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <p class="text-muted" style="font-size:13px">No run history yet. Start the scheduler or click Run Now.</p>
+</div>
+{% endif %}
+
+{% endblock %}
