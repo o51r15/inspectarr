@@ -69,8 +69,15 @@ class Scanner:
         Safe to call before every scan cycle in the daemon."""
         self.state.prune_old_records()
 
-    def process_retries(self):
-        due = self.state.get_due_retries(self.config.retry.max_attempts)
+    def process_retries(self, force: bool = False):
+        """
+        Process the retry queue. If force=True, bypasses next_attempt timing
+        and the exhaustion cap — retries everything unresolved. Used by --retry-now.
+        """
+        if force:
+            due = self.state.get_all_unresolved_retries()
+        else:
+            due = self.state.get_due_retries(self.config.retry.max_attempts)
         if not due:
             return
         self.log.info(f"Processing {len(due)} retry queue entry/entries")

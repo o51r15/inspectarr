@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--daemon",    action="store_true",
                    help="Not in the CLI — use web.py for the scheduler daemon")
     p.add_argument("--retry-now", action="store_true",
-                   help="[Not implemented in v1] Force flush retry queue now")
+                   help="Force flush retry queue — bypasses timing and exhaustion cap, then scans")
     return p.parse_args()
 
 
@@ -43,8 +43,26 @@ def main():
         sys.exit(1)
 
     if args.retry_now:
-        print("ERROR: --retry-now is not implemented in v1.")
-        sys.exit(1)
+        from core.config import load_config
+        from core.scanner import Scanner
+
+        if not os.path.exists(args.config):
+            print(f"ERROR: Config file not found: {args.config}")
+            sys.exit(1)
+        try:
+            config = load_config(args.config)
+        except Exception as exc:
+            print(f"ERROR: Failed to load config: {exc}")
+            sys.exit(1)
+        if args.dry_run:
+            config.dry_run = True
+        scanner = Scanner(config)
+        scanner.prepare()
+        print("Force-flushing retry queue (bypassing timing and exhaustion cap)...")
+        scanner.process_retries(force=True)
+        print("Done. Running scan...")
+        scanner.run_scan()
+        return
 
     from core.config import load_config
     from core.scanner import Scanner

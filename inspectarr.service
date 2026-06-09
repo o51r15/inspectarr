@@ -1,0 +1,20 @@
+[Unit]
+Description=inspectarr — torrent watchdog web UI and scheduler
+Documentation=https://github.com/o51r15/inspectarr
+After=network.target
+
+[Service]
+Type=simple
+User=o51r15
+Group=o51r15
+WorkingDirectory=/home/o51r15/scripts/inspectarr
+ExecStart=/home/o51r15/scripts/inspectarr/venv/bin/python web.py
+Environment=INSPECTARR_CONFIG=/home/o51r15/scripts/inspectarr/config.yaml
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=inspectarr
+
+[Install]
+WantedBy=multi-user.target

@@ -135,6 +135,17 @@ class StateManager:
             """, (_now_iso(), max_attempts)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_all_unresolved_retries(self) -> list[dict]:
+        """
+        Return ALL unresolved retries regardless of timing or attempt count.
+        Used by --retry-now to force-flush everything including exhausted entries.
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM retry_queue WHERE resolved = 0"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def has_active_retry(self, hash: str) -> bool:
         """
         True if an unresolved retry entry exists for this hash (pending OR

@@ -93,23 +93,10 @@ docker exec inspectarr python inspectarr.py --dry-run
 
 ## Systemd (auto-start on boot)
 
-Create `/etc/systemd/system/inspectarr.service`:
+A `inspectarr.service` unit file is included. Copy it and enable it:
 
-```ini
-[Unit]
-Description=Inspectarr torrent watchdog
-After=network.target
-
-[Service]
-Type=simple
-User=<your-user>
-WorkingDirectory=/home/<your-user>/scripts/inspectarr
-ExecStart=/home/<your-user>/scripts/inspectarr/venv/bin/python web.py
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
+```bash
+sudo cp inspectarr.service /etc/systemd/system/
 ```
 
 Then enable and start:
@@ -154,7 +141,7 @@ python3 inspectarr.py                    # single scan run
 python3 inspectarr.py --config /path     # alternate config location
 python3 inspectarr.py --dry-run          # override config dry_run=true
 python3 inspectarr.py --daemon           # not in the CLI — use web.py instead
-python3 inspectarr.py --retry-now        # (v2) force flush retry queue
+python3 inspectarr.py --retry-now        # force flush retry queue, then scan
 ```
 
 The continuous scheduler lives in `web.py`; the CLI is single-shot only.
@@ -202,11 +189,12 @@ inspectarr/
 │   ├── scheduler.py         # Background scheduler daemon thread
 │   ├── routes/              # Flask blueprints (dashboard, config, logs, scheduler)
 │   ├── templates/           # Jinja2 templates
-│   └── static/              # CSS + JS
+│   └── static/              # CSS + JS + logo.png
 ├── assets/
 │   └── inspectarr-banner.jpg
 ├── config.example.yaml
 ├── docker-compose.yml
+├── inspectarr.service
 ├── data/                    # Runtime state (gitignored, Docker volume)
 ├── Dockerfile
 └── requirements.txt
