@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/inspectarr-banner.jpg" alt="Inspectarr" width="900">
+</p>
+
 # inspectarr
 
 Torrent watchdog for *arr ecosystems. Polls qBittorrent categories, detects
@@ -73,10 +77,54 @@ docker run -d \
   inspectarr
 ```
 
+Or with Docker Compose (using the included `docker-compose.yml`):
+
+```bash
+docker compose up -d
+```
+
 To run a one-off CLI scan against a running container:
 
 ```bash
 docker exec inspectarr python inspectarr.py --dry-run
+```
+
+---
+
+## Systemd (auto-start on boot)
+
+Create `/etc/systemd/system/inspectarr.service`:
+
+```ini
+[Unit]
+Description=Inspectarr torrent watchdog
+After=network.target
+
+[Service]
+Type=simple
+User=<your-user>
+WorkingDirectory=/home/<your-user>/scripts/inspectarr
+ExecStart=/home/<your-user>/scripts/inspectarr/venv/bin/python web.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable inspectarr
+sudo systemctl start inspectarr
+```
+
+Check status and logs:
+
+```bash
+sudo systemctl status inspectarr
+sudo journalctl -u inspectarr -f
 ```
 
 ---
@@ -155,7 +203,10 @@ inspectarr/
 │   ├── routes/              # Flask blueprints (dashboard, config, logs, scheduler)
 │   ├── templates/           # Jinja2 templates
 │   └── static/              # CSS + JS
+├── assets/
+│   └── inspectarr-banner.jpg
 ├── config.example.yaml
+├── docker-compose.yml
 ├── data/                    # Runtime state (gitignored, Docker volume)
 ├── Dockerfile
 └── requirements.txt
