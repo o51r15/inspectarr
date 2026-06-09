@@ -21,7 +21,7 @@ arrs:
     url: http://192.168.1.100:8989
     api_key: your_sonarr_api_key_here
   radarr:
-    enabled: false                    # Not implemented in v1
+    enabled: false                    # Set to true and add credentials to use
     url: http://192.168.1.100:7878
     api_key: ~
 
@@ -46,9 +46,12 @@ rules:
         - ".vbs"
         - ".dmg"
         - ".rar"
-      # Future conditions (not evaluated in v1 — reserved config keys):
-      # min_file_size_mb: ~
-      # bad_filename_patterns: []
+      # Optional: flag if the primary (largest) file is suspiciously small
+      # min_file_size_mb: 100
+      # Optional: flag if any filename matches these regex patterns (respects match_mode)
+      # bad_filename_patterns:
+      #   - "sample\."         # filename contains "sample."
+      #   - "^(?!.*\d{3,})"    # primary file has no episode/quality number
 
   # Example: second rule for an anime category
   # - name: "Anime Bad Extensions"

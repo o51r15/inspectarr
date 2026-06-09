@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
+import re
 import yaml
 
 
@@ -32,9 +33,8 @@ class ArrsConfig:
 class RuleConditions:
     bad_extensions: list[str]
     match_mode: str = "any"   # "any" | "primary"
-    # Reserved — not evaluated in v1:
-    # min_file_size_mb: Optional[int] = None
-    # bad_filename_patterns: list[str] = field(default_factory=list)
+    min_file_size_mb: Optional[int] = None
+    bad_filename_patterns: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -142,6 +142,8 @@ def _parse_config(raw: dict) -> AppConfig:
             conditions=RuleConditions(
                 bad_extensions=exts,
                 match_mode=c.get("match_mode", "any"),
+                min_file_size_mb=c.get("min_file_size_mb", None),
+                bad_filename_patterns=c.get("bad_filename_patterns", []),
             ),
         ))
 
@@ -213,8 +215,19 @@ def _validate(raw: dict, rules: list[Rule], arrs: ArrsConfig) -> None:
             errors.append(f"Rule '{rule.name}': app=radarr but radarr is not enabled")
         if rule.conditions.match_mode not in ("any", "primary"):
             errors.append(f"Rule '{rule.name}': match_mode must be 'any' or 'primary'")
-        if not rule.conditions.bad_extensions:
-            errors.append(f"Rule '{rule.name}': bad_extensions list is empty")
+        has_conditions = (
+            bool(rule.conditions.bad_extensions)
+            or bool(rule.conditions.bad_filename_patterns)
+            or rule.conditions.min_file_size_mb is not None
+        )
+        if not has_conditions:
+            errors.append(f"Rule '{rule.name}': at least one condition must be set "
+                          "(bad_extensions, bad_filename_patterns, or min_file_size_mb)")
+        for pattern in rule.conditions.bad_filename_patterns:
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                errors.append(f"Rule '{rule.name}': invalid regex pattern '{pattern}': {exc}")
 
     if errors:
         raise ValueError(

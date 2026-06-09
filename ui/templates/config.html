@@ -75,19 +75,27 @@
       </div>
     </div>
 
-    <!-- Radarr (disabled) -->
+    <!-- Radarr -->
     <div class="form-section">
-      <div class="form-section-title">Radarr <span class="badge badge-warning" style="font-size:10px;vertical-align:middle">v2</span></div>
-      <p class="hint mb-16" style="font-size:12px">Radarr support is planned for v2. Fields are preserved but not active.</p>
-      <div class="form-row" style="opacity:.4;pointer-events:none">
+      <div class="form-section-title">Radarr</div>
+      <div class="toggle-row">
+        <input type="checkbox" name="radarr_enabled" id="radarr_enabled"
+               {{ 'checked' if cfg.get('arrs',{}).get('radarr',{}).get('enabled') else '' }}>
+        <label for="radarr_enabled">Enabled</label>
+      </div>
+      <div class="form-row">
         <div class="form-group">
           <label>URL</label>
-          <input type="text" name="radarr_url" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('url','') }}" disabled>
+          <input type="text" name="radarr_url" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('url','') }}" placeholder="http://192.168.1.100:7878">
         </div>
         <div class="form-group">
           <label>API Key</label>
-          <input type="password" name="radarr_api_key" value="" disabled>
+          <input type="password" name="radarr_api_key" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('api_key','') }}">
         </div>
+      </div>
+      <div class="flex gap-8 items-center">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('radarr')">Test Connection</button>
+        <span id="test-radarr-result" class="hint"></span>
       </div>
     </div>
 
@@ -120,7 +128,7 @@
               <label>App</label>
               <select name="rule_app_{{ idx }}">
                 <option value="sonarr" {{ 'selected' if rule.app == 'sonarr' else '' }}>Sonarr</option>
-                <option value="radarr" disabled>Radarr (v2)</option>
+                <option value="radarr" {{ 'selected' if rule.app == 'radarr' else '' }}>Radarr</option>
               </select>
             </div>
             <div class="form-group">
@@ -144,6 +152,33 @@
               {% for ext in exts %}
               <span class="ext-tag">{{ ext }}
                 <button type="button" onclick="removeExt({{ idx }},'{{ ext }}')">×</button>
+              </span>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="max-width:220px">
+              <label>Min Primary File Size (MB)</label>
+              {% set min_size = rule.conditions.get('min_file_size_mb') %}
+              <input type="number" name="rule_min_size_mb_{{ idx }}"
+                     value="{{ min_size if min_size is not none else '' }}"
+                     placeholder="Leave blank to disable" min="1">
+              <div class="hint">Flag if primary file is smaller than this</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Bad Filename Patterns (regex)</label>
+            {% set patterns = rule.conditions.get('bad_filename_patterns', []) %}
+            <input type="hidden" name="rule_patterns_{{ idx }}"
+                   id="rule_pat_hidden_{{ idx }}" value="{{ patterns | join(',') }}">
+            <div class="input-with-btn">
+              <input type="text" id="rule_pat_input_{{ idx }}" placeholder="e.g. sample\." style="max-width:200px">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="addPattern({{ idx }})">+ Add</button>
+            </div>
+            <div class="ext-tags" id="rule_pat_tags_{{ idx }}">
+              {% for p in patterns %}
+              <span class="ext-tag" data-pattern="{{ p }}">{{ p }}
+                <button type="button" onclick="removePattern({{ idx }}, this)">×</button>
               </span>
               {% endfor %}
             </div>

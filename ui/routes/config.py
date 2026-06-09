@@ -59,6 +59,19 @@ def test_qbit():
         return jsonify({"ok": False, "message": str(e)})
 
 
+@config_bp.route("/config/test/radarr", methods=["POST"])
+def test_radarr():
+    from core.arrs.radarr import RadarrClient
+    url     = request.json.get("url", "")
+    api_key = request.json.get("api_key", "")
+    try:
+        client = RadarrClient(url, api_key)
+        ok     = client.test_connection()
+        return jsonify({"ok": ok, "message": "Connected" if ok else "Failed"})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
+
+
 @config_bp.route("/config/test/sonarr", methods=["POST"])
 def test_sonarr():
     from core.arrs.sonarr import SonarrClient
@@ -78,15 +91,25 @@ def _form_to_config(form, existing: dict) -> dict:
     rules = []
     i = 0
     while f"rule_name_{i}" in form:
-        exts = [e.strip() for e in form.get(f"rule_extensions_{i}", "").split(",") if e.strip()]
+        exts     = [e.strip() for e in form.get(f"rule_extensions_{i}", "").split(",") if e.strip()]
+        patterns = [p.strip() for p in form.get(f"rule_patterns_{i}", "").split(",") if p.strip()]
+        min_size_raw = form.get(f"rule_min_size_mb_{i}", "").strip()
+        conditions = {
+            "match_mode":     form.get(f"rule_match_mode_{i}", "any"),
+            "bad_extensions": exts,
+        }
+        if patterns:
+            conditions["bad_filename_patterns"] = patterns
+        if min_size_raw:
+            try:
+                conditions["min_file_size_mb"] = int(min_size_raw)
+            except ValueError:
+                pass
         rules.append({
-            "name":     form.get(f"rule_name_{i}", ""),
-            "category": form.get(f"rule_category_{i}", ""),
-            "app":      form.get(f"rule_app_{i}", "sonarr"),
-            "conditions": {
-                "match_mode":     form.get(f"rule_match_mode_{i}", "any"),
-                "bad_extensions": exts,
-            }
+            "name":       form.get(f"rule_name_{i}", ""),
+            "category":   form.get(f"rule_category_{i}", ""),
+            "app":        form.get(f"rule_app_{i}", "sonarr"),
+            "conditions": conditions,
         })
         i += 1
 
@@ -105,9 +128,9 @@ def _form_to_config(form, existing: dict) -> dict:
                 "api_key": form.get("sonarr_api_key", ""),
             },
             "radarr": {
-                "enabled": False,
-                "url":     form.get("radarr_url", existing.get("arrs", {}).get("radarr", {}).get("url", "")),
-                "api_key": existing.get("arrs", {}).get("radarr", {}).get("api_key", ""),
+                "enabled": "radarr_enabled" in form,
+                "url":     form.get("radarr_url", ""),
+                "api_key": form.get("radarr_api_key", ""),
             },
         },
         "rules": rules,

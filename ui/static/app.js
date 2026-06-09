@@ -136,12 +136,14 @@ function removeRule(idx) {
   document.getElementById(`rule-${idx}`)?.remove();
 }
 
-function ruleTemplate(idx, rule, exts) {
+function ruleTemplate(idx, rule, exts, patterns, minSize) {
   const name     = rule.name     || "";
   const category = rule.category || "";
   const app      = rule.app      || "sonarr";
   const mode     = rule.match_mode || "any";
   const extTags  = exts.map(e => extTagHtml(idx, e)).join("");
+  const patTags  = (patterns || []).map(p => patTagHtml(idx, p)).join("");
+  const minSizeVal = minSize || "";
   return `
     <div class="rule-header">
       <strong style="color:var(--text)">Rule #${idx + 1}</strong>
@@ -162,7 +164,7 @@ function ruleTemplate(idx, rule, exts) {
         <label>App</label>
         <select name="rule_app_${idx}">
           <option value="sonarr"${app==="sonarr"?" selected":""}>Sonarr</option>
-          <option value="radarr"${app==="radarr"?" selected":""} disabled>Radarr (v2)</option>
+          <option value="radarr"${app==="radarr"?" selected":""}>Radarr</option>
         </select>
       </div>
       <div class="form-group">
@@ -182,6 +184,24 @@ function ruleTemplate(idx, rule, exts) {
         <button type="button" class="btn btn-ghost btn-sm" onclick="addExt(${idx})">+ Add</button>
       </div>
       <div class="ext-tags" id="rule_ext_tags_${idx}">${extTags}</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="max-width:220px">
+        <label>Min Primary File Size (MB)</label>
+        <input type="number" name="rule_min_size_mb_${idx}" value="${esc(minSizeVal)}"
+               placeholder="Leave blank to disable" min="1">
+        <div class="hint">Flag if primary file is smaller than this</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Bad Filename Patterns (regex)</label>
+      <input type="hidden" name="rule_patterns_${idx}" id="rule_pat_hidden_${idx}"
+             value="${esc((patterns||[]).join(","))}">
+      <div class="input-with-btn">
+        <input type="text" id="rule_pat_input_${idx}" placeholder="e.g. sample\\." style="max-width:200px">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addPattern(${idx})">+ Add</button>
+      </div>
+      <div class="ext-tags" id="rule_pat_tags_${idx}">${patTags}</div>
     </div>`;
 }
 
@@ -214,6 +234,35 @@ function removeExt(ruleIdx, ext) {
   tagsCon.querySelectorAll(".ext-tag").forEach(el => {
     if (el.textContent.trim().startsWith(ext)) el.remove();
   });
+}
+
+function patTagHtml(ruleIdx, pat) {
+  return `<span class="ext-tag" data-pattern="${esc(pat)}">${esc(pat)}
+    <button type="button" onclick="removePattern(${ruleIdx}, this)">×</button>
+  </span>`;
+}
+
+function addPattern(ruleIdx) {
+  const input   = document.getElementById(`rule_pat_input_${ruleIdx}`);
+  const hidden  = document.getElementById(`rule_pat_hidden_${ruleIdx}`);
+  const tagsCon = document.getElementById(`rule_pat_tags_${ruleIdx}`);
+  const val = input.value.trim();
+  if (!val) return;
+  const existing = hidden.value ? hidden.value.split(",") : [];
+  if (existing.includes(val)) { input.value = ""; return; }
+  existing.push(val);
+  hidden.value = existing.join(",");
+  tagsCon.innerHTML += patTagHtml(ruleIdx, val);
+  input.value = "";
+}
+
+function removePattern(ruleIdx, btn) {
+  const tag = btn.closest(".ext-tag");
+  const pat = tag.dataset.pattern;
+  const hidden  = document.getElementById(`rule_pat_hidden_${ruleIdx}`);
+  const existing = hidden.value ? hidden.value.split(",") : [];
+  hidden.value = existing.filter(e => e !== pat).join(",");
+  tag.remove();
 }
 
 // ------------------------------------------------------------------ //
@@ -249,6 +298,11 @@ function testConnection(type) {
     payload = {
       url:     document.querySelector('[name=sonarr_url]')?.value,
       api_key: document.querySelector('[name=sonarr_api_key]')?.value,
+    };
+  } else if (type === "radarr") {
+    payload = {
+      url:     document.querySelector('[name=radarr_url]')?.value,
+      api_key: document.querySelector('[name=radarr_api_key]')?.value,
     };
   }
 
