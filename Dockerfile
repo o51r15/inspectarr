@@ -1,5 +1,6 @@
 FROM python:3.12-slim
-
+LABEL org.opencontainers.image.source="https://github.com/o51r15/inspectarr"
+LABEL org.opencontainers.image.description="Torrent watchdog for *arr ecosystems"
 WORKDIR /app
 
 COPY requirements.txt .
