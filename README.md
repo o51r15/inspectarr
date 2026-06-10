@@ -6,7 +6,7 @@
 
 Torrent watchdog for *arr ecosystems. Polls qBittorrent categories, detects
 downloads that match configurable bad-file rules (e.g. `.exe` files in a TV
-category), blocklists them in Sonarr (Radarr planned), deletes the torrent and
+category), blocklists them in Sonarr, Radarr, or Lidarr, deletes the torrent and
 files, logs all events to JSON Lines, and notifies via Pushover.
 
 Runs two ways: a **web UI with a built-in scheduler daemon** (`web.py`), or a
@@ -55,7 +55,7 @@ Served on port `8585` by default (configurable via `web.port`). Four pages:
 | **Dashboard** | Scheduler status, last-scan stats (checked / flagged / actioned), last flagged torrent, recent run history. Live-updates every 5s. |
 | **Scheduler** | Start/stop the daemon, run-now, poll interval, last/next run, run history. |
 | **Logs** | Paginated JSON Lines viewer (100/page), level filter, color-coded badges, auto-refresh, clear-log. |
-| **Config** | Full form editor for every option, plus a raw-YAML mode for advanced edits. Test-connection buttons for qBittorrent and Sonarr. Rules are a dynamic add/remove builder. |
+| **Config** | Full form editor for every option, plus a raw-YAML mode for advanced edits. Test-connection buttons for qBittorrent, Sonarr, Radarr, and Lidarr. Rules are a dynamic add/remove builder. |
 
 The scheduler reloads `config.yaml` from disk before every scan, so changes
 saved in the Config page take effect on the next cycle — no restart needed.
@@ -125,11 +125,15 @@ Key settings:
 | Setting | Purpose |
 |---|---|
 | `rules[].conditions.match_mode` | `any` = flag on any bad file; `primary` = only if largest file is bad |
+| `rules[].conditions.bad_extensions` | List of file extensions to flag (e.g. `.exe`, `.zip`) |
+| `rules[].conditions.min_file_size_mb` | Flag if the primary (largest) file is below this size in MB |
+| `rules[].conditions.bad_filename_patterns` | List of regex patterns matched against filenames |
 | `on_arr_failure` | `delete` = remove from qBit anyway; `abort` = skip and retry |
 | `poll_interval_seconds` | How often the scheduler daemon scans (default: 300) |
 | `retry.max_attempts` | How many times to retry before giving up (default: 10) |
 | `retry.interval_seconds` | Seconds between retry attempts (default: 600) |
 | `web.port` | Web UI port (default: 8585) |
+| `web.scheduler_autostart` | `true` = start the scheduler automatically on launch (default: false) |
 | `dry_run` | `true` = log matches only, no deletions |
 
 ---
@@ -159,12 +163,16 @@ Everything in `data/` — mount as a Docker volume:
 
 ---
 
-## Extending to Radarr / Other *arrs
+## Extending to Other *arrs
 
-1. Implement `core/arrs/radarr.py` (mirrors `sonarr.py` against Radarr's API)
-2. Set `arrs.radarr.enabled: true` in config
-3. Add rules with `app: radarr`
-4. That's it — the abstract base and scanner already handle the rest
+Sonarr, Radarr, and Lidarr are all supported. To add a new *arr app (e.g. Prowlarr):
+
+1. Implement `core/arrs/<app>.py` mirroring `sonarr.py` against the target API
+2. Register it in `_build_arr_client()` in `core/scanner.py`
+3. Add config fields to `ArrsConfig` in `core/config.py`
+4. Set `arrs.<app>.enabled: true` in config and add rules with `app: <app>`
+
+The abstract base and scanner already handle the rest.
 
 ---
 
@@ -182,7 +190,8 @@ inspectarr/
 │   ├── arrs/
 │   │   ├── base.py          # AbstractArrClient
 │   │   ├── sonarr.py        # Sonarr v4 client
-│   │   └── radarr.py        # Radarr stub (v2)
+│   │   ├── radarr.py        # Radarr v3 client
+│   │   └── lidarr.py        # Lidarr v2 client
 │   ├── notifier.py          # Pushover client
 │   └── state.py             # SQLite + JSON Lines log
 ├── ui/                      # Web UI layer
