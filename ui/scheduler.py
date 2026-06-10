@@ -27,6 +27,8 @@ class Scheduler:
         self._state = self._init_state()
         if self._state:
             self.run_history = self._state.get_recent_runs(10)
+            if self.run_history:
+                self.last_result = self.run_history[0]
 
     # ------------------------------------------------------------------
     # Public controls
