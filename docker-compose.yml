@@ -1,10 +1,10 @@
 services:
   inspectarr:
-    build: .
+    image: ghcr.io/o51r15/inspectarr:latest
     container_name: inspectarr
-    restart: unless-stopped
     ports:
-      - "8585:8585"
+      - 8585:8585
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml
+    restart: unless-stopped
