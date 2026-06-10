@@ -96,13 +96,22 @@ class Scanner:
             try:
                 torrents = self.qbit.get_torrents_by_category(rule.category)
             except Exception as exc:
+                reason  = str(exc)
+                context = f"qbit_fetch:{rule.category}"
                 self.log.error(f"Failed to fetch category '{rule.category}': {exc}")
                 self.state.write_log({
                     "level": "ERROR", "event": "qbit_fetch_failed",
-                    "category": rule.category, "reason": str(exc),
+                    "category": rule.category, "reason": reason,
                 })
-                self.notifier.notify_error(f"Category fetch failed: {rule.category}", str(exc))
+                if self.state.get_error_state(context) != reason:
+                    self.notifier.notify_error(
+                        f"Category fetch failed: {rule.category}", reason
+                    )
+                    self.state.set_error_state(context, reason)
                 continue
+
+            # Fetch succeeded — clear stored error so a future failure notifies again
+            self.state.set_error_state(f"qbit_fetch:{rule.category}", None)
 
             self.log.debug(f"  {len(torrents)} torrent(s) found")
             for torrent in torrents:

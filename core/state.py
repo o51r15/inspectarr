@@ -71,6 +71,12 @@ class StateManager:
                     last_flagged     TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS error_state (
+                    context    TEXT PRIMARY KEY,
+                    last_error TEXT
+                )
+            """)
             conn.commit()
 
 
@@ -235,6 +241,35 @@ class StateManager:
                     entry["last_flagged"] = None
             results.append(entry)
         return results
+
+    # ------------------------------------------------------------------
+    # error_state — dedup repeated identical error notifications
+    # ------------------------------------------------------------------
+
+    def get_error_state(self, context: str) -> Optional[str]:
+        """Return the last recorded error for this context, or None."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT last_error FROM error_state WHERE context = ?", (context,)
+            ).fetchone()
+        return row["last_error"] if row else None
+
+    def set_error_state(self, context: str, error: Optional[str]):
+        """
+        Record the current error for this context.
+        Pass error=None to clear (e.g. when the operation succeeds again).
+        """
+        with self._conn() as conn:
+            if error is None:
+                conn.execute(
+                    "DELETE FROM error_state WHERE context = ?", (context,)
+                )
+            else:
+                conn.execute(
+                    "INSERT OR REPLACE INTO error_state (context, last_error) VALUES (?, ?)",
+                    (context, error),
+                )
+            conn.commit()
 
     # ------------------------------------------------------------------
     # Retention + log
