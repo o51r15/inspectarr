@@ -11,9 +11,6 @@
 
 {% block content %}
 
-{% if request.args.get('saved') %}
-  <div class="alert alert-success">Configuration saved successfully.</div>
-{% endif %}
 {% if error %}
   <div class="alert alert-error">{{ error }}</div>
 {% endif %}

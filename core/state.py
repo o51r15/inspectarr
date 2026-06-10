@@ -58,6 +58,19 @@ class StateManager:
                     resolved       INTEGER DEFAULT 0
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS run_history (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_start       TEXT,
+                    scan_end         TEXT,
+                    duration_seconds REAL,
+                    torrents_checked INTEGER,
+                    flagged          INTEGER,
+                    actioned         INTEGER,
+                    error            TEXT,
+                    last_flagged     TEXT
+                )
+            """)
             conn.commit()
 
 
@@ -173,6 +186,55 @@ class StateManager:
             )
             conn.commit()
 
+
+    # ------------------------------------------------------------------
+    # run_history
+    # ------------------------------------------------------------------
+
+    def save_run(self, result: dict):
+        """Persist a scan result. Keeps the latest 50 rows."""
+        lf = result.get("last_flagged")
+        with self._conn() as conn:
+            conn.execute("""
+                INSERT INTO run_history
+                    (scan_start, scan_end, duration_seconds,
+                     torrents_checked, flagged, actioned, error, last_flagged)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                result.get("scan_start"),
+                result.get("scan_end"),
+                result.get("duration_seconds"),
+                result.get("torrents_checked"),
+                result.get("flagged"),
+                result.get("actioned"),
+                result.get("error"),
+                json.dumps(lf) if lf else None,
+            ))
+            # Trim to latest 50
+            conn.execute("""
+                DELETE FROM run_history
+                WHERE id NOT IN (
+                    SELECT id FROM run_history ORDER BY id DESC LIMIT 50
+                )
+            """)
+            conn.commit()
+
+    def get_recent_runs(self, limit: int = 10) -> list[dict]:
+        """Return the most recent scan results, newest first."""
+        with self._conn() as conn:
+            rows = conn.execute("""
+                SELECT * FROM run_history ORDER BY id DESC LIMIT ?
+            """, (limit,)).fetchall()
+        results = []
+        for row in rows:
+            entry = dict(row)
+            if entry.get("last_flagged"):
+                try:
+                    entry["last_flagged"] = json.loads(entry["last_flagged"])
+                except (json.JSONDecodeError, TypeError):
+                    entry["last_flagged"] = None
+            results.append(entry)
+        return results
 
     # ------------------------------------------------------------------
     # Retention + log

@@ -23,6 +23,11 @@ class Scheduler:
         self.last_result: Optional[dict] = None
         self.run_history: list[dict] = []
 
+        # Persistent state — best effort; None if config/DB unavailable at startup
+        self._state = self._init_state()
+        if self._state:
+            self.run_history = self._state.get_recent_runs(10)
+
     # ------------------------------------------------------------------
     # Public controls
     # ------------------------------------------------------------------
@@ -67,6 +72,24 @@ class Scheduler:
     # ------------------------------------------------------------------
     # Internal loop
     # ------------------------------------------------------------------
+
+    def _init_state(self):
+        """
+        Instantiate a StateManager from the current config for run_history
+        persistence. Returns None on any failure — persistence is best-effort
+        and must never prevent the scheduler from starting.
+        """
+        try:
+            from core.config import load_config
+            from core.state import StateManager
+            config = load_config(self.config_path)
+            return StateManager(
+                db_path=config.state.db_file,
+                log_path=config.logging.log_file,
+                retention_days=config.logging.retention_days,
+            )
+        except Exception:
+            return None
 
     def _loop(self):
         first = True
@@ -127,6 +150,12 @@ class Scheduler:
             self.run_history.insert(0, result)
             if len(self.run_history) > 10:
                 self.run_history = self.run_history[:10]
+
+        if self._state:
+            try:
+                self._state.save_run(result)
+            except Exception:
+                pass  # persistence failure must never affect scan operation
 
     def _get_interval(self) -> int:
         try:

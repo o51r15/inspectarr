@@ -364,10 +364,45 @@ function levelBadge(level) {
 }
 
 // ------------------------------------------------------------------ //
+// Toasts                                                               //
+// ------------------------------------------------------------------ //
+
+function showToast(message, level = "info", duration = 3500) {
+  const container = document.getElementById("toast-container");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${level}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => toast.classList.add("toast-show"));
+  });
+  setTimeout(() => {
+    toast.classList.remove("toast-show");
+    toast.addEventListener("transitionend", () => toast.remove(), { once: true });
+  }, duration);
+}
+
+function _consumeToastParam() {
+  const params = new URLSearchParams(window.location.search);
+  const message = params.get("toast");
+  const level   = params.get("level") || "info";
+  if (!message) return;
+  showToast(message, level);
+  // Strip the toast params from the URL so a refresh doesn't re-fire
+  params.delete("toast");
+  params.delete("level");
+  const newSearch = params.toString();
+  const newUrl = window.location.pathname + (newSearch ? "?" + newSearch : "");
+  history.replaceState(null, "", newUrl);
+}
+
+// ------------------------------------------------------------------ //
 // Init                                                                 //
 // ------------------------------------------------------------------ //
 
 document.addEventListener("DOMContentLoaded", () => {
   startDashboardPolling();
   initRules();
+  _consumeToastParam();
 });

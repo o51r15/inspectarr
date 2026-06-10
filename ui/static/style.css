@@ -377,3 +377,41 @@ tbody td { padding: 9px 12px; vertical-align: top; }
 .flex  { display: flex; }
 .gap-8 { gap: 8px; }
 .items-center { align-items: center; }
+
+/* ------------------------------------------------------------------ */
+/* Toasts                                                               */
+/* ------------------------------------------------------------------ */
+
+#toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity .2s ease, transform .2s ease;
+  pointer-events: auto;
+  max-width: 320px;
+}
+
+.toast.toast-show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-success { background: rgba(63,185,80,.12);  border-color: var(--success); color: var(--success); }
+.toast-error   { background: rgba(248,81,73,.12);  border-color: var(--error);   color: var(--error); }
+.toast-warning { background: rgba(210,153,34,.12); border-color: var(--warning); color: var(--warning); }
+.toast-info    { background: rgba(88,166,255,.12); border-color: var(--info);    color: var(--info); }

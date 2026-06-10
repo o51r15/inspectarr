@@ -33,7 +33,7 @@ def config_save():
         try:
             data = yaml.safe_load(raw_yaml)
             _save_raw(config_path, data)
-            return redirect(url_for("config.config_view") + "?saved=1")
+            return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
         except yaml.YAMLError as e:
             raw = _load_raw(config_path)
             return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
@@ -42,7 +42,7 @@ def config_save():
     # Form mode — rebuild config dict from form fields
     data = _form_to_config(request.form, _load_raw(config_path))
     _save_raw(config_path, data)
-    return redirect(url_for("config.config_view") + "?saved=1")
+    return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
 
 
 @config_bp.route("/config/test/qbit", methods=["POST"])
