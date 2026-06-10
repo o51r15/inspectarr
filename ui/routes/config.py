@@ -59,6 +59,19 @@ def test_qbit():
         return jsonify({"ok": False, "message": str(e)})
 
 
+@config_bp.route("/config/test/lidarr", methods=["POST"])
+def test_lidarr():
+    from core.arrs.lidarr import LidarrClient
+    url     = request.json.get("url", "")
+    api_key = request.json.get("api_key", "")
+    try:
+        client = LidarrClient(url, api_key)
+        ok     = client.test_connection()
+        return jsonify({"ok": ok, "message": "Connected" if ok else "Failed"})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
+
+
 @config_bp.route("/config/test/radarr", methods=["POST"])
 def test_radarr():
     from core.arrs.radarr import RadarrClient
@@ -132,6 +145,11 @@ def _form_to_config(form, existing: dict) -> dict:
                 "url":     form.get("radarr_url", ""),
                 "api_key": form.get("radarr_api_key", ""),
             },
+            "lidarr": {
+                "enabled": "lidarr_enabled" in form,
+                "url":     form.get("lidarr_url", ""),
+                "api_key": form.get("lidarr_api_key", ""),
+            },
         },
         "rules": rules,
         "on_arr_failure":        form.get("on_arr_failure", "delete"),
@@ -148,7 +166,7 @@ def _form_to_config(form, existing: dict) -> dict:
             "level":          form.get("log_level", "INFO"),
         },
         "state":  {"db_file": form.get("db_file", "./data/inspectarr.db")},
-        "web":    {"port": int(form.get("web_port", 8585))},
+        "web":    {"port": int(form.get("web_port", 8585)), "scheduler_autostart": "scheduler_autostart" in form},
         "notifications": {
             "pushover": {
                 "enabled":   "pushover_enabled" in form,

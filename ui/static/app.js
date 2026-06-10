@@ -165,6 +165,7 @@ function ruleTemplate(idx, rule, exts, patterns, minSize) {
         <select name="rule_app_${idx}">
           <option value="sonarr"${app==="sonarr"?" selected":""}>Sonarr</option>
           <option value="radarr"${app==="radarr"?" selected":""}>Radarr</option>
+          <option value="lidarr"${app==="lidarr"?" selected":""}>Lidarr</option>
         </select>
       </div>
       <div class="form-group">
@@ -303,6 +304,11 @@ function testConnection(type) {
     payload = {
       url:     document.querySelector('[name=radarr_url]')?.value,
       api_key: document.querySelector('[name=radarr_api_key]')?.value,
+    };
+  } else if (type === "lidarr") {
+    payload = {
+      url:     document.querySelector('[name=lidarr_url]')?.value,
+      api_key: document.querySelector('[name=lidarr_api_key]')?.value,
     };
   }
 

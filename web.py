@@ -62,18 +62,26 @@ def main():
 
     # Read port from config — fall back to 8585 if config is broken
     port = 8585
+    scheduler_autostart = False
     try:
         from core.config import load_config
         config = load_config(config_path)
         port   = config.web.port
+        scheduler_autostart = config.web.scheduler_autostart
     except Exception as e:
-        print(f"WARNING: Could not read port from config ({e}), using 8585")
+        print(f"WARNING: Could not read config ({e}), using defaults")
 
     app = create_app(config_path)
 
-    print(f"inspectarr web UI → http://0.0.0.0:{port}")
-    print(f"Config: {config_path}")
-    print("Scheduler is OFF at startup — enable it from the dashboard.")
+    if scheduler_autostart:
+        app.config["SCHEDULER"].start()
+        print(f"inspectarr web UI → http://0.0.0.0:{port}")
+        print(f"Config: {config_path}")
+        print("Scheduler started automatically (scheduler_autostart: true)")
+    else:
+        print(f"inspectarr web UI → http://0.0.0.0:{port}")
+        print(f"Config: {config_path}")
+        print("Scheduler is OFF at startup — enable it from the dashboard.")
 
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
 

@@ -27,6 +27,10 @@ def _build_arr_client(app_name: str, config: AppConfig) -> AbstractArrClient:
     if app_name == "radarr":
         c = config.arrs.radarr
         return RadarrClient(c.url, c.api_key)
+    if app_name == "lidarr":
+        from .arrs.lidarr import LidarrClient
+        c = config.arrs.lidarr
+        return LidarrClient(c.url, c.api_key)
     raise ValueError(f"Unknown arr app: {app_name!r}")
 
 

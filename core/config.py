@@ -27,6 +27,7 @@ class ArrConfig:
 class ArrsConfig:
     sonarr: ArrConfig
     radarr: ArrConfig
+    lidarr: ArrConfig
 
 
 @dataclass
@@ -81,6 +82,7 @@ class NotificationsConfig:
 @dataclass
 class WebConfig:
     port: int = 8585
+    scheduler_autostart: bool = False
 
 
 @dataclass
@@ -128,7 +130,7 @@ def _parse_config(raw: dict) -> AppConfig:
             api_key=a.get("api_key", ""),
         )
 
-    arrs_cfg = ArrsConfig(sonarr=_arr("sonarr"), radarr=_arr("radarr"))
+    arrs_cfg = ArrsConfig(sonarr=_arr("sonarr"), radarr=_arr("radarr"), lidarr=_arr("lidarr"))
 
     # Rules
     rules: list[Rule] = []
@@ -192,7 +194,10 @@ def _parse_config(raw: dict) -> AppConfig:
         logging=logging_cfg,
         state=state_cfg,
         notifications=notif_cfg,
-        web=WebConfig(port=raw.get("web", {}).get("port", 8585)),
+        web=WebConfig(
+            port=raw.get("web", {}).get("port", 8585),
+            scheduler_autostart=raw.get("web", {}).get("scheduler_autostart", False),
+        ),
         poll_interval_seconds=raw.get("poll_interval_seconds", 300),
         dry_run=raw.get("dry_run", False),
     )
@@ -213,6 +218,10 @@ def _validate(raw: dict, rules: list[Rule], arrs: ArrsConfig) -> None:
             errors.append(f"Rule '{rule.name}': app=sonarr but sonarr is not enabled")
         if rule.app == "radarr" and not arrs.radarr.enabled:
             errors.append(f"Rule '{rule.name}': app=radarr but radarr is not enabled")
+        if rule.app == "lidarr" and not arrs.lidarr.enabled:
+            errors.append(f"Rule '{rule.name}': app=lidarr but lidarr is not enabled")
+        if rule.app not in ("sonarr", "radarr", "lidarr"):
+            errors.append(f"Rule '{rule.name}': unknown app '{rule.app}' (must be sonarr, radarr, or lidarr)")
         if rule.conditions.match_mode not in ("any", "primary"):
             errors.append(f"Rule '{rule.name}': match_mode must be 'any' or 'primary'")
         has_conditions = (

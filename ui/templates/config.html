@@ -96,6 +96,30 @@
       </div>
     </div>
 
+    <!-- Lidarr -->
+    <div class="form-section">
+      <div class="form-section-title">Lidarr</div>
+      <div class="toggle-row">
+        <input type="checkbox" name="lidarr_enabled" id="lidarr_enabled"
+               {{ 'checked' if cfg.get('arrs',{}).get('lidarr',{}).get('enabled') else '' }}>
+        <label for="lidarr_enabled">Enabled</label>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>URL</label>
+          <input type="text" name="lidarr_url" value="{{ cfg.get('arrs',{}).get('lidarr',{}).get('url','') }}" placeholder="http://192.168.1.100:8686">
+        </div>
+        <div class="form-group">
+          <label>API Key</label>
+          <input type="password" name="lidarr_api_key" value="{{ cfg.get('arrs',{}).get('lidarr',{}).get('api_key','') }}">
+        </div>
+      </div>
+      <div class="flex gap-8 items-center">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('lidarr')">Test Connection</button>
+        <span id="test-lidarr-result" class="hint"></span>
+      </div>
+    </div>
+
     <!-- Rules -->
     <div class="form-section">
       <div class="section-header">
@@ -126,6 +150,7 @@
               <select name="rule_app_{{ idx }}">
                 <option value="sonarr" {{ 'selected' if rule.app == 'sonarr' else '' }}>Sonarr</option>
                 <option value="radarr" {{ 'selected' if rule.app == 'radarr' else '' }}>Radarr</option>
+                <option value="lidarr" {{ 'selected' if rule.app == 'lidarr' else '' }}>Lidarr</option>
               </select>
             </div>
             <div class="form-group">
@@ -205,6 +230,11 @@
         <input type="checkbox" name="dry_run" id="dry_run"
                {{ 'checked' if cfg.get('dry_run') else '' }}>
         <label for="dry_run">Dry Run — flag matches but take no action</label>
+      </div>
+      <div class="toggle-row">
+        <input type="checkbox" name="scheduler_autostart" id="scheduler_autostart"
+               {{ 'checked' if cfg.get('web',{}).get('scheduler_autostart') else '' }}>
+        <label for="scheduler_autostart">Auto-start scheduler on launch</label>
       </div>
     </div>
 

@@ -24,6 +24,10 @@ arrs:
     enabled: false                    # Set to true and add credentials to use
     url: http://192.168.1.100:7878
     api_key: ~
+  lidarr:
+    enabled: false                    # Set to true and add credentials to use
+    url: http://192.168.1.100:8686
+    api_key: ~
 
 # ---------------------------------------------------------------------------
 # Rules
@@ -132,6 +136,7 @@ poll_interval_seconds: 300
 # ---------------------------------------------------------------------------
 web:
   port: 8585
-  # Auth planned for v2:
+  scheduler_autostart: false        # Set to true to start the scheduler automatically on launch
+  # Auth planned for a future release:
   # username: ~
   # password: ~
