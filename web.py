@@ -17,7 +17,8 @@ import argparse
 import os
 import sys
 
-from flask import Flask
+from flask import Flask, Response
+from ui.auth import check_auth, read_auth_block
 from ui.scheduler import Scheduler
 from ui.routes.dashboard import dashboard_bp
 from ui.routes.config import config_bp
@@ -41,6 +42,29 @@ def create_app(config_path: str) -> Flask:
     )
     app.config["CONFIG_PATH"] = config_path
     app.config["SCHEDULER"]   = Scheduler(config_path)
+
+    @app.context_processor
+    def inject_auth_status():
+        auth = read_auth_block(config_path)
+        return {"auth_enabled": auth.get("enabled", False)}
+
+    @app.route("/logout")
+    def logout():
+        return Response(
+            """<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Logged out — inspectarr</title>
+<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;
+height:100vh;margin:0;background:#0f1117;color:#e2e8f0}
+.box{text-align:center;padding:40px}.box a{color:#60a5fa;text-decoration:none}
+.box a:hover{text-decoration:underline}</style></head>
+<body><div class="box"><h2>Logged out</h2><p><a href="/">Log back in</a></p></div></body></html>""",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Inspectarr"', "Content-Type": "text/html"},
+        )
+
+    @app.before_request
+    def enforce_auth():
+        return check_auth(config_path)
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(config_bp)

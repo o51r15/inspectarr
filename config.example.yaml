@@ -137,6 +137,7 @@ poll_interval_seconds: 300
 web:
   port: 8585
   scheduler_autostart: false        # Set to true to start the scheduler automatically on launch
-  # Auth planned for a future release:
-  # username: ~
-  # password: ~
+  auth:
+    enabled: false                  # Set to true to password-protect the web UI
+    username: admin
+    password: changeme

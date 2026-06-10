@@ -166,7 +166,15 @@ def _form_to_config(form, existing: dict) -> dict:
             "level":          form.get("log_level", "INFO"),
         },
         "state":  {"db_file": form.get("db_file", "./data/inspectarr.db")},
-        "web":    {"port": int(form.get("web_port", 8585)), "scheduler_autostart": "scheduler_autostart" in form},
+        "web":    {
+            "port": int(form.get("web_port", 8585)),
+            "scheduler_autostart": "scheduler_autostart" in form,
+            "auth": {
+                "enabled":  "auth_enabled" in form,
+                "username": form.get("auth_username", "admin"),
+                "password": form.get("auth_password", "changeme"),
+            },
+        },
         "notifications": {
             "pushover": {
                 "enabled":   "pushover_enabled" in form,

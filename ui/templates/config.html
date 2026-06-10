@@ -238,6 +238,29 @@
       </div>
     </div>
 
+    <!-- Auth -->
+    <div class="form-section">
+      <div class="form-section-title">Web UI Authentication</div>
+      <div class="toggle-row">
+        <input type="checkbox" name="auth_enabled" id="auth_enabled"
+               {{ 'checked' if cfg.get('web',{}).get('auth',{}).get('enabled') else '' }}>
+        <label for="auth_enabled">Require login to access the web UI</label>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Username</label>
+          <input type="text" name="auth_username" autocomplete="off"
+                 value="{{ cfg.get('web',{}).get('auth',{}).get('username','admin') }}">
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input type="password" name="auth_password" autocomplete="new-password"
+                 value="{{ cfg.get('web',{}).get('auth',{}).get('password','') }}">
+        </div>
+      </div>
+      <div class="hint">Changes take effect immediately — no restart required.</div>
+    </div>
+
     <!-- Retry -->
     <div class="form-section">
       <div class="form-section-title">Retry</div>

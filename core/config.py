@@ -80,9 +80,17 @@ class NotificationsConfig:
 
 
 @dataclass
+class AuthConfig:
+    enabled: bool = False
+    username: str = "admin"
+    password: str = "changeme"
+
+
+@dataclass
 class WebConfig:
     port: int = 8585
     scheduler_autostart: bool = False
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
 
 @dataclass
@@ -197,6 +205,11 @@ def _parse_config(raw: dict) -> AppConfig:
         web=WebConfig(
             port=raw.get("web", {}).get("port", 8585),
             scheduler_autostart=raw.get("web", {}).get("scheduler_autostart", False),
+            auth=AuthConfig(
+                enabled=raw.get("web", {}).get("auth", {}).get("enabled", False),
+                username=raw.get("web", {}).get("auth", {}).get("username", "admin"),
+                password=raw.get("web", {}).get("auth", {}).get("password", "changeme"),
+            ),
         ),
         poll_interval_seconds=raw.get("poll_interval_seconds", 300),
         dry_run=raw.get("dry_run", False),

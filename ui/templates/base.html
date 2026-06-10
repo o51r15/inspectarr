@@ -27,6 +27,11 @@
       <a href="/config" class="{{ 'active' if request.path.startswith('/config') else '' }}">
         <span class="icon">⚙</span> Config
       </a>
+      {% if auth_enabled %}
+      <a href="/logout">
+        <span class="icon">⏻</span> Log out
+      </a>
+      {% endif %}
     </nav>
   </aside>
 
