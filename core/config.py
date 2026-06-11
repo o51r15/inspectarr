@@ -87,6 +87,27 @@ class AuthConfig:
 
 
 @dataclass
+class ProwlarrScoringConfig:
+    response_time_weight: float = 0.35
+    failure_rate_weight: float  = 0.40
+    malicious_weight: float     = 0.25
+    backoff_penalty: float      = 20.0
+    malicious_penalty_per_hit: float = 10.0
+
+
+@dataclass
+class ProwlarrConfig:
+    enabled: bool = False
+    url: str = ""
+    api_key: str = ""
+    base_priority: int = 10
+    reorder_interval_hours: int = 24
+    history_window_days: int = 90
+    min_grabs_before_scoring: int = 10
+    scoring: ProwlarrScoringConfig = field(default_factory=ProwlarrScoringConfig)
+
+
+@dataclass
 class WebConfig:
     port: int = 8585
     scheduler_autostart: bool = False
@@ -104,6 +125,7 @@ class AppConfig:
     state: StateConfig
     notifications: NotificationsConfig
     web: WebConfig = field(default_factory=WebConfig)
+    prowlarr: ProwlarrConfig = field(default_factory=ProwlarrConfig)
     poll_interval_seconds: int = 300
     dry_run: bool = False
 
@@ -193,6 +215,25 @@ def _parse_config(raw: dict) -> AppConfig:
 
     _validate(raw, rules, arrs_cfg)
 
+    p_raw = raw.get("prowlarr", {})
+    s_raw = p_raw.get("scoring", {})
+    prowlarr_cfg = ProwlarrConfig(
+        enabled=p_raw.get("enabled", False),
+        url=p_raw.get("url", "").rstrip("/"),
+        api_key=p_raw.get("api_key", ""),
+        base_priority=p_raw.get("base_priority", 10),
+        reorder_interval_hours=p_raw.get("reorder_interval_hours", 24),
+        history_window_days=p_raw.get("history_window_days", 90),
+        min_grabs_before_scoring=p_raw.get("min_grabs_before_scoring", 10),
+        scoring=ProwlarrScoringConfig(
+            response_time_weight=s_raw.get("response_time_weight", 0.35),
+            failure_rate_weight=s_raw.get("failure_rate_weight", 0.40),
+            malicious_weight=s_raw.get("malicious_weight", 0.25),
+            backoff_penalty=s_raw.get("backoff_penalty", 20.0),
+            malicious_penalty_per_hit=s_raw.get("malicious_penalty_per_hit", 10.0),
+        ),
+    )
+
     return AppConfig(
         qbittorrent=qbit_cfg,
         arrs=arrs_cfg,
@@ -213,6 +254,7 @@ def _parse_config(raw: dict) -> AppConfig:
         ),
         poll_interval_seconds=raw.get("poll_interval_seconds", 300),
         dry_run=raw.get("dry_run", False),
+        prowlarr=prowlarr_cfg,
     )
 
 

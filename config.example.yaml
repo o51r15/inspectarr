@@ -132,6 +132,27 @@ dry_run: false
 poll_interval_seconds: 300
 
 # ---------------------------------------------------------------------------
+# Prowlarr indexer health scoring (optional)
+# When enabled, Inspectarr scores torrent indexers by response time, failure
+# rate, and malicious content served, then auto-reorders them in Prowlarr.
+# NZB indexers are never touched.
+# ---------------------------------------------------------------------------
+prowlarr:
+  enabled: false
+  url: http://192.168.1.x:9696/prowlarr   # Include URL base if set in Prowlarr
+  api_key: ~
+  base_priority: 10            # Best-scoring torrent indexer gets this priority; others count up from here
+  reorder_interval_hours: 24   # How often to auto-reorder (runs via web scheduler)
+  history_window_days: 90      # Rolling window for response time + failure rate
+  min_grabs_before_scoring: 10 # Minimum history records before scoring an indexer
+  scoring:
+    response_time_weight: 0.35
+    failure_rate_weight: 0.40
+    malicious_weight: 0.25
+    backoff_penalty: 20          # Points deducted if currently in Prowlarr backoff
+    malicious_penalty_per_hit: 10  # Points deducted per confirmed malicious torrent
+
+# ---------------------------------------------------------------------------
 # Web UI
 # ---------------------------------------------------------------------------
 web:

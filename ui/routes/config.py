@@ -175,6 +175,7 @@ def _form_to_config(form, existing: dict) -> dict:
                 "password": form.get("auth_password", "changeme"),
             },
         },
+        "prowlarr": existing.get("prowlarr", {}),
         "notifications": {
             "pushover": {
                 "enabled":   "pushover_enabled" in form,
@@ -185,3 +186,126 @@ def _form_to_config(form, existing: dict) -> dict:
             }
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Prowlarr endpoints
+# ---------------------------------------------------------------------------
+
+@config_bp.route("/config/prowlarr/indexers", methods=["GET"])
+def prowlarr_indexers():
+    """Return scored indexer list as JSON. Called by the Prowlarr config tab."""
+    config_path = current_app.config["CONFIG_PATH"]
+    try:
+        from core.config import load_config
+        from core.prowlarr import ProwlarrClient
+        from core.indexer_scorer import IndexerScorer
+        from core.state import StateManager
+        cfg = load_config(config_path)
+        if not cfg.prowlarr.enabled:
+            return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        state    = StateManager(
+            db_path=cfg.state.db_file,
+            log_path=cfg.logging.log_file,
+            retention_days=cfg.logging.retention_days,
+        )
+        scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
+        results = scorer.score_all()
+        for r in results:
+            r.pop("_raw", None)
+        return jsonify({"ok": True, "indexers": results})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
+@config_bp.route("/config/prowlarr/save", methods=["POST"])
+def prowlarr_save():
+    """Merge the Prowlarr config block into config.yaml."""
+    config_path = current_app.config["CONFIG_PATH"]
+    data        = request.json or {}
+    try:
+        raw = _load_raw(config_path)
+        raw["prowlarr"] = {
+            "enabled":                data.get("enabled", False),
+            "url":                    data.get("url", ""),
+            "api_key":                data.get("api_key", ""),
+            "base_priority":          int(data.get("base_priority", 10)),
+            "reorder_interval_hours": int(data.get("reorder_interval_hours", 24)),
+            "history_window_days":    int(data.get("history_window_days", 90)),
+            "min_grabs_before_scoring": int(data.get("min_grabs_before_scoring", 10)),
+            "scoring": {
+                "response_time_weight":      float(data.get("response_time_weight", 0.35)),
+                "failure_rate_weight":       float(data.get("failure_rate_weight", 0.40)),
+                "malicious_weight":          float(data.get("malicious_weight", 0.25)),
+                "backoff_penalty":           float(data.get("backoff_penalty", 20.0)),
+                "malicious_penalty_per_hit": float(data.get("malicious_penalty_per_hit", 10.0)),
+            },
+        }
+        _save_raw(config_path, raw)
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
+@config_bp.route("/config/prowlarr/set-ignored", methods=["POST"])
+def prowlarr_set_ignored():
+    """Toggle the ignore/pin state for a single indexer."""
+    config_path = current_app.config["CONFIG_PATH"]
+    data        = request.json or {}
+    try:
+        from core.config import load_config
+        from core.state import StateManager
+        cfg   = load_config(config_path)
+        state = StateManager(
+            db_path=cfg.state.db_file,
+            log_path=cfg.logging.log_file,
+            retention_days=cfg.logging.retention_days,
+        )
+        state.set_indexer_ignored(
+            indexer_id=int(data["indexer_id"]),
+            indexer_name=data["indexer_name"],
+            ignored=bool(data["ignored"]),
+            pinned_position=data.get("pinned_position"),
+        )
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
+@config_bp.route("/config/prowlarr/rescore", methods=["POST"])
+def prowlarr_rescore():
+    """Manually trigger a full score + reorder cycle."""
+    config_path = current_app.config["CONFIG_PATH"]
+    try:
+        from core.config import load_config
+        from core.prowlarr import ProwlarrClient
+        from core.indexer_scorer import IndexerScorer
+        from core.state import StateManager
+        cfg = load_config(config_path)
+        if not cfg.prowlarr.enabled:
+            return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        state    = StateManager(
+            db_path=cfg.state.db_file,
+            log_path=cfg.logging.log_file,
+            retention_days=cfg.logging.retention_days,
+        )
+        scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
+        changed = scorer.reorder()
+        return jsonify({"ok": True, "changed": changed})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
+@config_bp.route("/config/test/prowlarr", methods=["POST"])
+def test_prowlarr():
+    from core.prowlarr import ProwlarrClient
+    url     = request.json.get("url", "")
+    api_key = request.json.get("api_key", "")
+    try:
+        client = ProwlarrClient(url, api_key)
+        ok     = client.test_connection()
+        return jsonify({"ok": ok, "message": "Connected" if ok else "Failed"})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})

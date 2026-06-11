@@ -61,3 +61,14 @@ class AbstractArrClient(ABC):
         # Not tracked by the arr at all — may have been a manual qbit add.
         # Return True so the caller doesn't treat this as an arr failure.
         return True
+
+    def get_grab_indexer(self, infohash: str) -> str | None:
+        """
+        Return the indexer name that served this grab, or None.
+        Uses find_in_history() which each subclass already implements.
+        Called by Inspectarr when attributing malicious hits to Prowlarr indexers.
+        """
+        item = self.find_in_history(infohash)
+        if item:
+            return item.get("data", {}).get("indexer")
+        return None

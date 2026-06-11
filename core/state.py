@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from typing import Optional
 
 
 class StateManager:
@@ -75,6 +76,17 @@ class StateManager:
                 CREATE TABLE IF NOT EXISTS error_state (
                     context    TEXT PRIMARY KEY,
                     last_error TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS indexer_stats (
+                    indexer_id       INTEGER PRIMARY KEY,
+                    indexer_name     TEXT,
+                    malicious_hits   INTEGER DEFAULT 0,
+                    last_reorder     TEXT,
+                    ignored          INTEGER DEFAULT 0,
+                    pinned_position  INTEGER,
+                    last_scored      TEXT
                 )
             """)
             conn.commit()
@@ -269,6 +281,73 @@ class StateManager:
                     "INSERT OR REPLACE INTO error_state (context, last_error) VALUES (?, ?)",
                     (context, error),
                 )
+            conn.commit()
+
+    # ------------------------------------------------------------------
+    # indexer_stats — Prowlarr indexer health tracking
+    # ------------------------------------------------------------------
+
+    def get_all_indexer_stats(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM indexer_stats").fetchall()
+        return [dict(r) for r in rows]
+
+    def _upsert_indexer(self, conn, indexer_id: int, indexer_name: str):
+        """Ensure a row exists for this indexer; update name if it changed."""
+        conn.execute(
+            "INSERT OR IGNORE INTO indexer_stats (indexer_id, indexer_name) VALUES (?, ?)",
+            (indexer_id, indexer_name),
+        )
+        conn.execute(
+            "UPDATE indexer_stats SET indexer_name = ? WHERE indexer_id = ?",
+            (indexer_name, indexer_id),
+        )
+
+    def increment_malicious_hit(self, indexer_id: int, indexer_name: str) -> int:
+        """Increment malicious_hits for this indexer. Returns the new count."""
+        with self._conn() as conn:
+            self._upsert_indexer(conn, indexer_id, indexer_name)
+            conn.execute(
+                "UPDATE indexer_stats SET malicious_hits = malicious_hits + 1 WHERE indexer_id = ?",
+                (indexer_id,),
+            )
+            row = conn.execute(
+                "SELECT malicious_hits FROM indexer_stats WHERE indexer_id = ?",
+                (indexer_id,),
+            ).fetchone()
+            conn.commit()
+        return row["malicious_hits"] if row else 1
+
+    def set_indexer_ignored(
+        self,
+        indexer_id: int,
+        indexer_name: str,
+        ignored: bool,
+        pinned_position: int | None = None,
+    ):
+        """Set or clear the ignore/pin state for an indexer."""
+        with self._conn() as conn:
+            self._upsert_indexer(conn, indexer_id, indexer_name)
+            conn.execute(
+                "UPDATE indexer_stats SET ignored = ?, pinned_position = ? WHERE indexer_id = ?",
+                (int(ignored), pinned_position, indexer_id),
+            )
+            conn.commit()
+
+    def update_last_reorder(self, indexer_id: int):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE indexer_stats SET last_reorder = ? WHERE indexer_id = ?",
+                (_now_iso(), indexer_id),
+            )
+            conn.commit()
+
+    def update_last_scored(self, indexer_id: int):
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE indexer_stats SET last_scored = ? WHERE indexer_id = ?",
+                (_now_iso(), indexer_id),
+            )
             conn.commit()
 
     # ------------------------------------------------------------------

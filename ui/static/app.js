@@ -271,12 +271,22 @@ function removePattern(ruleIdx, btn) {
 // ------------------------------------------------------------------ //
 
 function toggleEditMode(mode) {
+  const formEl     = document.getElementById("config-form");
+  const prowlarrEl = document.getElementById("prowlarr-view");
+  // The form holds both form-view and yaml-view; show it for those modes.
+  if (formEl)     formEl.style.display     = (mode === "form" || mode === "yaml") ? "" : "none";
+  if (prowlarrEl) prowlarrEl.style.display = (mode === "prowlarr") ? "" : "none";
   document.getElementById("form-view").style.display = mode === "form" ? "" : "none";
   document.getElementById("yaml-view").style.display = mode === "yaml" ? "" : "none";
-  document.getElementById("edit_mode").value = mode;
+  document.getElementById("edit_mode").value = (mode === "prowlarr") ? "form" : mode;
   document.querySelectorAll(".mode-tab").forEach(t => {
     t.classList.toggle("active", t.dataset.mode === mode);
   });
+  // Lazy-load the indexer table the first time the Prowlarr tab is opened.
+  if (mode === "prowlarr" && typeof loadProwlarrIndexers === "function") {
+    const tbody = document.getElementById("prowlarr-tbody");
+    if (tbody && tbody.children.length === 0) loadProwlarrIndexers();
+  }
 }
 
 // ------------------------------------------------------------------ //

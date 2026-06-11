@@ -22,6 +22,7 @@ class Scheduler:
         self.next_run:    Optional[str] = None
         self.last_result: Optional[dict] = None
         self.run_history: list[dict] = []
+        self.last_reorder: Optional[datetime] = None
 
         # Persistent state — best effort; None if config/DB unavailable at startup
         self._state = self._init_state()
@@ -158,6 +159,49 @@ class Scheduler:
                 self._state.save_run(result)
             except Exception:
                 pass  # persistence failure must never affect scan operation
+
+        # After each scan cycle, check whether a Prowlarr reorder is due.
+        self._maybe_reorder()
+
+    def _maybe_reorder(self):
+        """
+        If Prowlarr scoring is enabled and reorder_interval_hours has elapsed
+        since the last reorder, run one. Best-effort: any failure is logged and
+        never affects the scan loop.
+        """
+        try:
+            from core.config import load_config
+            config = load_config(self.config_path)
+            if not config.prowlarr.enabled:
+                return
+
+            interval_h = config.prowlarr.reorder_interval_hours
+            now = datetime.now(timezone.utc)
+            if self.last_reorder is not None:
+                elapsed_h = (now - self.last_reorder).total_seconds() / 3600.0
+                if elapsed_h < interval_h:
+                    return
+
+            from core.prowlarr import ProwlarrClient
+            from core.indexer_scorer import IndexerScorer
+            prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
+            scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
+            changed  = scorer.reorder()
+            self.last_reorder = now
+            if self._state:
+                self._state.write_log({
+                    "level": "INFO", "event": "prowlarr_auto_reorder",
+                    "indexers_moved": changed,
+                })
+        except Exception as exc:
+            if self._state:
+                try:
+                    self._state.write_log({
+                        "level": "ERROR", "event": "prowlarr_auto_reorder_failed",
+                        "reason": str(exc),
+                    })
+                except Exception:
+                    pass
 
     def _get_interval(self) -> int:
         try:

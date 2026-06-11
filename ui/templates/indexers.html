@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Indexers — inspectarr{% endblock %}
+{% block page_title %}Indexer Health{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn btn-ghost btn-sm" onclick="rescoreIndexers()">Rescore</button>
+  <button class="btn btn-primary btn-sm" onclick="reorderIndexers()">Reorder Now</button>
+  <span id="indexer-status" class="hint"></span>
+{% endblock %}
+
+{% block content %}
+
+{% if not prowlarr_enabled %}
+  <div class="form-section">
+    <div class="form-section-title">Prowlarr not enabled</div>
+    <p class="hint">
+      Prowlarr indexer scoring is currently disabled. Enable it and enter your
+      connection details under <a href="/config?mode=prowlarr">Config &rarr; Prowlarr</a>,
+      then return here to view and reorder your indexers.
+    </p>
+  </div>
+{% else %}
+
+  <div class="form-section">
+    <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+      <span>Torrent Indexers</span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="rescoreIndexers()">&#8635; Refresh</button>
+    </div>
+    <p class="hint" style="margin-bottom:0.75rem">
+      <strong>Rescore</strong> recalculates health scores and refreshes this table without changing anything in Prowlarr.
+      <strong>Reorder Now</strong> applies the scores &mdash; the healthiest indexer gets the base priority and the rest follow.
+      Check <em>Ignore</em> to lock an indexer at its current priority.
+    </p>
+    <div id="indexer-msg" class="hint" style="padding:0.5rem 0"></div>
+    <table id="indexer-table" style="display:none;width:100%;border-collapse:collapse">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border)">
+          <th style="padding:6px 8px">Priority</th>
+          <th style="padding:6px 8px">Name</th>
+          <th style="padding:6px 8px">Avg Response</th>
+          <th style="padding:6px 8px">Success Rate</th>
+          <th style="padding:6px 8px">Malicious Hits</th>
+          <th style="padding:6px 8px">Health Score</th>
+          <th style="padding:6px 8px">Status</th>
+          <th style="padding:6px 8px">Ignore</th>
+        </tr>
+      </thead>
+      <tbody id="indexer-tbody"></tbody>
+    </table>
+  </div>
+
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const prowlarrEnabled = {{ 'true' if prowlarr_enabled else 'false' }};
+
+  if (prowlarrEnabled) {
+    loadIndexers();
+  }
+
+  function loadIndexers() {
+    const msg   = document.getElementById('indexer-msg');
+    const table = document.getElementById('indexer-table');
+    msg.textContent = 'Loading indexer data from Prowlarr\u2026';
+    table.style.display = 'none';
+    fetch('/config/prowlarr/indexers')
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) { msg.textContent = 'Error: ' + d.message; return; }
+        msg.textContent = '';
+        renderTable(d.indexers);
+        table.style.display = 'table';
+      })
+      .catch(e => { msg.textContent = 'Request failed: ' + e; });
+  }
+
+  function rescoreIndexers() {
+    const el = document.getElementById('indexer-status');
+    el.textContent = 'Rescoring\u2026';
+    el.style.color = '';
+    loadIndexers();
+    setTimeout(() => { el.textContent = 'Scores refreshed'; el.style.color = 'var(--success, #22c55e)'; }, 400);
+  }
+
+  function reorderIndexers() {
+    const el = document.getElementById('indexer-status');
+    el.textContent = 'Reordering\u2026';
+    el.style.color = '';
+    fetch('/config/prowlarr/rescore', {method: 'POST'})
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          el.textContent = `Done \u2014 ${d.changed} indexer(s) moved`;
+          el.style.color = 'var(--success, #22c55e)';
+          loadIndexers();
+        } else {
+          el.textContent = 'Error: ' + d.message;
+          el.style.color = 'var(--error, #ef4444)';
+        }
+      })
+      .catch(e => { el.textContent = 'Request failed: ' + e; el.style.color = 'var(--error, #ef4444)'; });
+  }
+
+  function renderTable(indexers) {
+    const tbody = document.getElementById('indexer-tbody');
+    tbody.innerHTML = '';
+    indexers.forEach(idx => {
+      const score      = idx.health_score !== null ? idx.health_score.toFixed(1) + '%' : 'N/A';
+      const scoreColor = idx.health_score === null ? '' :
+                         idx.health_score >= 80 ? 'color:#22c55e' :
+                         idx.health_score >= 50 ? 'color:#f59e0b' : 'color:#ef4444';
+      const statusBadge = idx.in_backoff
+        ? '<span style="color:#ef4444">&#9888; Backoff</span>'
+        : idx.ignored
+        ? '<span style="opacity:0.6">Pinned</span>'
+        : '';
+      const ignoreCell = `<input type="checkbox" title="Lock this indexer at its current priority"
+             ${idx.ignored ? 'checked' : ''}
+             onchange="setIgnored(${idx.id}, '${idx.name.replace(/'/g,"\\'")}', this.checked)">`;
+
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid var(--border)';
+      tr.style.opacity = idx.ignored ? '0.75' : '1';
+      tr.innerHTML = `
+        <td style="padding:6px 8px">${idx.priority}</td>
+        <td style="padding:6px 8px">${idx.name}</td>
+        <td style="padding:6px 8px">${idx.avg_response_ms > 0 ? idx.avg_response_ms + ' ms' : '\u2014'}</td>
+        <td style="padding:6px 8px">${idx.total_records > 0 ? idx.success_rate + '%' : '\u2014'}</td>
+        <td style="padding:6px 8px">${idx.malicious_hits > 0 ? '<span style="color:#ef4444">' + idx.malicious_hits + '</span>' : '0'}</td>
+        <td style="padding:6px 8px;${scoreColor}">${score}</td>
+        <td style="padding:6px 8px">${statusBadge}</td>
+        <td style="padding:6px 8px">${ignoreCell}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function setIgnored(indexerId, indexerName, ignored) {
+    fetch('/config/prowlarr/set-ignored', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        indexer_id:      indexerId,
+        indexer_name:    indexerName,
+        ignored:         ignored,
+        pinned_position: null,
+      }),
+    })
+      .then(r => r.json())
+      .then(d => { if (!d.ok) alert('Could not update ignore state: ' + d.message); });
+  }
+</script>
+{% endblock %}

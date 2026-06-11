@@ -7,6 +7,8 @@
           data-mode="form" onclick="toggleEditMode('form')">Form</button>
   <button class="btn btn-ghost btn-sm mode-tab {{ 'active' if request.args.get('mode') == 'yaml' else '' }}"
           data-mode="yaml" onclick="toggleEditMode('yaml')">Raw YAML</button>
+  <button class="btn btn-ghost btn-sm mode-tab"
+          data-mode="prowlarr" onclick="toggleEditMode('prowlarr')">Prowlarr</button>
 {% endblock %}
 
 {% block content %}
@@ -15,7 +17,7 @@
   <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-<form method="post" action="/config/save">
+<form method="post" action="/config/save" id="config-form">
   <input type="hidden" name="edit_mode" id="edit_mode" value="form">
 
   <!-- ============================================================ -->
@@ -372,12 +374,141 @@
   </div>
 
 </form>
+
+<!-- ============================================================ -->
+<!-- PROWLARR VIEW (tab)                                           -->
+<!-- ============================================================ -->
+<div id="prowlarr-view" style="display:none">
+<div class="form-section" style="margin-top:0.5rem">
+  <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+    <span>Prowlarr Connection &amp; Scoring</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="testProwlarr()">Test Connection</button>
+      <span id="prowlarr-status" class="hint"></span>
+    </div>
+  </div>
+  <p class="hint" style="margin-bottom:0.75rem">
+    View scores and reorder indexers on the <a href="/indexers">Indexers</a> page.
+  </p>
+
+  <!-- Connection settings -->
+  <div class="toggle-row" style="margin-bottom:0.75rem">
+    <input type="checkbox" id="prowlarr_enabled"
+           {{ 'checked' if cfg.get('prowlarr',{}).get('enabled') else '' }}
+           onchange="prowlarrSettingsChanged()">
+    <label for="prowlarr_enabled">Enable Prowlarr indexer health scoring</label>
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label>URL</label>
+      <input type="text" id="prowlarr_url"
+             value="{{ cfg.get('prowlarr',{}).get('url','') }}"
+             placeholder="http://192.168.1.x:9696/prowlarr"
+             oninput="prowlarrSettingsChanged()">
+    </div>
+    <div class="form-group">
+      <label>API Key</label>
+      <input type="password" id="prowlarr_api_key"
+             value="{{ cfg.get('prowlarr',{}).get('api_key','') }}"
+             oninput="prowlarrSettingsChanged()">
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label>Base priority</label>
+      <input type="number" id="prowlarr_base_priority" min="1" max="50"
+             value="{{ cfg.get('prowlarr',{}).get('base_priority', 10) }}"
+             oninput="prowlarrSettingsChanged()">
+      <span class="hint">Best-scoring torrent indexer gets this priority number; others count up from here. Keep it above your NZB indexers' priority numbers.</span>
+    </div>
+    <div class="form-group">
+      <label>Reorder interval (hours)</label>
+      <input type="number" id="prowlarr_reorder_interval" min="1"
+             value="{{ cfg.get('prowlarr',{}).get('reorder_interval_hours', 24) }}"
+             oninput="prowlarrSettingsChanged()">
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label>History window (days)</label>
+      <input type="number" id="prowlarr_history_window" min="1"
+             value="{{ cfg.get('prowlarr',{}).get('history_window_days', 90) }}"
+             oninput="prowlarrSettingsChanged()">
+    </div>
+    <div class="form-group">
+      <label>Min records before scoring</label>
+      <input type="number" id="prowlarr_min_grabs" min="1"
+             value="{{ cfg.get('prowlarr',{}).get('min_grabs_before_scoring', 10) }}"
+             oninput="prowlarrSettingsChanged()">
+      <span class="hint">Indexers with fewer history records show N/A for health score</span>
+    </div>
+  </div>
+  <button type="button" class="btn btn-primary btn-sm" id="prowlarr-save-btn"
+          style="display:none" onclick="saveProwlarrConfig()">Save Prowlarr Settings</button>
+  <span id="prowlarr-save-status" class="hint" style="margin-left:8px"></span>
+</div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
-  // Set initial edit mode
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('mode') === 'yaml') toggleEditMode('yaml');
+
+  let prowlarrDirty = false;
+
+  function prowlarrSettingsChanged() {
+    prowlarrDirty = true;
+    document.getElementById('prowlarr-save-btn').style.display = 'inline-flex';
+    document.getElementById('prowlarr-save-status').textContent = '';
+  }
+
+  function saveProwlarrConfig() {
+    const payload = {
+      enabled:                document.getElementById('prowlarr_enabled').checked,
+      url:                    document.getElementById('prowlarr_url').value,
+      api_key:                document.getElementById('prowlarr_api_key').value,
+      base_priority:          parseInt(document.getElementById('prowlarr_base_priority').value) || 10,
+      reorder_interval_hours: parseInt(document.getElementById('prowlarr_reorder_interval').value) || 24,
+      history_window_days:    parseInt(document.getElementById('prowlarr_history_window').value) || 90,
+      min_grabs_before_scoring: parseInt(document.getElementById('prowlarr_min_grabs').value) || 10,
+    };
+    fetch('/config/prowlarr/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('prowlarr-save-status');
+      if (d.ok) {
+        el.textContent = 'Saved';
+        el.style.color = 'var(--success, #22c55e)';
+        document.getElementById('prowlarr-save-btn').style.display = 'none';
+        prowlarrDirty = false;
+      } else {
+        el.textContent = 'Error: ' + d.message;
+        el.style.color = 'var(--error, #ef4444)';
+      }
+    });
+  }
+
+  function testProwlarr() {
+    const url     = document.getElementById('prowlarr_url').value;
+    const api_key = document.getElementById('prowlarr_api_key').value;
+    const el      = document.getElementById('prowlarr-status');
+    el.textContent = 'Testing…';
+    fetch('/config/test/prowlarr', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, api_key}),
+    })
+    .then(r => r.json())
+    .then(d => {
+      el.textContent = d.message;
+      el.style.color = d.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)';
+    });
+  }
 </script>
 {% endblock %}

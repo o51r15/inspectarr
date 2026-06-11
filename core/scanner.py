@@ -258,6 +258,11 @@ class Scanner:
         })
         self.notifier.notify_action(name, bad_files, arr_success, qbit_ok)
         self.log.info(f"  DONE — deleted: {name}")
+
+        # Step 4 — attribute malicious hit to Prowlarr indexer (best-effort)
+        if self.config.prowlarr.enabled:
+            self._record_malicious_hit(hash, name, rule.app)
+
         return True
 
 
@@ -317,3 +322,53 @@ class Scanner:
                 "hash": hash, "torrent_name": name, "attempts": attempt_count,
             })
             self.notifier.notify_retry_exhausted(name, hash, attempt_count)
+
+    def _record_malicious_hit(self, torrent_hash: str, name: str, app: str):
+        """
+        Look up which indexer served this torrent via the *arr grab history
+        and record a malicious hit in SQLite against that Prowlarr indexer.
+        Non-fatal — all failures are logged at DEBUG only.
+        """
+        try:
+            arr_client   = _build_arr_client(app, self.config)
+            indexer_name = arr_client.get_grab_indexer(torrent_hash)
+            if not indexer_name:
+                self.log.debug(
+                    f"No indexer found in {app} history for {torrent_hash} — "
+                    f"skipping malicious hit recording"
+                )
+                return
+
+            from .prowlarr import ProwlarrClient
+            prowlarr = ProwlarrClient(
+                self.config.prowlarr.url,
+                self.config.prowlarr.api_key,
+            )
+            indexers = prowlarr.get_torrent_indexers()
+            match = next(
+                (i for i in indexers if i["name"].lower() == indexer_name.lower()),
+                None,
+            )
+            if not match:
+                self.log.debug(
+                    f"Indexer name '{indexer_name}' from {app} history "
+                    f"did not match any Prowlarr torrent indexer"
+                )
+                return
+
+            count = self.state.increment_malicious_hit(match["id"], match["name"])
+            self.log.info(
+                f"Malicious hit recorded — indexer: '{match['name']}' "
+                f"(total: {count})"
+            )
+            self.state.write_log({
+                "level":        "INFO",
+                "event":        "malicious_hit_recorded",
+                "torrent_name": name,
+                "hash":         torrent_hash,
+                "indexer":      match["name"],
+                "indexer_id":   match["id"],
+                "total_hits":   count,
+            })
+        except Exception as exc:
+            self.log.debug(f"Could not record malicious hit for '{name}': {exc}")

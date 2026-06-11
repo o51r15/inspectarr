@@ -24,6 +24,7 @@ from ui.routes.dashboard import dashboard_bp
 from ui.routes.config import config_bp
 from ui.routes.logs import logs_bp
 from ui.routes.scheduler import scheduler_bp
+from ui.routes.indexers import indexers_bp
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +71,7 @@ height:100vh;margin:0;background:#0f1117;color:#e2e8f0}
     app.register_blueprint(config_bp)
     app.register_blueprint(logs_bp)
     app.register_blueprint(scheduler_bp)
+    app.register_blueprint(indexers_bp)
 
     return app
 
