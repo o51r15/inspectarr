@@ -9,6 +9,10 @@ downloads that match configurable bad-file rules (e.g. `.exe` files in a TV
 category), blocklists them in Sonarr, Radarr, or Lidarr, deletes the torrent and
 files, logs all events to JSON Lines, and notifies via Pushover.
 
+Also monitors Prowlarr torrent indexer health — scoring each indexer by response
+time, failure rate, and malicious content served — and automatically reorders
+them so your best indexers are always searched first.
+
 Runs two ways: a **web UI with a built-in scheduler daemon** (`web.py`), or a
 **one-shot CLI** (`inspectarr.py`) for manual runs and testing.
 
@@ -38,7 +42,8 @@ python3 inspectarr.py              # live run
 
 - Python 3.12+
 - qBittorrent with Web UI enabled
-- Sonarr v4
+- One or more of: Sonarr v4, Radarr v3, Lidarr v2
+- Prowlarr (optional — required only for indexer health scoring)
 
 ```bash
 pip install -r requirements.txt   # requests, pyyaml, flask
@@ -48,33 +53,45 @@ pip install -r requirements.txt   # requests, pyyaml, flask
 
 ## Web UI
 
-Served on port `8585` by default (configurable via `web.port`). Four pages:
+Served on port `8585` by default (configurable via `web.port`). Five pages:
 
 | Page | What it does |
 |---|---|
 | **Dashboard** | Scheduler status, last-scan stats (checked / flagged / actioned), last flagged torrent, recent run history. Live-updates every 5s. |
 | **Scheduler** | Start/stop the daemon, run-now, poll interval, last/next run, run history. |
+| **Indexers** | Prowlarr torrent indexer health table. Rescore to refresh scores; Reorder Now to apply priority changes. Per-indexer Ignore toggle to pin an indexer at its current priority. |
 | **Logs** | Paginated JSON Lines viewer (100/page), level filter, color-coded badges, auto-refresh, clear-log. |
-| **Config** | Full form editor for every option, plus a raw-YAML mode for advanced edits. Test-connection buttons for qBittorrent, Sonarr, Radarr, and Lidarr. Rules are a dynamic add/remove builder. |
+| **Config** | Full form editor for every option, plus a raw-YAML mode for advanced edits. Test-connection buttons for qBittorrent, Sonarr, Radarr, Lidarr, and Prowlarr. Rules are a dynamic add/remove builder. Prowlarr connection and scoring settings are under the Prowlarr section of the Config page. |
 
 The scheduler reloads `config.yaml` from disk before every scan, so changes
 saved in the Config page take effect on the next cycle — no restart needed.
 Changing `web.port` is the one exception; that requires a restart.
 
+### Authentication
+
+Optional HTTP Basic Auth, configurable from the Config page (Form tab → Web UI
+Authentication). Takes effect immediately — no restart needed. Fails open on
+config errors so a broken `config.yaml` never locks you out.
+
 ---
 
 ## Docker
 
-The container runs the web UI + scheduler by default.
+Pull the published image from GHCR:
 
 ```bash
-docker build -t inspectarr .
+docker pull ghcr.io/o51r15/inspectarr:latest
+```
+
+Run it:
+
+```bash
 docker run -d \
   --name inspectarr \
   -p 8585:8585 \
   -v ./data:/app/data \
   -v ./config.yaml:/app/config.yaml \
-  inspectarr
+  ghcr.io/o51r15/inspectarr:latest
 ```
 
 Or with Docker Compose (using the included `docker-compose.yml`):
@@ -134,7 +151,16 @@ Key settings:
 | `retry.interval_seconds` | Seconds between retry attempts (default: 600) |
 | `web.port` | Web UI port (default: 8585) |
 | `web.scheduler_autostart` | `true` = start the scheduler automatically on launch (default: false) |
+| `web.auth.enabled` | `true` = require Basic Auth login to access the web UI |
+| `web.auth.username` / `web.auth.password` | Credentials for Basic Auth |
 | `dry_run` | `true` = log matches only, no deletions |
+| `prowlarr.enabled` | Enable Prowlarr indexer health scoring and auto-reorder |
+| `prowlarr.url` | Prowlarr URL including base path if set (e.g. `http://host:9696/prowlarr`) |
+| `prowlarr.base_priority` | Priority number assigned to the best-scoring torrent indexer; others count up from here |
+| `prowlarr.reorder_interval_hours` | How often the auto-reorder runs (driven by the scheduler) |
+| `prowlarr.history_window_days` | Rolling window for response time and failure rate scoring |
+| `prowlarr.min_grabs_before_scoring` | Minimum history records required before scoring an indexer |
+| `prowlarr.scoring.*` | Weights for response time, failure rate, malicious hits, backoff penalty |
 
 ---
 
@@ -144,7 +170,6 @@ Key settings:
 python3 inspectarr.py                    # single scan run
 python3 inspectarr.py --config /path     # alternate config location
 python3 inspectarr.py --dry-run          # override config dry_run=true
-python3 inspectarr.py --daemon           # not in the CLI — use web.py instead
 python3 inspectarr.py --retry-now        # force flush retry queue, then scan
 ```
 
@@ -163,19 +188,6 @@ Everything in `data/` — mount as a Docker volume:
 
 ---
 
-## Extending to Other *arrs
-
-Sonarr, Radarr, and Lidarr are all supported. To add a new *arr app (e.g. Prowlarr):
-
-1. Implement `core/arrs/<app>.py` mirroring `sonarr.py` against the target API
-2. Register it in `_build_arr_client()` in `core/scanner.py`
-3. Add config fields to `ArrsConfig` in `core/config.py`
-4. Set `arrs.<app>.enabled: true` in config and add rules with `app: <app>`
-
-The abstract base and scanner already handle the rest.
-
----
-
 ## Project Layout
 
 ```
@@ -187,6 +199,8 @@ inspectarr/
 │   ├── scanner.py           # Main orchestrator
 │   ├── rules.py             # Rule evaluation engine
 │   ├── qbit.py              # qBittorrent Web API v2 client
+│   ├── prowlarr.py          # Prowlarr API client (indexer list, history, priority writes)
+│   ├── indexer_scorer.py    # Indexer health score computation + reorder logic
 │   ├── arrs/
 │   │   ├── base.py          # AbstractArrClient
 │   │   ├── sonarr.py        # Sonarr v4 client
@@ -195,8 +209,14 @@ inspectarr/
 │   ├── notifier.py          # Pushover client
 │   └── state.py             # SQLite + JSON Lines log
 ├── ui/                      # Web UI layer
+│   ├── auth.py              # HTTP Basic Auth enforcement (before_request hook)
 │   ├── scheduler.py         # Background scheduler daemon thread
-│   ├── routes/              # Flask blueprints (dashboard, config, logs, scheduler)
+│   ├── routes/              # Flask blueprints
+│   │   ├── dashboard.py
+│   │   ├── scheduler.py
+│   │   ├── logs.py
+│   │   ├── config.py        # Config form + Prowlarr settings/scoring endpoints
+│   │   └── indexers.py      # Indexer Health page
 │   ├── templates/           # Jinja2 templates
 │   └── static/              # CSS + JS + logo.png
 ├── assets/
@@ -204,6 +224,8 @@ inspectarr/
 ├── config.example.yaml
 ├── docker-compose.yml
 ├── inspectarr.service
+├── .github/workflows/
+│   └── release.yml          # Build + push Docker image to GHCR on tag
 ├── data/                    # Runtime state (gitignored, Docker volume)
 ├── Dockerfile
 └── requirements.txt
