@@ -17,7 +17,15 @@ class StateManager:
         self.log_path = log_path
         self.retention_days = retention_days
         self._ensure_dirs()
+        self._db = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
         self._init_db()
+
+    def __del__(self):
+        try:
+            self._db.close()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Setup
@@ -28,9 +36,8 @@ class StateManager:
         Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """Return the persistent shared connection."""
+        return self._db
 
     def _init_db(self):
         with self._conn() as conn:
