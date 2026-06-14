@@ -76,10 +76,11 @@ class IndexerScorer:
         current Prowlarr priority (ascending = best first).
         Does NOT reorder — purely informational.
         """
-        indexers    = self.prowlarr.get_torrent_indexers()
-        backoff_map = self.prowlarr.get_indexer_status()
-        stats_by_id = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
-        return [self._score_one(idx, backoff_map, stats_by_id) for idx in indexers]
+        indexers       = self.prowlarr.get_torrent_indexers()
+        backoff_map    = self.prowlarr.get_indexer_status()
+        stats_by_id    = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
+        prowlarr_stats = self.prowlarr.get_indexer_stats()
+        return [self._score_one(idx, backoff_map, stats_by_id, prowlarr_stats) for idx in indexers]
 
     def reorder(self) -> int:
         """
@@ -92,15 +93,16 @@ class IndexerScorer:
 
         Returns the number of priority changes written to Prowlarr.
         """
-        indexers    = self.prowlarr.get_torrent_indexers()   # sorted by priority asc
-        backoff_map = self.prowlarr.get_indexer_status()
-        stats_by_id = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
+        indexers       = self.prowlarr.get_torrent_indexers()   # sorted by priority asc
+        backoff_map    = self.prowlarr.get_indexer_status()
+        stats_by_id    = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
+        prowlarr_stats = self.prowlarr.get_indexer_stats()
 
         if not indexers:
             log.info("No torrent indexers found — nothing to reorder.")
             return 0
 
-        scored = [self._score_one(i, backoff_map, stats_by_id) for i in indexers]
+        scored = [self._score_one(i, backoff_map, stats_by_id, prowlarr_stats) for i in indexers]
 
         base = self.cfg.base_priority
 
@@ -152,33 +154,32 @@ class IndexerScorer:
         idx: dict,
         backoff_map: dict[int, dict],
         stats_by_id: dict[int, dict],
+        prowlarr_stats: dict[int, dict],
     ) -> dict:
         iid      = idx["id"]
         db_stats = stats_by_id.get(iid, {})
+        ps       = prowlarr_stats.get(iid, {})
 
-        fetch_failed = False
-        try:
-            history = self.prowlarr.get_indexer_history(
-                iid, days=self.cfg.history_window_days
-            )
-        except Exception as exc:
-            log.warning(f"Could not fetch history for indexer '{idx['name']}': {exc}")
-            history = []
-            fetch_failed = True
+        # Per-indexer response time and query counts from /api/v1/indexerstats.
+        # This replaces the per-indexer history fetch, which did not filter by
+        # indexer correctly and returned a global average for every indexer.
+        avg_ms = float(ps.get("averageResponseTime", 0))
 
-        total = len(history)
-        has_enough = (not fetch_failed) and total >= self.cfg.min_grabs_before_scoring
+        total_queries = (
+            ps.get("numberOfQueries",     0) +
+            ps.get("numberOfGrabs",       0) +
+            ps.get("numberOfRssQueries",  0) +
+            ps.get("numberOfAuthQueries", 0)
+        )
+        total_failed = (
+            ps.get("numberOfFailedQueries",     0) +
+            ps.get("numberOfFailedGrabs",       0) +
+            ps.get("numberOfFailedRssQueries",  0) +
+            ps.get("numberOfFailedAuthQueries", 0)
+        )
 
-        if total > 0:
-            avg_ms       = sum(
-                float(r.get("data", {}).get("elapsedTime", 0)) for r in history
-            ) / total
-            success_rate = sum(1 for r in history if r.get("successful", False)) / total
-        else:
-            avg_ms       = 0.0
-            # No data with a successful fetch → assume healthy (fail-open).
-            # Fetch failure → assume unhealthy so it isn't promoted on bad data.
-            success_rate = 0.0 if fetch_failed else 1.0
+        has_enough   = total_queries >= self.cfg.min_grabs_before_scoring
+        success_rate = (1.0 - total_failed / total_queries) if total_queries > 0 else 1.0
 
         malicious_hits = db_stats.get("malicious_hits", 0)
         in_backoff     = iid in backoff_map
@@ -194,7 +195,7 @@ class IndexerScorer:
             "priority":        idx.get("priority", 0),
             "avg_response_ms": round(avg_ms, 1),
             "success_rate":    round(success_rate * 100, 1),
-            "total_records":   total,
+            "total_records":   total_queries,
             "malicious_hits":  malicious_hits,
             "health_score":    health,
             "in_backoff":      in_backoff,

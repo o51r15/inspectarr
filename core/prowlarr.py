@@ -68,6 +68,16 @@ class ProwlarrClient:
         statuses = self._get("indexerstatus")
         return {s["indexerId"]: s for s in statuses}
 
+    def get_indexer_stats(self) -> dict[int, dict]:
+        """
+        Return per-indexer stats from /api/v1/indexerstats, keyed by indexer_id.
+        Provides averageResponseTime plus per-type query and failure counts.
+        NZB indexers are included in the response but are never looked up by the
+        scorer (only torrent indexer IDs are passed in).
+        """
+        data = self._get("indexerstats")
+        return {s["indexerId"]: s for s in data.get("indexers", [])}
+
     def get_indexer_history(
         self,
         indexer_id: int,
