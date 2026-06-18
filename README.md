@@ -2,16 +2,21 @@
   <img src="assets/inspectarr-banner.jpg" alt="Inspectarr" width="900">
 </p>
 
+<p align="center">
+  <img src="ui/static/logo.svg" alt="inspectarr logo" width="96">
+</p>
+
 # inspectarr
 
-Torrent watchdog for *arr ecosystems. Polls qBittorrent categories, detects
+Torrent watchdog for \*arr ecosystems. Polls qBittorrent categories, detects
 downloads that match configurable bad-file rules (e.g. `.exe` files in a TV
 category), blocklists them in Sonarr, Radarr, or Lidarr, deletes the torrent and
 files, logs all events to JSON Lines, and notifies via Pushover.
 
 Also monitors Prowlarr torrent indexer health — scoring each indexer by response
-time, failure rate, and malicious content served — and automatically reorders
-them so your best indexers are always searched first.
+time, failure rate, and malicious content served — automatically reorders them so
+your best indexers are always searched first, and tracks per-indexer grab and
+malicious-hit statistics over time.
 
 Runs two ways: a **web UI with a built-in scheduler daemon** (`web.py`), or a
 **one-shot CLI** (`inspectarr.py`) for manual runs and testing.
@@ -41,9 +46,9 @@ python3 inspectarr.py              # live run
 ## Requirements
 
 - Python 3.12+
-- qBittorrent with Web UI enabled
+- qBittorrent with Web UI enabled (v4.x or v5.x)
 - One or more of: Sonarr v4, Radarr v3, Lidarr v2
-- Prowlarr (optional — required only for indexer health scoring)
+- Prowlarr (optional — required only for indexer health scoring and attribution)
 
 ```bash
 pip install -r requirements.txt   # requests, pyyaml, flask
@@ -53,15 +58,17 @@ pip install -r requirements.txt   # requests, pyyaml, flask
 
 ## Web UI
 
-Served on port `8585` by default (configurable via `web.port`). Five pages:
+Served on port `8585` by default (configurable via `web.port`). Seven pages:
 
 | Page | What it does |
 |---|---|
-| **Dashboard** | Scheduler status, last-scan stats (checked / flagged / actioned), last flagged torrent, recent run history. Live-updates every 5s. |
+| **Dashboard** | Scheduler status, last-scan stats (checked / flagged / actioned), last flagged torrent (persists across clean scans), recent run history. Live-updates every 5s. |
 | **Scheduler** | Start/stop the daemon, run-now, poll interval, last/next run, run history. |
-| **Indexers** | Prowlarr torrent indexer health table. Rescore to refresh scores; Reorder Now to apply priority changes. Per-indexer Ignore toggle to pin an indexer at its current priority. |
+| **Torrents** | Quick-look dashboard of all qBittorrent torrents. Filter by status/category, change categories, pause/resume, and delete. Per-torrent detail view with tracker status and file list. Compatible with qBittorrent 4.x and 5.x. |
+| **Indexers** | Prowlarr torrent indexer health table. Rescore to refresh scores; Reorder & Sync to apply priority changes and push the updated order to all connected apps (Sonarr, Radarr, Whisparr, etc.). Per-indexer Ignore toggle to pin an indexer at its current priority. |
+| **Stats** | Per-indexer grab and malicious-hit statistics. Total grabs attributed on first scan of each torrent; malicious hits increment when Inspectarr flags and deletes a torrent from that indexer. |
 | **Logs** | Paginated JSON Lines viewer (100/page), level filter, color-coded badges, auto-refresh, clear-log. |
-| **Config** | Full form editor for every option, plus a raw-YAML mode for advanced edits. Test-connection buttons for qBittorrent, Sonarr, Radarr, Lidarr, and Prowlarr. Rules are a dynamic add/remove builder. Prowlarr connection and scoring settings are under the Prowlarr section of the Config page. |
+| **Config** | Full form editor for every option, plus a raw-YAML mode for advanced edits. Test-connection buttons for qBittorrent, Sonarr, Radarr, Lidarr, Prowlarr, and Pushover. Rules are a dynamic add/remove builder. |
 
 The scheduler reloads `config.yaml` from disk before every scan, so changes
 saved in the Config page take effect on the next cycle — no restart needed.
@@ -114,11 +121,6 @@ A `inspectarr.service` unit file is included. Copy it and enable it:
 
 ```bash
 sudo cp inspectarr.service /etc/systemd/system/
-```
-
-Then enable and start:
-
-```bash
 sudo systemctl daemon-reload
 sudo systemctl enable inspectarr
 sudo systemctl start inspectarr
@@ -154,7 +156,7 @@ Key settings:
 | `web.auth.enabled` | `true` = require Basic Auth login to access the web UI |
 | `web.auth.username` / `web.auth.password` | Credentials for Basic Auth |
 | `dry_run` | `true` = log matches only, no deletions |
-| `prowlarr.enabled` | Enable Prowlarr indexer health scoring and auto-reorder |
+| `prowlarr.enabled` | Enable Prowlarr indexer health scoring, auto-reorder, and grab attribution |
 | `prowlarr.url` | Prowlarr URL including base path if set (e.g. `http://host:9696/prowlarr`) |
 | `prowlarr.base_priority` | Priority number assigned to the best-scoring torrent indexer; others count up from here |
 | `prowlarr.reorder_interval_hours` | How often the auto-reorder runs (driven by the scheduler) |
@@ -183,7 +185,7 @@ Everything in `data/` — mount as a Docker volume:
 
 | File | Contents |
 |---|---|
-| `inspectarr.db` | SQLite: processed hashes + retry queue |
+| `inspectarr.db` | SQLite: processed hashes, retry queue, run history, indexer stats, grab attribution |
 | `inspectarr.log.json` | JSON Lines: one event object per line |
 
 ---
@@ -196,29 +198,43 @@ inspectarr/
 ├── web.py                   # Web UI + scheduler daemon entry point
 ├── core/                    # Core logic — no awareness of the UI
 │   ├── config.py            # Config loader + dataclasses
-│   ├── scanner.py           # Main orchestrator
+│   ├── scanner.py           # Main orchestrator (scan, flag, action, attribute)
 │   ├── rules.py             # Rule evaluation engine
-│   ├── qbit.py              # qBittorrent Web API v2 client
-│   ├── prowlarr.py          # Prowlarr API client (indexer list, history, priority writes)
+│   ├── qbit.py              # qBittorrent Web API v2 client (4.x + 5.x compatible)
+│   ├── prowlarr.py          # Prowlarr API client (indexers, priority, sync)
 │   ├── indexer_scorer.py    # Indexer health score computation + reorder logic
 │   ├── arrs/
-│   │   ├── base.py          # AbstractArrClient
+│   │   ├── base.py          # AbstractArrClient (history lookup, grab attribution)
 │   │   ├── sonarr.py        # Sonarr v4 client
 │   │   ├── radarr.py        # Radarr v3 client
 │   │   └── lidarr.py        # Lidarr v2 client
 │   ├── notifier.py          # Pushover client
-│   └── state.py             # SQLite + JSON Lines log
+│   └── state.py             # SQLite + JSON Lines log + grab attribution tables
 ├── ui/                      # Web UI layer
-│   ├── auth.py              # HTTP Basic Auth enforcement (before_request hook)
+│   ├── auth.py              # HTTP Basic Auth enforcement
 │   ├── scheduler.py         # Background scheduler daemon thread
-│   ├── routes/              # Flask blueprints
-│   │   ├── dashboard.py
-│   │   ├── scheduler.py
-│   │   ├── logs.py
-│   │   ├── config.py        # Config form + Prowlarr settings/scoring endpoints
-│   │   └── indexers.py      # Indexer Health page
-│   ├── templates/           # Jinja2 templates
-│   └── static/              # CSS + JS + logo.png
+│   ├── routes/
+│   │   ├── dashboard.py     # Dashboard page + /status JSON endpoint
+│   │   ├── scheduler.py     # Scheduler controls
+│   │   ├── logs.py          # Log viewer
+│   │   ├── torrents.py      # Torrents page + AJAX actions
+│   │   ├── indexers.py      # Indexer health page + reorder & sync
+│   │   ├── stats.py         # Indexer grab/malicious stats page
+│   │   └── config.py        # Config form + test connection endpoints
+│   ├── templates/
+│   │   ├── base.html        # Sidebar, nav, fonts, toast system
+│   │   ├── dashboard.html
+│   │   ├── scheduler.html
+│   │   ├── logs.html
+│   │   ├── torrents.html
+│   │   ├── torrent_detail.html
+│   │   ├── indexers.html
+│   │   ├── stats.html
+│   │   └── config.html
+│   └── static/
+│       ├── style.css        # Dark theme — IBM Plex + Syne typography
+│       ├── app.js
+│       └── logo.svg         # Vector logo mark
 ├── assets/
 │   └── inspectarr-banner.jpg
 ├── config.example.yaml

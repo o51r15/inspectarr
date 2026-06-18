@@ -1,4 +1,5 @@
 import threading
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -23,6 +24,9 @@ class Scheduler:
         self.last_result: Optional[dict] = None
         self.run_history: list[dict] = []
         self.last_reorder: Optional[datetime] = None
+        # Persists the most recent flagged torrent across clean scans and restarts.
+        # Never reset to None when a clean scan runs — only updated when flagged > 0.
+        self.last_detection: Optional[dict] = None
 
         # Persistent state — best effort; None if config/DB unavailable at startup
         self._state = self._init_state()
@@ -30,6 +34,9 @@ class Scheduler:
             self.run_history = self._state.get_recent_runs(10)
             if self.run_history:
                 self.last_result = self.run_history[0]
+            # Recover last_detection directly — dedicated query finds the most
+            # recent flagged run regardless of how many clean scans followed it.
+            self.last_detection = self._state.get_last_detection()
 
     # ------------------------------------------------------------------
     # Public controls
@@ -63,12 +70,13 @@ class Scheduler:
     def get_status(self) -> dict:
         with self._lock:
             return {
-                "running":     self.running,
-                "scanning":    self._scanning,
-                "last_run":    self.last_run,
-                "next_run":    self.next_run,
-                "last_result": self.last_result,
-                "run_history": list(self.run_history),
+                "running":        self.running,
+                "scanning":       self._scanning,
+                "last_run":       self.last_run,
+                "next_run":       self.next_run,
+                "last_result":    self.last_result,
+                "last_detection": self.last_detection,
+                "run_history":    list(self.run_history),
             }
 
 
@@ -150,6 +158,10 @@ class Scheduler:
             self._scanning   = False
             self.last_run    = end.isoformat()
             self.last_result = result
+            # Only update last_detection when this scan actually flagged something.
+            # This preserves the most recent detection across subsequent clean scans.
+            if result.get("last_flagged"):
+                self.last_detection = result["last_flagged"]
             self.run_history.insert(0, result)
             if len(self.run_history) > 10:
                 self.run_history = self.run_history[:10]

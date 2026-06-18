@@ -81,8 +81,8 @@
 
     <div class="card">
       <div class="card-title">Last Flagged Torrent</div>
-      {% if status.last_result and status.last_result.last_flagged %}
-        {% set lf = status.last_result.last_flagged %}
+      {% if status.last_detection %}
+        {% set lf = status.last_detection %}
         <div style="font-weight:600;margin-bottom:8px" id="last-flagged-name">{{ lf.torrent_name }}</div>
         <div class="text-muted" style="font-size:12px">
           Rule: <span id="last-flagged-rule">{{ lf.rule }}</span><br>

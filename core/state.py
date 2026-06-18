@@ -278,6 +278,25 @@ class StateManager:
             results.append(entry)
         return results
 
+    def get_last_detection(self) -> dict | None:
+        """
+        Return the last_flagged dict from the most recent scan that had
+        a flagged torrent, regardless of how many clean scans have run since.
+        Returns None if no flagged run exists.
+        """
+        with self._conn() as conn:
+            row = conn.execute("""
+                SELECT last_flagged FROM run_history
+                WHERE flagged > 0 AND last_flagged IS NOT NULL
+                ORDER BY id DESC LIMIT 1
+            """).fetchone()
+        if not row or not row["last_flagged"]:
+            return None
+        try:
+            return json.loads(row["last_flagged"])
+        except (json.JSONDecodeError, TypeError):
+            return None
+
     # ------------------------------------------------------------------
     # error_state — dedup repeated identical error notifications
     # ------------------------------------------------------------------
