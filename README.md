@@ -1,9 +1,5 @@
 <p align="center">
-  <img src="assets/inspectarr-banner.jpg" alt="Inspectarr" width="900">
-</p>
-
-<p align="center">
-  <img src="ui/static/logo.svg" alt="inspectarr logo" width="96">
+  <img src="assets/inspectarr-banner.svg" alt="Inspectarr" width="900">
 </p>
 
 # inspectarr
