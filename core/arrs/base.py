@@ -62,13 +62,35 @@ class AbstractArrClient(ABC):
         # Return True so the caller doesn't treat this as an arr failure.
         return True
 
+    def get_history_records_by_hash(self, infohash: str) -> list[dict]:
+        """
+        Return ALL history records for this infohash.
+
+        The default implementation wraps find_in_history() (returns at most one
+        record). Subclasses should override to return the full records list from
+        their history endpoint so that get_grab_indexer() can search beyond the
+        most-recent event.
+
+        This is important for malicious-hit attribution: after blocklisting, the
+        arr appends a new "downloadFailed" event, making it records[0]. The
+        original "grabbed" event — which carries data.indexer — is still present
+        but is no longer the most recent. Iterating all records finds it reliably.
+        """
+        item = self.find_in_history(infohash)
+        return [item] if item else []
+
     def get_grab_indexer(self, infohash: str) -> str | None:
         """
         Return the indexer name that served this grab, or None.
-        Uses find_in_history() which each subclass already implements.
-        Called by Inspectarr when attributing malicious hits to Prowlarr indexers.
+
+        Iterates ALL history records for this infohash and returns the indexer
+        field from the first record that carries it. This handles the case where
+        the arr has added post-blocklist events (e.g. downloadFailed) that become
+        records[0] but lack data.indexer — the original grabbed event is still in
+        history, just not the most recent.
         """
-        item = self.find_in_history(infohash)
-        if item:
-            return item.get("data", {}).get("indexer")
+        for record in self.get_history_records_by_hash(infohash):
+            indexer = record.get("data", {}).get("indexer")
+            if indexer:
+                return indexer
         return None

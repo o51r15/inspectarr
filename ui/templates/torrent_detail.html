@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}{{ torrent.name if torrent else 'Torrent' }} — inspectarr{% endblock %}
+{% block page_title %}Torrent Detail{% endblock %}
+
+{% block topbar_actions %}
+<a href="/torrents" class="btn btn-sm">← Back to Torrents</a>
+{% endblock %}
+
+{% block content %}
+
+{% if error and not torrent %}
+<div class="alert alert-error">{{ error }}</div>
+
+{% elif torrent %}
+
+{% if error %}
+<div class="alert alert-error" style="margin-bottom:1rem;">{{ error }}</div>
+{% endif %}
+
+<!-- Name + state banner -->
+<div class="card" style="margin-bottom:1rem;padding:1rem 1.25rem;">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div>
+      <div style="font-size:1rem;font-weight:600;color:var(--text-primary);word-break:break-all;">
+        {{ torrent.name }}
+      </div>
+      <div style="margin-top:0.35rem;color:var(--text-muted);font-size:0.82rem;font-family:monospace;">
+        {{ torrent.hash }}
+      </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0;">
+      {% set s = torrent.state %}
+      {% if s in ['downloading', 'metaDL', 'allocating', 'forcedDL'] %}
+        <span class="badge badge-blue">Downloading</span>
+      {% elif s in ['uploading', 'forcedUP'] %}
+        <span class="badge badge-green">Seeding</span>
+      {% elif s in ['pausedDL', 'pausedUP', 'stoppedDL', 'stoppedUP'] %}
+        <span class="badge badge-gray">Stopped</span>
+      {% elif s in ['stalledDL', 'stalledUP'] %}
+        <span class="badge badge-yellow">Stalled</span>
+      {% elif s in ['checkingDL', 'checkingUP', 'checkingResumeData', 'moving'] %}
+        <span class="badge badge-yellow">Checking</span>
+      {% elif s in ['error', 'missingFiles', 'unknown'] %}
+        <span class="badge badge-red">Error</span>
+      {% else %}
+        <span class="badge badge-gray">{{ s }}</span>
+      {% endif %}
+      <span class="badge {% if torrent.category %}badge-blue{% else %}badge-gray{% endif %}">
+        {{ torrent.category if torrent.category else '(no category)' }}
+      </span>
+    </div>
+  </div>
+
+  <!-- Progress bar -->
+  <div style="margin-top:0.85rem;">
+    <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);margin-bottom:0.3rem;">
+      <span>{{ (torrent.progress * 100)|int }}% complete</span>
+      <span>{{ torrent.size | filesizeformat }}</span>
+    </div>
+    <div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden;">
+      <div style="width:{{ (torrent.progress * 100)|int }}%;background:var(--accent);height:100%;border-radius:4px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Properties grid -->
+<div class="card" style="margin-bottom:1rem;padding:1rem 1.25rem;">
+  <h3 style="margin:0 0 0.75rem;font-size:0.9rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">Properties</h3>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.6rem 1.5rem;">
+
+    {% macro prop(label, value) %}
+    <div>
+      <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.1rem;">{{ label }}</div>
+      <div style="font-size:0.88rem;color:var(--text-primary);word-break:break-all;">{{ value if value else '—' }}</div>
+    </div>
+    {% endmacro %}
+
+    {{ prop("Save Path",     properties.get("save_path", "")) }}
+    {{ prop("Ratio",         "%.2f"|format(torrent.ratio)) }}
+    {{ prop("Seeds",         "%d connected / %d total" % (torrent.num_seeds, torrent.num_complete)) }}
+    {{ prop("Peers",         "%d connected / %d total" % (torrent.num_leechs, torrent.num_incomplete)) }}
+    {{ prop("↓ Speed",       (torrent.dlspeed | filesizeformat) + "/s" if torrent.dlspeed > 0 else "—") }}
+    {{ prop("↑ Speed",       (torrent.upspeed | filesizeformat) + "/s" if torrent.upspeed > 0 else "—") }}
+    {{ prop("Avg ↓ Speed",   (properties.get("dl_speed_avg", 0) | filesizeformat) + "/s" if properties.get("dl_speed_avg", 0) > 0 else "—") }}
+    {{ prop("Avg ↑ Speed",   (properties.get("up_speed_avg", 0) | filesizeformat) + "/s" if properties.get("up_speed_avg", 0) > 0 else "—") }}
+    {{ prop("Connections",   properties.get("nb_connections", "—")) }}
+    {{ prop("ETA",           torrent.eta ~ "s" if torrent.eta and torrent.eta > 0 and torrent.eta < 8640000 else "—") }}
+    {% if properties.get("addition_date") %}
+    {{ prop("Added",         properties.addition_date | int | datetimeformat) }}
+    {% endif %}
+    {% if properties.get("completion_date") and properties.completion_date > 0 %}
+    {{ prop("Completed",     properties.completion_date | int | datetimeformat) }}
+    {% endif %}
+
+  </div>
+</div>
+
+<!-- Trackers -->
+{% if trackers %}
+<div class="card" style="margin-bottom:1rem;padding:0;overflow:hidden;">
+  <div style="padding:0.75rem 1.25rem 0.5rem;border-bottom:1px solid var(--border);">
+    <h3 style="margin:0;font-size:0.9rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">
+      Trackers <span style="font-weight:400;">({{ trackers|length }})</span>
+    </h3>
+  </div>
+  <div style="overflow-x:auto;">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>URL</th>
+        <th>Status</th>
+        <th>Seeds</th>
+        <th>Peers</th>
+        <th>Message</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for tr in trackers %}
+    <tr>
+      <td style="font-size:0.8rem;max-width:260px;word-break:break-all;color:var(--text-muted);">{{ tr.url }}</td>
+      <td>
+        {% if tr.status == 2 %}
+          <span class="badge badge-green">Working</span>
+        {% elif tr.status == 0 %}
+          <span class="badge badge-gray">Disabled</span>
+        {% elif tr.status == 1 %}
+          <span class="badge badge-gray">Not contacted</span>
+        {% elif tr.status == 3 %}
+          <span class="badge badge-yellow">Too many requests</span>
+        {% elif tr.status == 4 %}
+          <span class="badge badge-red">Not working</span>
+        {% elif tr.status == 5 %}
+          <span class="badge badge-red">Not registered</span>
+        {% else %}
+          <span class="badge badge-gray">Unknown</span>
+        {% endif %}
+      </td>
+      <td style="color:var(--text-muted);">{{ tr.num_seeds if tr.num_seeds >= 0 else '—' }}</td>
+      <td style="color:var(--text-muted);">{{ tr.num_peers if tr.num_peers >= 0 else '—' }}</td>
+      <td style="font-size:0.8rem;color:var(--text-muted);max-width:200px;">{{ tr.msg if tr.msg else '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- Files -->
+{% if files %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <div style="padding:0.75rem 1.25rem 0.5rem;border-bottom:1px solid var(--border);">
+    <h3 style="margin:0;font-size:0.9rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">
+      Files <span style="font-weight:400;">({{ files|length }})</span>
+    </h3>
+  </div>
+  <div style="overflow-x:auto;">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Path</th>
+        <th>Size</th>
+        <th style="min-width:120px;">Progress</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for f in files %}
+    <tr>
+      <td style="font-size:0.82rem;word-break:break-all;color:var(--text-primary);">{{ f.name }}</td>
+      <td style="white-space:nowrap;color:var(--text-muted);">{{ f.size | filesizeformat }}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <div style="flex:1;background:var(--border);border-radius:4px;height:5px;overflow:hidden;">
+            <div style="width:{{ (f.progress * 100)|int }}%;background:var(--accent);height:100%;border-radius:4px;"></div>
+          </div>
+          <span style="font-size:0.75rem;color:var(--text-muted);white-space:nowrap;">{{ (f.progress * 100)|int }}%</span>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="alert alert-error">Torrent not found.</div>
+{% endif %}
+
+{% endblock %}

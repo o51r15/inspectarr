@@ -21,8 +21,14 @@
       <a href="/scheduler" class="{{ 'active' if request.path.startswith('/scheduler') else '' }}">
         <span class="icon">⏱</span> Scheduler
       </a>
+      <a href="/torrents" class="{{ 'active' if request.path.startswith('/torrents') else '' }}">
+        <span class="icon">⬇</span> Torrents
+      </a>
       <a href="/indexers" class="{{ 'active' if request.path.startswith('/indexers') else '' }}">
         <span class="icon">⚖</span> Indexers
+      </a>
+      <a href="/stats" class="{{ 'active' if request.path.startswith('/stats') else '' }}">
+        <span class="icon">📊</span> Stats
       </a>
       <a href="/logs" class="{{ 'active' if request.path.startswith('/logs') else '' }}">
         <span class="icon">≡</span> Logs
@@ -36,8 +42,10 @@
       </a>
       {% endif %}
     </nav>
-    <a href="https://github.com/o51r15/inspectarr" target="_blank" rel="noopener"
-       class="sidebar-version">v1.1.0</a>
+    <a href="https://buymeacoffee.com/o51r15" target="_blank" rel="noopener"
+       class="sidebar-donate" title="Buy me a coffee">☕ Donate</a>
+    <a id="sidebar-version" href="https://github.com/o51r15/inspectarr" target="_blank" rel="noopener"
+       class="sidebar-version">v1.1.1</a>
   </aside>
 
   <!-- Main -->
@@ -55,5 +63,23 @@
 <script src="/static/app.js"></script>
 {% block scripts %}{% endblock %}
 <div id="toast-container"></div>
+<script>
+  // Dynamic version — fetch latest GitHub release, cache per session
+  (function() {
+    const el = document.getElementById('sidebar-version');
+    if (!el) return;
+    const cached = sessionStorage.getItem('inspectarr_version');
+    if (cached) { el.textContent = cached; return; }
+    fetch('https://api.github.com/repos/o51r15/inspectarr/releases/latest')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && d.tag_name) {
+          el.textContent = d.tag_name;
+          sessionStorage.setItem('inspectarr_version', d.tag_name);
+        }
+      })
+      .catch(() => {});  // silent fail — hardcoded fallback stays
+  })();
+</script>
 </body>
 </html>

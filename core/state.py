@@ -96,7 +96,24 @@ class StateManager:
                     last_scored      TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS seen_torrents (
+                    hash         TEXT PRIMARY KEY,
+                    indexer_id   INTEGER,
+                    indexer_name TEXT,
+                    first_seen   TEXT
+                )
+            """)
             conn.commit()
+        # Migrate indexer_stats to add total_grabs if not present
+        try:
+            with self._conn() as conn:
+                conn.execute(
+                    "ALTER TABLE indexer_stats ADD COLUMN total_grabs INTEGER DEFAULT 0"
+                )
+                conn.commit()
+        except Exception:
+            pass  # Column already exists — safe to ignore
 
 
     # ------------------------------------------------------------------
@@ -356,6 +373,56 @@ class StateManager:
                 (_now_iso(), indexer_id),
             )
             conn.commit()
+
+    def increment_total_grabs(self, indexer_id: int, indexer_name: str) -> int:
+        """Increment total_grabs for this indexer. Returns the new count."""
+        with self._conn() as conn:
+            self._upsert_indexer(conn, indexer_id, indexer_name)
+            conn.execute(
+                "UPDATE indexer_stats SET total_grabs = total_grabs + 1 WHERE indexer_id = ?",
+                (indexer_id,),
+            )
+            row = conn.execute(
+                "SELECT total_grabs FROM indexer_stats WHERE indexer_id = ?",
+                (indexer_id,),
+            ).fetchone()
+            conn.commit()
+        return row["total_grabs"] if row else 1
+
+    # ------------------------------------------------------------------
+    # seen_torrents — per-torrent indexer attribution (dedup grab counts)
+    # ------------------------------------------------------------------
+
+    def get_torrent_seen(self, hash: str) -> dict | None:
+        """Return the seen_torrents record for this hash, or None."""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM seen_torrents WHERE hash = ?", (hash,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def record_torrent_seen(
+        self, hash: str, indexer_id: int, indexer_name: str
+    ) -> bool:
+        """
+        Record a torrent as seen (attributed to an indexer).
+        Returns True if newly inserted, False if already existed.
+        Uses INSERT OR IGNORE so it is safe to call multiple times.
+        """
+        with self._conn() as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM seen_torrents WHERE hash = ?", (hash,)
+            ).fetchone()
+            if existing:
+                return False
+            conn.execute(
+                """INSERT INTO seen_torrents
+                   (hash, indexer_id, indexer_name, first_seen)
+                   VALUES (?, ?, ?, ?)""",
+                (hash, indexer_id, indexer_name, _now_iso()),
+            )
+            conn.commit()
+        return True
 
     # ------------------------------------------------------------------
     # Retention + log

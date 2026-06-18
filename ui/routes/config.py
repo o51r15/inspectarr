@@ -309,3 +309,32 @@ def test_prowlarr():
         return jsonify({"ok": ok, "message": "Connected" if ok else "Failed"})
     except Exception as exc:
         return jsonify({"ok": False, "message": str(exc)})
+
+
+@config_bp.route("/config/test/pushover", methods=["POST"])
+def test_pushover():
+    """Send a test Pushover notification to verify credentials."""
+    import requests as req
+    app_token = request.json.get("app_token", "")
+    user_key  = request.json.get("user_key", "")
+    if not app_token or not user_key:
+        return jsonify({"ok": False, "message": "App token and user key are required"})
+    try:
+        resp = req.post(
+            "https://api.pushover.net/1/messages.json",
+            data={
+                "token":   app_token,
+                "user":    user_key,
+                "title":   "inspectarr",
+                "message": "Test notification — Pushover is configured correctly.",
+                "priority": 0,
+            },
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("status") == 1:
+            return jsonify({"ok": True, "message": "Test notification sent"})
+        errors = ", ".join(data.get("errors", ["Unknown error"]))
+        return jsonify({"ok": False, "message": errors})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})

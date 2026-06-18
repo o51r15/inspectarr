@@ -3,8 +3,10 @@
 {% block page_title %}Indexer Health{% endblock %}
 
 {% block topbar_actions %}
-  <button class="btn btn-ghost btn-sm" onclick="rescoreIndexers()">Rescore</button>
-  <button class="btn btn-primary btn-sm" onclick="reorderIndexers()">Reorder Now</button>
+  <button class="btn btn-ghost btn-sm" onclick="rescoreIndexers()"
+          title="Recalculate health scores and refresh the table (no changes made in Prowlarr)">Rescore</button>
+  <button class="btn btn-primary btn-sm" onclick="reorderAndSync()"
+          title="Reorder indexers in Prowlarr by health score, then sync updated order to Sonarr, Radarr, and Whisparr">Reorder &amp; Sync</button>
   <span id="indexer-status" class="hint"></span>
 {% endblock %}
 
@@ -85,23 +87,29 @@
     setTimeout(() => { el.textContent = 'Scores refreshed'; el.style.color = 'var(--success, #22c55e)'; }, 400);
   }
 
-  function reorderIndexers() {
+  function reorderAndSync() {
     const el = document.getElementById('indexer-status');
-    el.textContent = 'Reordering\u2026';
+    el.textContent = 'Reordering and syncing\u2026';
     el.style.color = '';
-    fetch('/config/prowlarr/rescore', {method: 'POST'})
+    fetch('/indexers/sync', {method: 'POST'})
       .then(r => r.json())
       .then(d => {
         if (d.ok) {
-          el.textContent = `Done \u2014 ${d.changed} indexer(s) moved`;
-          el.style.color = 'var(--success, #22c55e)';
+          el.textContent = d.msg;
+          el.style.color = d.synced ? 'var(--success, #22c55e)' : 'var(--warning, #f59e0b)';
           loadIndexers();
+          showToast(d.msg, d.synced ? 'success' : 'warning');
         } else {
-          el.textContent = 'Error: ' + d.message;
+          el.textContent = 'Error: ' + d.msg;
           el.style.color = 'var(--error, #ef4444)';
+          showToast('Sync failed: ' + d.msg, 'error');
         }
       })
-      .catch(e => { el.textContent = 'Request failed: ' + e; el.style.color = 'var(--error, #ef4444)'; });
+      .catch(e => {
+        el.textContent = 'Request failed: ' + e;
+        el.style.color = 'var(--error, #ef4444)';
+        showToast('Request failed', 'error');
+      });
   }
 
   function renderTable(indexers) {

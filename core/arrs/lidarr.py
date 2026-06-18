@@ -88,6 +88,16 @@ class LidarrClient(AbstractArrClient):
         records = data.get("records", [])
         return records[0] if records else None
 
+    def get_history_records_by_hash(self, infohash: str) -> list[dict]:
+        """Return ALL history records for this infohash (used for indexer attribution)."""
+        data = self._get("/history", params={
+            "pageSize": 100,
+            "sortKey": "date",
+            "sortDir": "desc",
+            "downloadId": infohash.upper(),
+        })
+        return data.get("records", [])
+
     def blocklist_from_history(self, history_id: int) -> bool:
         """
         Mark history item as failed. Lidarr blocklists the release and

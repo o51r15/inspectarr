@@ -302,6 +302,11 @@
           <input type="password" name="pushover_user_key" value="{{ push.get('user_key','') }}">
         </div>
       </div>
+      <div class="flex gap-8 items-center" style="margin-bottom:0.75rem;">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="testPushover()"
+                title="Send a test notification to verify your Pushover credentials">Test Notification</button>
+        <span id="test-pushover-result" class="hint"></span>
+      </div>
       <div class="form-group mb-16">
         <label>Notify On</label>
         <div class="flex gap-8" style="flex-wrap:wrap;margin-top:6px">
@@ -508,6 +513,28 @@
     .then(d => {
       el.textContent = d.message;
       el.style.color = d.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)';
+    });
+  }
+
+  function testPushover() {
+    const app_token = document.querySelector('[name="pushover_app_token"]').value;
+    const user_key  = document.querySelector('[name="pushover_user_key"]').value;
+    const el        = document.getElementById('test-pushover-result');
+    el.textContent  = 'Sending…';
+    el.style.color  = '';
+    fetch('/config/test/pushover', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({app_token, user_key}),
+    })
+    .then(r => r.json())
+    .then(d => {
+      el.textContent = d.message;
+      el.style.color = d.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)';
+    })
+    .catch(() => {
+      el.textContent = 'Request failed';
+      el.style.color = 'var(--error, #ef4444)';
     });
   }
 </script>

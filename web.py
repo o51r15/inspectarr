@@ -16,6 +16,7 @@ CLI runs (no UI) still use:
 import argparse
 import os
 import sys
+from datetime import datetime
 
 from flask import Flask, Response
 from ui.auth import check_auth, read_auth_block
@@ -25,6 +26,8 @@ from ui.routes.config import config_bp
 from ui.routes.logs import logs_bp
 from ui.routes.scheduler import scheduler_bp
 from ui.routes.indexers import indexers_bp
+from ui.routes.torrents import torrents_bp
+from ui.routes.stats import stats_bp
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +52,16 @@ def create_app(config_path: str) -> Flask:
         auth = read_auth_block(config_path)
         return {"auth_enabled": auth.get("enabled", False)}
 
+    @app.template_filter("datetimeformat")
+    def datetimeformat(value):
+        """Convert a Unix timestamp (int) to a readable date string."""
+        try:
+            if not value or int(value) <= 0:
+                return "—"
+            return datetime.fromtimestamp(int(value)).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            return "—"
+
     @app.route("/logout")
     def logout():
         return Response(
@@ -72,6 +85,8 @@ height:100vh;margin:0;background:#0f1117;color:#e2e8f0}
     app.register_blueprint(logs_bp)
     app.register_blueprint(scheduler_bp)
     app.register_blueprint(indexers_bp)
+    app.register_blueprint(torrents_bp)
+    app.register_blueprint(stats_bp)
 
     return app
 

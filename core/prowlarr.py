@@ -114,6 +114,33 @@ class ProwlarrClient:
 
         return records
 
+    def sync_to_apps(self) -> bool:
+        """
+        Trigger Prowlarr to push the current indexer list to all connected
+        applications (Sonarr, Radarr, Whisparr, etc.) via the
+        ApplicationIndexerSync command.
+        Returns True if the command was accepted, False on any error.
+        """
+        try:
+            resp = requests.post(
+                f"{self.base_url}/api/v1/command",
+                headers={**self.headers, "Content-Type": "application/json"},
+                json={"name": "ApplicationIndexerSync"},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            return True
+        except requests.HTTPError as exc:
+            body = exc.response.text[:300] if exc.response is not None else ""
+            log.warning(
+                f"Prowlarr ApplicationIndexerSync failed "
+                f"(HTTP {exc.response.status_code if exc.response is not None else '?'}): {body}"
+            )
+            return False
+        except Exception as exc:
+            log.warning(f"Prowlarr ApplicationIndexerSync failed: {exc}")
+            return False
+
     def set_indexer_priority(self, indexer: dict, new_priority: int) -> bool:
         """
         Write a new priority for an indexer.

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Indexer Stats — inspectarr{% endblock %}
+{% block page_title %}Indexer Stats{% endblock %}
+
+{% block content %}
+
+{% if error %}
+<div class="alert alert-error"><strong>Error:</strong> {{ error }}</div>
+{% endif %}
+
+{% if not prowlarr_enabled %}
+<div class="alert alert-error" style="margin-bottom:1rem;">
+  Prowlarr is not enabled. Enable it in Config to start tracking grab attribution.
+</div>
+{% endif %}
+
+{% if indexer_rows %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <div style="overflow-x:auto;">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Indexer</th>
+        <th>Priority</th>
+        <th>Total Grabs</th>
+        <th>Malicious</th>
+        <th>% Malicious</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in indexer_rows %}
+    <tr>
+      <td style="font-weight:500;color:var(--text-primary);">{{ row.name }}</td>
+      <td style="color:var(--text-muted);">{{ row.priority }}</td>
+      <td style="color:var(--text-muted);">{{ row.total_grabs }}</td>
+      <td>
+        {% if row.malicious_hits > 0 %}
+          <span style="color:#f87171;font-weight:600;">{{ row.malicious_hits }}</span>
+        {% else %}
+          <span style="color:var(--text-muted);">0</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if row.malicious_pct > 10 %}
+          <span class="badge badge-red">{{ row.malicious_pct }}%</span>
+        {% elif row.malicious_pct > 0 %}
+          <span class="badge badge-yellow">{{ row.malicious_pct }}%</span>
+        {% else %}
+          <span style="color:var(--text-muted);">0%</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted);padding:0 0.25rem;">
+  Grabs are attributed on first scan. Malicious count increments when Inspectarr
+  flags and deletes a torrent from that indexer.
+</div>
+
+{% elif not error %}
+<div class="card" style="text-align:center;padding:3rem;color:var(--text-muted);">
+  No grab data yet. Stats appear after the first scan with Prowlarr enabled.
+</div>
+{% endif %}
+
+{% endblock %}

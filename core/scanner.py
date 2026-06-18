@@ -149,8 +149,6 @@ class Scanner:
             self.log.debug(f"  Skip (already actioned): {name}")
             return False, False
 
-        # If retry is enabled and this hash has an unresolved retry entry,
-        # let the retry queue own its timing — don't reprocess every poll cycle.
         if self.config.retry.enabled and self.state.has_active_retry(h):
             self.log.debug(f"  Skip (retry queue owns it): {name}")
             return False, False
@@ -162,7 +160,11 @@ class Scanner:
             return False, False
 
         flagged, bad_files = evaluate_rule(rule, files)
+
         if not flagged:
+            # Attribute grab for clean torrents (first sight only, deduped)
+            if self.config.prowlarr.enabled:
+                self._record_grab_attribution(h, name, rule.app)
             return False, False
 
         self.log.info(f"FLAGGED [{rule.name}] {name} | bad: {bad_files}")
@@ -200,6 +202,16 @@ class Scanner:
         arr_client  = _build_arr_client(rule.app, self.config)
         arr_success = False
 
+        # Step 0 — grab attribution BEFORE blocklisting.
+        # Must happen before the arr blocklist call because blocklisting adds a
+        # new history event (e.g. downloadFailed) which would become records[0],
+        # hiding the original grabbed event that carries data.indexer.
+        indexer_id, indexer_name = None, None
+        if self.config.prowlarr.enabled:
+            indexer_id, indexer_name = self._record_grab_attribution(
+                hash, name, rule.app
+            )
+
         # Step 1 — blocklist in arr
         try:
             arr_success = arr_client.blocklist(hash)
@@ -225,7 +237,6 @@ class Scanner:
                     )
                     self._check_retry_limit(hash, name, count)
                 return False
-            # on_arr_failure == "delete": fall through
 
         # Step 2 — delete from qBittorrent
         try:
@@ -259,9 +270,9 @@ class Scanner:
         self.notifier.notify_action(name, bad_files, arr_success, qbit_ok)
         self.log.info(f"  DONE — deleted: {name}")
 
-        # Step 4 — attribute malicious hit to Prowlarr indexer (best-effort)
-        if self.config.prowlarr.enabled:
-            self._record_malicious_hit(hash, name, rule.app)
+        # Step 4 — record malicious hit against the indexer
+        if self.config.prowlarr.enabled and indexer_id:
+            self._record_malicious_hit(hash, name, indexer_id, indexer_name)
 
         return True
 
@@ -323,21 +334,32 @@ class Scanner:
             })
             self.notifier.notify_retry_exhausted(name, hash, attempt_count)
 
-    def _record_malicious_hit(self, torrent_hash: str, name: str, app: str):
+    def _record_grab_attribution(
+        self, torrent_hash: str, name: str, app: str
+    ) -> tuple[int | None, str | None]:
         """
-        Look up which indexer served this torrent via the *arr grab history
-        and record a malicious hit in SQLite against that Prowlarr indexer.
+        Look up which Prowlarr indexer served this torrent via *arr grab history
+        and record it. Increments total_grabs on first sight only (deduped via
+        seen_torrents table). Returns (indexer_id, indexer_name) or (None, None).
+
+        Must be called BEFORE blocklisting so the original grabbed event is still
+        records[0] in arr history (blocklisting adds a new event that would hide it).
         Non-fatal — all failures are logged at DEBUG only.
         """
+        # Return cached result if we've already attributed this torrent
+        seen = self.state.get_torrent_seen(torrent_hash)
+        if seen:
+            return seen.get("indexer_id"), seen.get("indexer_name")
+
         try:
             arr_client   = _build_arr_client(app, self.config)
             indexer_name = arr_client.get_grab_indexer(torrent_hash)
             if not indexer_name:
                 self.log.debug(
                     f"No indexer found in {app} history for {torrent_hash} — "
-                    f"skipping malicious hit recording"
+                    f"skipping grab attribution"
                 )
-                return
+                return None, None
 
             from .prowlarr import ProwlarrClient
             prowlarr = ProwlarrClient(
@@ -351,14 +373,50 @@ class Scanner:
             )
             if not match:
                 self.log.debug(
-                    f"Indexer name '{indexer_name}' from {app} history "
+                    f"Indexer '{indexer_name}' from {app} history "
                     f"did not match any Prowlarr torrent indexer"
                 )
-                return
+                return None, None
 
-            count = self.state.increment_malicious_hit(match["id"], match["name"])
+            iid   = match["id"]
+            iname = match["name"]  # canonical name from Prowlarr
+
+            is_new = self.state.record_torrent_seen(torrent_hash, iid, iname)
+            if is_new:
+                count = self.state.increment_total_grabs(iid, iname)
+                self.log.info(
+                    f"Grab attributed — indexer: '{iname}' "
+                    f"(total grabs: {count})"
+                )
+                self.state.write_log({
+                    "level":        "INFO",
+                    "event":        "grab_attributed",
+                    "torrent_name": name,
+                    "hash":         torrent_hash,
+                    "indexer":      iname,
+                    "indexer_id":   iid,
+                    "total_grabs":  count,
+                })
+
+            return iid, iname
+
+        except Exception as exc:
+            self.log.debug(f"Could not attribute grab for '{name}': {exc}")
+            return None, None
+
+    def _record_malicious_hit(
+        self, torrent_hash: str, name: str, indexer_id: int, indexer_name: str
+    ):
+        """
+        Record a malicious hit against the given indexer.
+        indexer_id and indexer_name come from _record_grab_attribution so no
+        additional API calls are needed here.
+        Non-fatal — all failures are logged at DEBUG only.
+        """
+        try:
+            count = self.state.increment_malicious_hit(indexer_id, indexer_name)
             self.log.info(
-                f"Malicious hit recorded — indexer: '{match['name']}' "
+                f"Malicious hit recorded — indexer: '{indexer_name}' "
                 f"(total: {count})"
             )
             self.state.write_log({
@@ -366,8 +424,8 @@ class Scanner:
                 "event":        "malicious_hit_recorded",
                 "torrent_name": name,
                 "hash":         torrent_hash,
-                "indexer":      match["name"],
-                "indexer_id":   match["id"],
+                "indexer":      indexer_name,
+                "indexer_id":   indexer_id,
                 "total_hits":   count,
             })
         except Exception as exc:
