@@ -111,7 +111,7 @@ class RadarrClient(AbstractArrClient):
 
     def test_connection(self) -> bool:
         try:
-            self._get("/system/status")
-            return True
+            data = self._get("/system/status")
+            return isinstance(data, dict) and data.get("appName", "").lower() == "radarr"
         except Exception:
             return False

@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from .config import AppConfig, Rule
 from .qbit import QBittorrentClient
@@ -32,6 +33,19 @@ def _build_arr_client(app_name: str, config: AppConfig) -> AbstractArrClient:
         c = config.arrs.lidarr
         return LidarrClient(c.url, c.api_key)
     raise ValueError(f"Unknown arr app: {app_name!r}")
+
+
+def _normalize_indexer_name(name: str) -> str:
+    """
+    Normalize an indexer name for cross-system matching.
+
+    When Prowlarr syncs an indexer to Sonarr/Radarr/Lidarr, the arr appends
+    " (Prowlarr)" to the name. So the arr's grab history shows
+    "TorrentProject2 (Prowlarr)" while Prowlarr's own /api/v1/indexer list
+    returns "TorrentProject2". Stripping that trailing suffix (and lowercasing)
+    lets the two sides match. Documented behaviour — see Servarr wiki.
+    """
+    return re.sub(r"\s*\(prowlarr\)\s*$", "", name or "", flags=re.IGNORECASE).strip().lower()
 
 
 class Scanner:
@@ -367,15 +381,25 @@ class Scanner:
                 self.config.prowlarr.api_key,
             )
             indexers = prowlarr.get_torrent_indexers()
+            target   = _normalize_indexer_name(indexer_name)
             match = next(
-                (i for i in indexers if i["name"].lower() == indexer_name.lower()),
+                (i for i in indexers if _normalize_indexer_name(i["name"]) == target),
                 None,
             )
             if not match:
-                self.log.debug(
-                    f"Indexer '{indexer_name}' from {app} history "
-                    f"did not match any Prowlarr torrent indexer"
+                available = ", ".join(i["name"] for i in indexers) or "(none)"
+                self.log.warning(
+                    f"Indexer '{indexer_name}' from {app} history did not match "
+                    f"any Prowlarr torrent indexer. Available: {available}"
                 )
+                self.state.write_log({
+                    "level":            "WARNING",
+                    "event":            "grab_attribution_no_match",
+                    "torrent_name":     name,
+                    "hash":             torrent_hash,
+                    "arr_indexer_name": indexer_name,
+                    "available":        [i["name"] for i in indexers],
+                })
                 return None, None
 
             iid   = match["id"]
@@ -401,7 +425,14 @@ class Scanner:
             return iid, iname
 
         except Exception as exc:
-            self.log.debug(f"Could not attribute grab for '{name}': {exc}")
+            self.log.warning(f"Could not attribute grab for '{name}': {exc}")
+            self.state.write_log({
+                "level":        "WARNING",
+                "event":        "grab_attribution_error",
+                "torrent_name": name,
+                "hash":         torrent_hash,
+                "reason":       str(exc),
+            })
             return None, None
 
     def _record_malicious_hit(
