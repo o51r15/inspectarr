@@ -37,12 +37,30 @@
       <a href="/stats" class="{{ 'active' if request.path.startswith('/stats') else '' }}">
         <span class="icon">⎇</span> Stats
       </a>
-      <a href="/logs" class="{{ 'active' if request.path.startswith('/logs') else '' }}">
-        <span class="icon">▣</span> Logs
-      </a>
-      <a href="/config" class="{{ 'active' if request.path.startswith('/config') else '' }}">
-        <span class="icon">⚙</span> Config
-      </a>
+      <div class="nav-group {{ 'open' if request.path.startswith('/system') else '' }}" id="system-group">
+        <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/system') else '' }}" onclick="toggleNavGroup('system-group')">
+          <span class="icon">⚒</span> System
+          <span class="nav-group-caret">▸</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="/system/status" class="{{ 'active' if request.path.startswith('/system/status') else '' }}">Status</a>
+          <a href="/system/events" class="{{ 'active' if request.path.startswith('/system/events') or request.path.startswith('/logs') else '' }}">Events</a>
+        </div>
+      </div>
+      <div class="nav-group {{ 'open' if request.path.startswith('/config') else '' }}" id="settings-group">
+        <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/config') else '' }}" onclick="toggleNavGroup('settings-group')">
+          <span class="icon">⚙</span> Settings
+          <span class="nav-group-caret">▸</span>
+        </button>
+        <div class="nav-group-items">
+          <a href="/config#connections"   data-pane="connections">Connections</a>
+          <a href="/config#rules"         data-pane="rules">Rules</a>
+          <a href="/config#indexers"      data-pane="indexers">Indexers</a>
+          <a href="/config#notifications" data-pane="notifications">Notifications</a>
+          <a href="/config#general"       data-pane="general">General</a>
+          <a href="/config#advanced"      data-pane="advanced">Advanced</a>
+        </div>
+      </div>
       {% if auth_enabled %}
       <a href="/logout">
         <span class="icon">◌</span> Log out
@@ -52,7 +70,7 @@
     <a href="https://buymeacoffee.com/o51r15" target="_blank" rel="noopener"
        class="sidebar-donate" title="Support the project">☕ Donate</a>
     <a id="sidebar-version" href="https://github.com/o51r15/inspectarr/releases" target="_blank" rel="noopener"
-       class="sidebar-version">v1.1.1</a>
+       class="sidebar-version">v1.2.0</a>
   </aside>
 
   <!-- Main -->
@@ -71,6 +89,11 @@
 {% block scripts %}{% endblock %}
 <div id="toast-container"></div>
 <script>
+  // Expandable nav groups (System, etc.)
+  function toggleNavGroup(id) {
+    document.getElementById(id).classList.toggle('open');
+  }
+
   // Dynamic version — fetch latest GitHub release, cache per session
   (function() {
     const el = document.getElementById('sidebar-version');

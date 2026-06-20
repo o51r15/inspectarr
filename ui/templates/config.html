@@ -1,14 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Config — inspectarr{% endblock %}
-{% block page_title %}Configuration{% endblock %}
+{% block title %}Settings — inspectarr{% endblock %}
+{% block page_title %}Settings{% endblock %}
 
 {% block topbar_actions %}
-  <button class="btn btn-ghost btn-sm mode-tab {{ 'active' if not request.args.get('mode') == 'yaml' else '' }}"
-          data-mode="form" onclick="toggleEditMode('form')">Form</button>
-  <button class="btn btn-ghost btn-sm mode-tab {{ 'active' if request.args.get('mode') == 'yaml' else '' }}"
-          data-mode="yaml" onclick="toggleEditMode('yaml')">Raw YAML</button>
-  <button class="btn btn-ghost btn-sm mode-tab"
-          data-mode="prowlarr" onclick="toggleEditMode('prowlarr')">Prowlarr</button>
+  <button class="btn btn-ghost btn-sm" id="mode-form-btn" onclick="setEditMode('form')">Form</button>
+  <button class="btn btn-ghost btn-sm" id="mode-yaml-btn" onclick="setEditMode('yaml')">Raw YAML</button>
 {% endblock %}
 
 {% block content %}
@@ -21,347 +17,429 @@
   <input type="hidden" name="edit_mode" id="edit_mode" value="form">
 
   <!-- ============================================================ -->
-  <!-- FORM VIEW                                                     -->
+  <!-- FORM VIEW — panes driven by the sidebar Settings group       -->
   <!-- ============================================================ -->
   <div id="form-view">
 
-    <!-- qBittorrent -->
-    <div class="form-section">
-      <div class="form-section-title">qBittorrent</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>URL</label>
-          <input type="text" name="qbit_url" value="{{ cfg.get('qbittorrent',{}).get('url','') }}" placeholder="http://192.168.1.100:8080">
-        </div>
-        <div class="form-group">
-          <label>Username</label>
-          <input type="text" name="qbit_username" value="{{ cfg.get('qbittorrent',{}).get('username','') }}">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" name="qbit_password" value="{{ cfg.get('qbittorrent',{}).get('password','') }}">
-        </div>
-        <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
-          <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('qbit')">Test Connection</button>
-          <span id="test-qbit-result" class="hint"></span>
-        </div>
-      </div>
-    </div>
+    <div class="settings-content">
 
-    <!-- Sonarr -->
-    <div class="form-section">
-      <div class="form-section-title">Sonarr</div>
-      <div class="toggle-row">
-        <input type="checkbox" name="sonarr_enabled" id="sonarr_enabled"
-               {{ 'checked' if cfg.get('arrs',{}).get('sonarr',{}).get('enabled') else '' }}>
-        <label for="sonarr_enabled">Enabled</label>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>URL</label>
-          <input type="text" name="sonarr_url" value="{{ cfg.get('arrs',{}).get('sonarr',{}).get('url','') }}" placeholder="http://192.168.1.100:8989">
-        </div>
-        <div class="form-group">
-          <label>API Key</label>
-          <input type="password" name="sonarr_api_key" value="{{ cfg.get('arrs',{}).get('sonarr',{}).get('api_key','') }}">
+      <!-- Sticky save bar -->
+      <div class="settings-savebar" id="savebar">
+        <span class="pane-name" id="active-pane-name">Connections</span>
+        <div class="save-actions">
+          <span class="dirty-flag">Unsaved changes</span>
+          <button type="submit" class="btn btn-primary btn-sm">Save Configuration</button>
         </div>
       </div>
-      <div class="flex gap-8 items-center">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('sonarr')">Test Connection</button>
-        <span id="test-sonarr-result" class="hint"></span>
-      </div>
-    </div>
 
-    <!-- Radarr -->
-    <div class="form-section">
-      <div class="form-section-title">Radarr</div>
-      <div class="toggle-row">
-        <input type="checkbox" name="radarr_enabled" id="radarr_enabled"
-               {{ 'checked' if cfg.get('arrs',{}).get('radarr',{}).get('enabled') else '' }}>
-        <label for="radarr_enabled">Enabled</label>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>URL</label>
-          <input type="text" name="radarr_url" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('url','') }}" placeholder="http://192.168.1.100:7878">
-        </div>
-        <div class="form-group">
-          <label>API Key</label>
-          <input type="password" name="radarr_api_key" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('api_key','') }}">
-        </div>
-      </div>
-      <div class="flex gap-8 items-center">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('radarr')">Test Connection</button>
-        <span id="test-radarr-result" class="hint"></span>
-      </div>
-    </div>
-
-    <!-- Lidarr -->
-    <div class="form-section">
-      <div class="form-section-title">Lidarr</div>
-      <div class="toggle-row">
-        <input type="checkbox" name="lidarr_enabled" id="lidarr_enabled"
-               {{ 'checked' if cfg.get('arrs',{}).get('lidarr',{}).get('enabled') else '' }}>
-        <label for="lidarr_enabled">Enabled</label>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>URL</label>
-          <input type="text" name="lidarr_url" value="{{ cfg.get('arrs',{}).get('lidarr',{}).get('url','') }}" placeholder="http://192.168.1.100:8686">
-        </div>
-        <div class="form-group">
-          <label>API Key</label>
-          <input type="password" name="lidarr_api_key" value="{{ cfg.get('arrs',{}).get('lidarr',{}).get('api_key','') }}">
-        </div>
-      </div>
-      <div class="flex gap-8 items-center">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('lidarr')">Test Connection</button>
-        <span id="test-lidarr-result" class="hint"></span>
-      </div>
-    </div>
-
-    <!-- Rules -->
-    <div class="form-section">
-      <div class="section-header">
-        <div class="form-section-title" style="margin-bottom:0;border:none;padding:0">Rules</div>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="addRule()">+ Add Rule</button>
-      </div>
-      <div id="rules-container" style="margin-top:12px">
-        {% for rule in cfg.get('rules', []) %}
-        {% set idx = loop.index0 %}
-        <div class="rule-card" id="rule-{{ idx }}">
-          <div class="rule-header">
-            <strong style="color:var(--text)">Rule #{{ loop.index }}</strong>
-            <button type="button" class="rule-remove" onclick="removeRule({{ idx }})" title="Remove">×</button>
-          </div>
+      <!-- PANE: Connections -->
+      <div class="settings-pane active" data-pane="connections">
+        <div class="form-section">
+          <div class="form-section-title">qBittorrent</div>
           <div class="form-row">
             <div class="form-group">
-              <label>Rule Name</label>
-              <input type="text" name="rule_name_{{ idx }}" value="{{ rule.name }}">
+              <label>URL</label>
+              <input type="text" name="qbit_url" value="{{ cfg.get('qbittorrent',{}).get('url','') }}" placeholder="http://192.168.1.100:8080">
             </div>
             <div class="form-group">
-              <label>qBit Category</label>
-              <input type="text" name="rule_category_{{ idx }}" value="{{ rule.category }}">
+              <label>Username</label>
+              <input type="text" name="qbit_username" value="{{ cfg.get('qbittorrent',{}).get('username','') }}">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>App</label>
-              <select name="rule_app_{{ idx }}">
-                <option value="sonarr" {{ 'selected' if rule.app == 'sonarr' else '' }}>Sonarr</option>
-                <option value="radarr" {{ 'selected' if rule.app == 'radarr' else '' }}>Radarr</option>
-                <option value="lidarr" {{ 'selected' if rule.app == 'lidarr' else '' }}>Lidarr</option>
-              </select>
+              <label>Password</label>
+              <input type="password" name="qbit_password" value="{{ cfg.get('qbittorrent',{}).get('password','') }}">
             </div>
-            <div class="form-group">
-              <label>Match Mode</label>
-              <select name="rule_match_mode_{{ idx }}">
-                <option value="any"     {{ 'selected' if rule.conditions.get('match_mode','any') == 'any' else '' }}>Any bad file</option>
-                <option value="primary" {{ 'selected' if rule.conditions.get('match_mode') == 'primary' else '' }}>Primary file only</option>
-              </select>
+            <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('qbit')">Test Connection</button>
+              <span id="test-qbit-result" class="hint"></span>
             </div>
           </div>
-          <div class="form-group">
-            <label>Bad Extensions</label>
-            {% set exts = rule.conditions.get('bad_extensions', []) %}
-            <input type="hidden" name="rule_extensions_{{ idx }}"
-                   id="rule_ext_hidden_{{ idx }}" value="{{ exts | join(',') }}">
-            <div class="input-with-btn">
-              <input type="text" id="rule_ext_input_{{ idx }}" placeholder=".exe" style="max-width:160px">
-              <button type="button" class="btn btn-ghost btn-sm" onclick="addExt({{ idx }})">+ Add</button>
-            </div>
-            <div class="ext-tags" id="rule_ext_tags_{{ idx }}">
-              {% for ext in exts %}
-              <span class="ext-tag">{{ ext }}
-                <button type="button" onclick="removeExt({{ idx }},'{{ ext }}')">×</button>
-              </span>
-              {% endfor %}
-            </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Sonarr</div>
+          <div class="toggle-row">
+            <input type="checkbox" name="sonarr_enabled" id="sonarr_enabled"
+                   {{ 'checked' if cfg.get('arrs',{}).get('sonarr',{}).get('enabled') else '' }}>
+            <label for="sonarr_enabled">Enabled</label>
           </div>
           <div class="form-row">
-            <div class="form-group" style="max-width:220px">
-              <label>Min Primary File Size (MB)</label>
-              {% set min_size = rule.conditions.get('min_file_size_mb') %}
-              <input type="number" name="rule_min_size_mb_{{ idx }}"
-                     value="{{ min_size if min_size is not none else '' }}"
-                     placeholder="Leave blank to disable" min="1">
-              <div class="hint">Flag if primary file is smaller than this</div>
+            <div class="form-group">
+              <label>URL</label>
+              <input type="text" name="sonarr_url" value="{{ cfg.get('arrs',{}).get('sonarr',{}).get('url','') }}" placeholder="http://192.168.1.100:8989/sonarr">
+            </div>
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" name="sonarr_api_key" value="{{ cfg.get('arrs',{}).get('sonarr',{}).get('api_key','') }}">
             </div>
           </div>
-          <div class="form-group">
-            <label>Bad Filename Patterns (regex)</label>
-            {% set patterns = rule.conditions.get('bad_filename_patterns', []) %}
-            <input type="hidden" name="rule_patterns_{{ idx }}"
-                   id="rule_pat_hidden_{{ idx }}" value="{{ patterns | join(',') }}">
-            <div class="input-with-btn">
-              <input type="text" id="rule_pat_input_{{ idx }}" placeholder="e.g. sample\." style="max-width:200px">
-              <button type="button" class="btn btn-ghost btn-sm" onclick="addPattern({{ idx }})">+ Add</button>
-            </div>
-            <div class="ext-tags" id="rule_pat_tags_{{ idx }}">
-              {% for p in patterns %}
-              <span class="ext-tag" data-pattern="{{ p }}">{{ p }}
-                <button type="button" onclick="removePattern({{ idx }}, this)">×</button>
-              </span>
-              {% endfor %}
-            </div>
+          <div class="flex gap-8 items-center">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('sonarr')">Test Connection</button>
+            <span id="test-sonarr-result" class="hint"></span>
           </div>
         </div>
-        {% endfor %}
-      </div>
-    </div>
 
-    <!-- Behavior -->
-    <div class="form-section">
-      <div class="form-section-title">Behavior</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>On Arr Failure</label>
-          <select name="on_arr_failure">
-            <option value="delete" {{ 'selected' if cfg.get('on_arr_failure','delete') == 'delete' else '' }}>Delete from qBit anyway</option>
-            <option value="abort"  {{ 'selected' if cfg.get('on_arr_failure') == 'abort' else '' }}>Abort — skip deletion</option>
-          </select>
+        <div class="form-section">
+          <div class="form-section-title">Radarr</div>
+          <div class="toggle-row">
+            <input type="checkbox" name="radarr_enabled" id="radarr_enabled"
+                   {{ 'checked' if cfg.get('arrs',{}).get('radarr',{}).get('enabled') else '' }}>
+            <label for="radarr_enabled">Enabled</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>URL</label>
+              <input type="text" name="radarr_url" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('url','') }}" placeholder="http://192.168.1.100:7878/radarr">
+            </div>
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" name="radarr_api_key" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('api_key','') }}">
+            </div>
+          </div>
+          <div class="flex gap-8 items-center">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('radarr')">Test Connection</button>
+            <span id="test-radarr-result" class="hint"></span>
+          </div>
         </div>
-        <div class="form-group">
-          <label>Poll Interval (seconds)</label>
-          <input type="number" name="poll_interval_seconds" value="{{ cfg.get('poll_interval_seconds', 300) }}" min="60">
-        </div>
-      </div>
-      <div class="toggle-row">
-        <input type="checkbox" name="dry_run" id="dry_run"
-               {{ 'checked' if cfg.get('dry_run') else '' }}>
-        <label for="dry_run">Dry Run — flag matches but take no action</label>
-      </div>
-      <div class="toggle-row">
-        <input type="checkbox" name="scheduler_autostart" id="scheduler_autostart"
-               {{ 'checked' if cfg.get('web',{}).get('scheduler_autostart') else '' }}>
-        <label for="scheduler_autostart">Auto-start scheduler on launch</label>
-      </div>
-    </div>
 
-    <!-- Auth -->
-    <div class="form-section">
-      <div class="form-section-title">Web UI Authentication</div>
-      <div class="toggle-row">
-        <input type="checkbox" name="auth_enabled" id="auth_enabled"
-               {{ 'checked' if cfg.get('web',{}).get('auth',{}).get('enabled') else '' }}>
-        <label for="auth_enabled">Require login to access the web UI</label>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Username</label>
-          <input type="text" name="auth_username" autocomplete="off"
-                 value="{{ cfg.get('web',{}).get('auth',{}).get('username','admin') }}">
+        <div class="form-section">
+          <div class="form-section-title">Lidarr</div>
+          <div class="toggle-row">
+            <input type="checkbox" name="lidarr_enabled" id="lidarr_enabled"
+                   {{ 'checked' if cfg.get('arrs',{}).get('lidarr',{}).get('enabled') else '' }}>
+            <label for="lidarr_enabled">Enabled</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>URL</label>
+              <input type="text" name="lidarr_url" value="{{ cfg.get('arrs',{}).get('lidarr',{}).get('url','') }}" placeholder="http://192.168.1.100:8686/lidarr">
+            </div>
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" name="lidarr_api_key" value="{{ cfg.get('arrs',{}).get('lidarr',{}).get('api_key','') }}">
+            </div>
+          </div>
+          <div class="flex gap-8 items-center">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('lidarr')">Test Connection</button>
+            <span id="test-lidarr-result" class="hint"></span>
+          </div>
         </div>
-        <div class="form-group">
-          <label>Password</label>
-          <input type="password" name="auth_password" autocomplete="new-password"
-                 value="{{ cfg.get('web',{}).get('auth',{}).get('password','') }}">
-        </div>
       </div>
-      <div class="hint">Changes take effect immediately — no restart required.</div>
-    </div>
 
-    <!-- Retry -->
-    <div class="form-section">
-      <div class="form-section-title">Retry</div>
-      <div class="toggle-row">
-        <input type="checkbox" name="retry_enabled" id="retry_enabled"
-               {{ 'checked' if cfg.get('retry',{}).get('enabled', True) else '' }}>
-        <label for="retry_enabled">Enabled</label>
-      </div>
-      <div class="form-row form-row-3">
-        <div class="form-group">
-          <label>Max Attempts</label>
-          <input type="number" name="retry_max_attempts" value="{{ cfg.get('retry',{}).get('max_attempts', 10) }}" min="1">
+      <!-- PANE: Rules -->
+      <div class="settings-pane" data-pane="rules">
+        <div class="conn-banner" id="qbit-conn-banner">
+          <span class="status-dot stopped" id="qbit-conn-dot"></span>
+          <span class="conn-text" id="qbit-conn-text">Checking qBittorrent connection…</span>
         </div>
-        <div class="form-group">
-          <label>Interval (seconds)</label>
-          <input type="number" name="retry_interval_seconds" value="{{ cfg.get('retry',{}).get('interval_seconds', 600) }}" min="60">
-        </div>
-      </div>
-    </div>
 
-    <!-- Pushover -->
-    <div class="form-section">
-      <div class="form-section-title">Pushover Notifications</div>
-      {% set push = cfg.get('notifications',{}).get('pushover',{}) %}
-      <div class="toggle-row">
-        <input type="checkbox" name="pushover_enabled" id="pushover_enabled"
-               {{ 'checked' if push.get('enabled') else '' }}>
-        <label for="pushover_enabled">Enabled</label>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>App Token</label>
-          <input type="password" name="pushover_app_token" value="{{ push.get('app_token','') }}">
+        <div class="section-header">
+          <div class="form-section-title" style="margin-bottom:0;border:none;padding:0">Rules</div>
+          <button type="button" class="btn btn-ghost btn-sm" id="add-rule-btn" onclick="addRule()">+ Add Rule</button>
         </div>
-        <div class="form-group">
-          <label>User Key</label>
-          <input type="password" name="pushover_user_key" value="{{ push.get('user_key','') }}">
-        </div>
-      </div>
-      <div class="flex gap-8 items-center" style="margin-bottom:0.75rem;">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="testPushover()"
-                title="Send a test notification to verify your Pushover credentials">Test Notification</button>
-        <span id="test-pushover-result" class="hint"></span>
-      </div>
-      <div class="form-group mb-16">
-        <label>Notify On</label>
-        <div class="flex gap-8" style="flex-wrap:wrap;margin-top:6px">
-          {% for evt in ['action','error','startup','dry_run'] %}
-          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text)">
-            <input type="checkbox" name="notify_on" value="{{ evt }}"
-                   {{ 'checked' if evt in push.get('notify_on',[]) else '' }}>
-            {{ evt }}
-          </label>
+        <div id="rules-container" style="margin-top:12px">
+          {% for rule in cfg.get('rules', []) %}
+          {% set idx = loop.index0 %}
+          <div class="rule-card" id="rule-{{ idx }}">
+            <div class="rule-header">
+              <strong style="color:var(--text)">Rule #{{ loop.index }}</strong>
+              <button type="button" class="rule-remove" onclick="removeRule({{ idx }})" title="Remove">×</button>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Rule Name</label>
+                <input type="text" name="rule_name_{{ idx }}" value="{{ rule.name }}">
+              </div>
+              <div class="form-group">
+                <label>qBit Category</label>
+                <select name="rule_category_{{ idx }}" class="rule-category" data-current="{{ rule.category }}">
+                  <option value="{{ rule.category }}" selected>{{ rule.category }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>App</label>
+                <select name="rule_app_{{ idx }}">
+                  <option value="sonarr" {{ 'selected' if rule.app == 'sonarr' else '' }}>Sonarr</option>
+                  <option value="radarr" {{ 'selected' if rule.app == 'radarr' else '' }}>Radarr</option>
+                  <option value="lidarr" {{ 'selected' if rule.app == 'lidarr' else '' }}>Lidarr</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Match Mode</label>
+                <select name="rule_match_mode_{{ idx }}">
+                  <option value="any"     {{ 'selected' if rule.conditions.get('match_mode','any') == 'any' else '' }}>Any bad file</option>
+                  <option value="primary" {{ 'selected' if rule.conditions.get('match_mode') == 'primary' else '' }}>Primary file only</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Bad Extensions</label>
+              {% set exts = rule.conditions.get('bad_extensions', []) %}
+              <input type="hidden" name="rule_extensions_{{ idx }}"
+                     id="rule_ext_hidden_{{ idx }}" value="{{ exts | join(',') }}">
+              <div class="input-with-btn">
+                <input type="text" id="rule_ext_input_{{ idx }}" placeholder=".exe" style="max-width:160px">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="addExt({{ idx }})">+ Add</button>
+              </div>
+              <div class="ext-tags" id="rule_ext_tags_{{ idx }}">
+                {% for ext in exts %}
+                <span class="ext-tag">{{ ext }}
+                  <button type="button" onclick="removeExt({{ idx }},'{{ ext }}')">×</button>
+                </span>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group" style="max-width:220px">
+                <label>Min Primary File Size (MB)</label>
+                {% set min_size = rule.conditions.get('min_file_size_mb') %}
+                <input type="number" name="rule_min_size_mb_{{ idx }}"
+                       value="{{ min_size if min_size is not none else '' }}"
+                       placeholder="Leave blank to disable" min="1">
+                <div class="hint">Flag if primary file is smaller than this</div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Bad Filename Patterns (regex)</label>
+              {% set patterns = rule.conditions.get('bad_filename_patterns', []) %}
+              <input type="hidden" name="rule_patterns_{{ idx }}"
+                     id="rule_pat_hidden_{{ idx }}" value="{{ patterns | join(',') }}">
+              <div class="input-with-btn">
+                <input type="text" id="rule_pat_input_{{ idx }}" placeholder="e.g. sample\." style="max-width:200px">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="addPattern({{ idx }})">+ Add</button>
+              </div>
+              <div class="ext-tags" id="rule_pat_tags_{{ idx }}">
+                {% for p in patterns %}
+                <span class="ext-tag" data-pattern="{{ p }}">{{ p }}
+                  <button type="button" onclick="removePattern({{ idx }}, this)">×</button>
+                </span>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
           {% endfor %}
         </div>
       </div>
-      <div class="form-group" style="max-width:200px">
-        <label>Priority</label>
-        <select name="pushover_priority">
-          {% for val, label in [(-2,'Silent'),(-1,'Quiet'),(0,'Normal'),(1,'High'),(2,'Emergency')] %}
-          <option value="{{ val }}" {{ 'selected' if push.get('priority',0) == val else '' }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
 
-    <!-- Advanced -->
-    <div class="form-section">
-      <div class="form-section-title">Advanced</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Log File Path</label>
-          <input type="text" name="log_file" value="{{ cfg.get('logging',{}).get('log_file','./data/inspectarr.log.json') }}">
-        </div>
-        <div class="form-group">
-          <label>DB File Path</label>
-          <input type="text" name="db_file" value="{{ cfg.get('state',{}).get('db_file','./data/inspectarr.db') }}">
+      <!-- PANE: Indexers (Prowlarr) -->
+      <div class="settings-pane" data-pane="indexers">
+        <div class="form-section">
+          <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Prowlarr Connection &amp; Scoring</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="testProwlarr()">Test Connection</button>
+              <span id="prowlarr-status" class="hint"></span>
+            </div>
+          </div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            View scores and reorder indexers on the <a href="/indexers">Indexers</a> page.
+          </p>
+          <div class="toggle-row" style="margin-bottom:0.75rem">
+            <input type="checkbox" name="prowlarr_enabled" id="prowlarr_enabled"
+                   {{ 'checked' if cfg.get('prowlarr',{}).get('enabled') else '' }}>
+            <label for="prowlarr_enabled">Enable Prowlarr indexer health scoring</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>URL</label>
+              <input type="text" name="prowlarr_url" id="prowlarr_url"
+                     value="{{ cfg.get('prowlarr',{}).get('url','') }}"
+                     placeholder="http://192.168.1.x:9696/prowlarr">
+            </div>
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" name="prowlarr_api_key" id="prowlarr_api_key"
+                     value="{{ cfg.get('prowlarr',{}).get('api_key','') }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Base priority</label>
+              <input type="number" name="prowlarr_base_priority" id="prowlarr_base_priority" min="1" max="50"
+                     value="{{ cfg.get('prowlarr',{}).get('base_priority', 10) }}">
+              <span class="hint">Best-scoring torrent indexer gets this priority; others count up. Keep above your NZB indexers' priority numbers.</span>
+            </div>
+            <div class="form-group">
+              <label>Reorder interval (hours)</label>
+              <input type="number" name="prowlarr_reorder_interval" id="prowlarr_reorder_interval" min="1"
+                     value="{{ cfg.get('prowlarr',{}).get('reorder_interval_hours', 24) }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>History window (days)</label>
+              <input type="number" name="prowlarr_history_window" id="prowlarr_history_window" min="1"
+                     value="{{ cfg.get('prowlarr',{}).get('history_window_days', 90) }}">
+            </div>
+            <div class="form-group">
+              <label>Min records before scoring</label>
+              <input type="number" name="prowlarr_min_grabs" id="prowlarr_min_grabs" min="1"
+                     value="{{ cfg.get('prowlarr',{}).get('min_grabs_before_scoring', 10) }}">
+              <span class="hint">Indexers with fewer history records show N/A for health score</span>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Retention (days)</label>
-          <input type="number" name="retention_days" value="{{ cfg.get('logging',{}).get('retention_days',30) }}" min="1">
-        </div>
-        <div class="form-group">
-          <label>Log Level</label>
-          <select name="log_level">
-            <option {{ 'selected' if cfg.get('logging',{}).get('level','INFO') == 'INFO' else '' }}>INFO</option>
-            <option {{ 'selected' if cfg.get('logging',{}).get('level') == 'DEBUG' else '' }}>DEBUG</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group" style="max-width:200px">
-        <label>Web UI Port</label>
-        <input type="number" name="web_port" value="{{ cfg.get('web',{}).get('port', 8585) }}" min="1024" max="65535">
-        <div class="hint">Requires restart to take effect</div>
-      </div>
-    </div>
 
+      <!-- PANE: Notifications -->
+      <div class="settings-pane" data-pane="notifications">
+        <div class="form-section">
+          <div class="form-section-title">Pushover Notifications</div>
+          {% set push = cfg.get('notifications',{}).get('pushover',{}) %}
+          <div class="toggle-row">
+            <input type="checkbox" name="pushover_enabled" id="pushover_enabled"
+                   {{ 'checked' if push.get('enabled') else '' }}>
+            <label for="pushover_enabled">Enabled</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>App Token</label>
+              <input type="password" name="pushover_app_token" value="{{ push.get('app_token','') }}">
+            </div>
+            <div class="form-group">
+              <label>User Key</label>
+              <input type="password" name="pushover_user_key" value="{{ push.get('user_key','') }}">
+            </div>
+          </div>
+          <div class="flex gap-8 items-center" style="margin-bottom:0.75rem;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="testPushover()"
+                    title="Send a test notification to verify your Pushover credentials">Test Notification</button>
+            <span id="test-pushover-result" class="hint"></span>
+          </div>
+          <div class="form-group mb-16">
+            <label>Notify On</label>
+            <div class="flex gap-8" style="flex-wrap:wrap;margin-top:6px">
+              {% for evt in ['action','error','startup','dry_run'] %}
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text)">
+                <input type="checkbox" name="notify_on" value="{{ evt }}"
+                       {{ 'checked' if evt in push.get('notify_on',[]) else '' }}>
+                {{ evt }}
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="form-group" style="max-width:200px">
+            <label>Priority</label>
+            <select name="pushover_priority">
+              {% for val, label in [(-2,'Silent'),(-1,'Quiet'),(0,'Normal'),(1,'High'),(2,'Emergency')] %}
+              <option value="{{ val }}" {{ 'selected' if push.get('priority',0) == val else '' }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- PANE: General -->
+      <div class="settings-pane" data-pane="general">
+        <div class="form-section">
+          <div class="form-section-title">Behavior</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>On Arr Failure</label>
+              <select name="on_arr_failure">
+                <option value="delete" {{ 'selected' if cfg.get('on_arr_failure','delete') == 'delete' else '' }}>Delete from qBit anyway</option>
+                <option value="abort"  {{ 'selected' if cfg.get('on_arr_failure') == 'abort' else '' }}>Abort — skip deletion</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Poll Interval (seconds)</label>
+              <input type="number" name="poll_interval_seconds" value="{{ cfg.get('poll_interval_seconds', 300) }}" min="60">
+            </div>
+          </div>
+          <div class="toggle-row">
+            <input type="checkbox" name="dry_run" id="dry_run"
+                   {{ 'checked' if cfg.get('dry_run') else '' }}>
+            <label for="dry_run">Dry Run — flag matches but take no action</label>
+          </div>
+          <div class="toggle-row">
+            <input type="checkbox" name="scheduler_autostart" id="scheduler_autostart"
+                   {{ 'checked' if cfg.get('web',{}).get('scheduler_autostart') else '' }}>
+            <label for="scheduler_autostart">Auto-start scheduler on launch</label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Retry</div>
+          <div class="toggle-row">
+            <input type="checkbox" name="retry_enabled" id="retry_enabled"
+                   {{ 'checked' if cfg.get('retry',{}).get('enabled', True) else '' }}>
+            <label for="retry_enabled">Enabled</label>
+          </div>
+          <div class="form-row form-row-3">
+            <div class="form-group">
+              <label>Max Attempts</label>
+              <input type="number" name="retry_max_attempts" value="{{ cfg.get('retry',{}).get('max_attempts', 10) }}" min="1">
+            </div>
+            <div class="form-group">
+              <label>Interval (seconds)</label>
+              <input type="number" name="retry_interval_seconds" value="{{ cfg.get('retry',{}).get('interval_seconds', 600) }}" min="60">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Web UI Authentication</div>
+          <div class="toggle-row">
+            <input type="checkbox" name="auth_enabled" id="auth_enabled"
+                   {{ 'checked' if cfg.get('web',{}).get('auth',{}).get('enabled') else '' }}>
+            <label for="auth_enabled">Require login to access the web UI</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Username</label>
+              <input type="text" name="auth_username" autocomplete="off"
+                     value="{{ cfg.get('web',{}).get('auth',{}).get('username','admin') }}">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" name="auth_password" autocomplete="new-password"
+                     value="{{ cfg.get('web',{}).get('auth',{}).get('password','') }}">
+            </div>
+          </div>
+          <div class="hint">Changes take effect immediately — no restart required.</div>
+        </div>
+      </div>
+
+      <!-- PANE: Advanced -->
+      <div class="settings-pane" data-pane="advanced">
+        <div class="form-section">
+          <div class="form-section-title">Advanced</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Log File Path</label>
+              <input type="text" name="log_file" value="{{ cfg.get('logging',{}).get('log_file','./data/inspectarr.log.json') }}">
+            </div>
+            <div class="form-group">
+              <label>DB File Path</label>
+              <input type="text" name="db_file" value="{{ cfg.get('state',{}).get('db_file','./data/inspectarr.db') }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Retention (days)</label>
+              <input type="number" name="retention_days" value="{{ cfg.get('logging',{}).get('retention_days',30) }}" min="1">
+            </div>
+            <div class="form-group">
+              <label>Log Level</label>
+              <select name="log_level">
+                <option {{ 'selected' if cfg.get('logging',{}).get('level','INFO') == 'INFO' else '' }}>INFO</option>
+                <option {{ 'selected' if cfg.get('logging',{}).get('level') == 'DEBUG' else '' }}>DEBUG</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group" style="max-width:200px">
+            <label>Web UI Port</label>
+            <input type="number" name="web_port" value="{{ cfg.get('web',{}).get('port', 8585) }}" min="1024" max="65535">
+            <div class="hint">Requires restart to take effect</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /settings-content -->
   </div><!-- /form-view -->
 
   <!-- ============================================================ -->
@@ -371,171 +449,324 @@
     <div class="form-group">
       <textarea name="raw_yaml" rows="40" style="min-height:500px">{{ raw_yaml }}</textarea>
     </div>
-  </div>
-
-  <div class="flex gap-8 mt-16">
-    <button type="submit" class="btn btn-primary">Save Configuration</button>
-    <a href="/config" class="btn btn-ghost">Cancel</a>
+    <div class="flex gap-8 mt-16">
+      <button type="submit" class="btn btn-primary">Save Configuration</button>
+      <a href="/config" class="btn btn-ghost">Cancel</a>
+    </div>
   </div>
 
 </form>
 
-<!-- ============================================================ -->
-<!-- PROWLARR VIEW (tab)                                           -->
-<!-- ============================================================ -->
-<div id="prowlarr-view" style="display:none">
-<div class="form-section" style="margin-top:0.5rem">
-  <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
-    <span>Prowlarr Connection &amp; Scoring</span>
-    <div style="display:flex;gap:8px;align-items:center">
-      <button type="button" class="btn btn-ghost btn-sm" onclick="testProwlarr()">Test Connection</button>
-      <span id="prowlarr-status" class="hint"></span>
-    </div>
-  </div>
-  <p class="hint" style="margin-bottom:0.75rem">
-    View scores and reorder indexers on the <a href="/indexers">Indexers</a> page.
-  </p>
-
-  <!-- Connection settings -->
-  <div class="toggle-row" style="margin-bottom:0.75rem">
-    <input type="checkbox" id="prowlarr_enabled"
-           {{ 'checked' if cfg.get('prowlarr',{}).get('enabled') else '' }}
-           onchange="prowlarrSettingsChanged()">
-    <label for="prowlarr_enabled">Enable Prowlarr indexer health scoring</label>
-  </div>
-  <div class="form-row">
-    <div class="form-group">
-      <label>URL</label>
-      <input type="text" id="prowlarr_url"
-             value="{{ cfg.get('prowlarr',{}).get('url','') }}"
-             placeholder="http://192.168.1.x:9696/prowlarr"
-             oninput="prowlarrSettingsChanged()">
-    </div>
-    <div class="form-group">
-      <label>API Key</label>
-      <input type="password" id="prowlarr_api_key"
-             value="{{ cfg.get('prowlarr',{}).get('api_key','') }}"
-             oninput="prowlarrSettingsChanged()">
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group">
-      <label>Base priority</label>
-      <input type="number" id="prowlarr_base_priority" min="1" max="50"
-             value="{{ cfg.get('prowlarr',{}).get('base_priority', 10) }}"
-             oninput="prowlarrSettingsChanged()">
-      <span class="hint">Best-scoring torrent indexer gets this priority number; others count up from here. Keep it above your NZB indexers' priority numbers.</span>
-    </div>
-    <div class="form-group">
-      <label>Reorder interval (hours)</label>
-      <input type="number" id="prowlarr_reorder_interval" min="1"
-             value="{{ cfg.get('prowlarr',{}).get('reorder_interval_hours', 24) }}"
-             oninput="prowlarrSettingsChanged()">
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group">
-      <label>History window (days)</label>
-      <input type="number" id="prowlarr_history_window" min="1"
-             value="{{ cfg.get('prowlarr',{}).get('history_window_days', 90) }}"
-             oninput="prowlarrSettingsChanged()">
-    </div>
-    <div class="form-group">
-      <label>Min records before scoring</label>
-      <input type="number" id="prowlarr_min_grabs" min="1"
-             value="{{ cfg.get('prowlarr',{}).get('min_grabs_before_scoring', 10) }}"
-             oninput="prowlarrSettingsChanged()">
-      <span class="hint">Indexers with fewer history records show N/A for health score</span>
-    </div>
-  </div>
-  <button type="button" class="btn btn-primary btn-sm" id="prowlarr-save-btn"
-          style="display:none" onclick="saveProwlarrConfig()">Save Prowlarr Settings</button>
-  <span id="prowlarr-save-status" class="hint" style="margin-left:8px"></span>
-</div>
-</div>
-
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/app.js"></script>
 <script>
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('mode') === 'yaml') toggleEditMode('yaml');
+  // ---- Edit mode (form vs raw yaml) ----
+  function setEditMode(mode) {
+    document.getElementById('edit_mode').value = mode;
+    document.getElementById('form-view').style.display = (mode === 'form') ? 'block' : 'none';
+    document.getElementById('yaml-view').style.display = (mode === 'yaml') ? 'block' : 'none';
+    document.getElementById('mode-form-btn').classList.toggle('active', mode === 'form');
+    document.getElementById('mode-yaml-btn').classList.toggle('active', mode === 'yaml');
+  }
+  setEditMode('form');
 
-  let prowlarrDirty = false;
+  // ---- Pane switching — driven by the sidebar Settings group + URL hash ----
+  const paneNames = {
+    connections: 'Connections', rules: 'Rules', indexers: 'Indexers',
+    notifications: 'Notifications', general: 'General', advanced: 'Advanced',
+  };
 
-  function prowlarrSettingsChanged() {
-    prowlarrDirty = true;
-    document.getElementById('prowlarr-save-btn').style.display = 'inline-flex';
-    document.getElementById('prowlarr-save-status').textContent = '';
+  function showPane(pane) {
+    if (!paneNames[pane]) pane = 'connections';
+    document.querySelectorAll('.settings-pane').forEach(p =>
+      p.classList.toggle('active', p.dataset.pane === pane));
+    document.getElementById('active-pane-name').textContent = paneNames[pane];
+    // Reflect the active sub-item in the sidebar Settings group
+    document.querySelectorAll('#settings-group .nav-group-items a').forEach(a =>
+      a.classList.toggle('active', a.dataset.pane === pane));
+    // Ensure form mode is visible if a YAML view was open
+    if (document.getElementById('edit_mode').value !== 'form') setEditMode('form');
   }
 
-  function saveProwlarrConfig() {
-    const payload = {
-      enabled:                document.getElementById('prowlarr_enabled').checked,
-      url:                    document.getElementById('prowlarr_url').value,
-      api_key:                document.getElementById('prowlarr_api_key').value,
-      base_priority:          parseInt(document.getElementById('prowlarr_base_priority').value) || 10,
-      reorder_interval_hours: parseInt(document.getElementById('prowlarr_reorder_interval').value) || 24,
-      history_window_days:    parseInt(document.getElementById('prowlarr_history_window').value) || 90,
-      min_grabs_before_scoring: parseInt(document.getElementById('prowlarr_min_grabs').value) || 10,
+  // Initial pane from the URL hash (e.g. /config#rules), default connections
+  showPane((window.location.hash || '').replace('#', '') || 'connections');
+
+  // Sidebar sub-item clicks: switch pane without a full reload (same page)
+  document.querySelectorAll('#settings-group .nav-group-items a').forEach(a => {
+    a.addEventListener('click', (e) => {
+      // Already on /config — intercept and switch pane in place
+      e.preventDefault();
+      const pane = a.dataset.pane;
+      history.replaceState(null, '', '/config#' + pane);
+      showPane(pane);
+    });
+  });
+
+  // Respond to back/forward hash changes
+  window.addEventListener('hashchange', () => {
+    showPane((window.location.hash || '').replace('#', '') || 'connections');
+  });
+
+  // ---- Dirty-state tracking ----
+  const savebar = document.getElementById('savebar');
+  function markDirty() { savebar.classList.add('dirty'); }
+  document.getElementById('config-form').addEventListener('input', markDirty);
+  document.getElementById('config-form').addEventListener('change', markDirty);
+  // Clear dirty flag on submit so the warning doesn't fire during navigation
+  document.getElementById('config-form').addEventListener('submit', () => {
+    window.removeEventListener('beforeunload', beforeUnloadHandler);
+  });
+  function beforeUnloadHandler(e) {
+    if (savebar.classList.contains('dirty')) { e.preventDefault(); e.returnValue = ''; }
+  }
+  window.addEventListener('beforeunload', beforeUnloadHandler);
+
+  // ---- qBit category population + rules gating ----
+  let qbitCategories = [];
+  let qbitConnected  = false;
+
+  function buildCategoryOptions(selectEl) {
+    const current = selectEl.dataset.current || '';
+    selectEl.innerHTML = '';
+    // Always include the currently-saved value first so it's never lost
+    const values = [...qbitCategories];
+    if (current && !values.includes(current)) values.unshift(current);
+    if (!current && !values.includes('')) {
+      const opt = document.createElement('option');
+      opt.value = ''; opt.textContent = '(select category)';
+      selectEl.appendChild(opt);
+    }
+    values.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      if (v === current) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+  }
+
+  function applyRulesGating() {
+    const banner = document.getElementById('qbit-conn-banner');
+    const dot    = document.getElementById('qbit-conn-dot');
+    const text   = document.getElementById('qbit-conn-text');
+    const addBtn = document.getElementById('add-rule-btn');
+    const container = document.getElementById('rules-container');
+
+    if (qbitConnected) {
+      banner.classList.add('connected'); banner.classList.remove('disconnected');
+      dot.className = 'status-dot running';
+      text.textContent = `qBittorrent connected · ${qbitCategories.length} categories`;
+      addBtn.disabled = false;
+      container.classList.remove('rules-disabled');
+      document.querySelectorAll('.rule-category').forEach(buildCategoryOptions);
+    } else {
+      banner.classList.add('disconnected'); banner.classList.remove('connected');
+      dot.className = 'status-dot stopped';
+      text.innerHTML = 'qBittorrent not reachable — rules are read-only. Check the Connections tab.';
+      addBtn.disabled = true;
+      container.classList.add('rules-disabled');
+    }
+  }
+
+  function loadCategories() {
+    fetch('/config/qbit/categories')
+      .then(r => r.json())
+      .then(d => {
+        qbitConnected  = d.ok && Array.isArray(d.categories);
+        qbitCategories = d.categories || [];
+        applyRulesGating();
+      })
+      .catch(() => { qbitConnected = false; qbitCategories = []; applyRulesGating(); });
+  }
+  loadCategories();
+
+  // ---- Rule builder ----
+  let ruleIndex = {{ cfg.get('rules', []) | length }};
+
+  function addRule() {
+    if (!qbitConnected) return;
+    const idx = ruleIndex++;
+    const catOpts = qbitCategories.map(c => `<option value="${c}">${c}</option>`).join('');
+    const card = document.createElement('div');
+    card.className = 'rule-card';
+    card.id = `rule-${idx}`;
+    card.innerHTML = `
+      <div class="rule-header">
+        <strong style="color:var(--text)">New Rule</strong>
+        <button type="button" class="rule-remove" onclick="removeRule(${idx})" title="Remove">×</button>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Rule Name</label>
+          <input type="text" name="rule_name_${idx}" value="">
+        </div>
+        <div class="form-group">
+          <label>qBit Category</label>
+          <select name="rule_category_${idx}" class="rule-category" data-current="">
+            <option value="">(select category)</option>
+            ${catOpts}
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>App</label>
+          <select name="rule_app_${idx}">
+            <option value="sonarr">Sonarr</option>
+            <option value="radarr">Radarr</option>
+            <option value="lidarr">Lidarr</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Match Mode</label>
+          <select name="rule_match_mode_${idx}">
+            <option value="any">Any bad file</option>
+            <option value="primary">Primary file only</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Bad Extensions</label>
+        <input type="hidden" name="rule_extensions_${idx}" id="rule_ext_hidden_${idx}" value="">
+        <div class="input-with-btn">
+          <input type="text" id="rule_ext_input_${idx}" placeholder=".exe" style="max-width:160px">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addExt(${idx})">+ Add</button>
+        </div>
+        <div class="ext-tags" id="rule_ext_tags_${idx}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="max-width:220px">
+          <label>Min Primary File Size (MB)</label>
+          <input type="number" name="rule_min_size_mb_${idx}" value="" placeholder="Leave blank to disable" min="1">
+          <div class="hint">Flag if primary file is smaller than this</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Bad Filename Patterns (regex)</label>
+        <input type="hidden" name="rule_patterns_${idx}" id="rule_pat_hidden_${idx}" value="">
+        <div class="input-with-btn">
+          <input type="text" id="rule_pat_input_${idx}" placeholder="e.g. sample\\." style="max-width:200px">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="addPattern(${idx})">+ Add</button>
+        </div>
+        <div class="ext-tags" id="rule_pat_tags_${idx}"></div>
+      </div>`;
+    document.getElementById('rules-container').appendChild(card);
+    markDirty();
+  }
+
+  function removeRule(idx) {
+    const card = document.getElementById(`rule-${idx}`);
+    if (card) { card.remove(); markDirty(); }
+  }
+
+  function addExt(idx) {
+    const input  = document.getElementById(`rule_ext_input_${idx}`);
+    const hidden = document.getElementById(`rule_ext_hidden_${idx}`);
+    const tags   = document.getElementById(`rule_ext_tags_${idx}`);
+    let val = input.value.trim();
+    if (!val) return;
+    if (!val.startsWith('.')) val = '.' + val;
+    const cur = hidden.value ? hidden.value.split(',') : [];
+    if (cur.includes(val)) { input.value = ''; return; }
+    cur.push(val);
+    hidden.value = cur.join(',');
+    const span = document.createElement('span');
+    span.className = 'ext-tag';
+    span.innerHTML = `${val} <button type="button">×</button>`;
+    span.querySelector('button').onclick = () => removeExt(idx, val);
+    tags.appendChild(span);
+    input.value = '';
+    markDirty();
+  }
+
+  function removeExt(idx, val) {
+    const hidden = document.getElementById(`rule_ext_hidden_${idx}`);
+    const tags   = document.getElementById(`rule_ext_tags_${idx}`);
+    hidden.value = hidden.value.split(',').filter(e => e && e !== val).join(',');
+    [...tags.children].forEach(c => { if (c.textContent.trim().startsWith(val)) c.remove(); });
+    markDirty();
+  }
+
+  function addPattern(idx) {
+    const input  = document.getElementById(`rule_pat_input_${idx}`);
+    const hidden = document.getElementById(`rule_pat_hidden_${idx}`);
+    const tags   = document.getElementById(`rule_pat_tags_${idx}`);
+    const val = input.value.trim();
+    if (!val) return;
+    const cur = hidden.value ? hidden.value.split(',') : [];
+    if (cur.includes(val)) { input.value = ''; return; }
+    cur.push(val);
+    hidden.value = cur.join(',');
+    const span = document.createElement('span');
+    span.className = 'ext-tag';
+    span.setAttribute('data-pattern', val);
+    span.innerHTML = `${val} <button type="button">×</button>`;
+    span.querySelector('button').onclick = () => removePattern(idx, span.querySelector('button'));
+    tags.appendChild(span);
+    input.value = '';
+    markDirty();
+  }
+
+  function removePattern(idx, btn) {
+    const span   = btn.closest('.ext-tag');
+    const val    = span.getAttribute('data-pattern');
+    const hidden = document.getElementById(`rule_pat_hidden_${idx}`);
+    hidden.value = hidden.value.split(',').filter(p => p && p !== val).join(',');
+    span.remove();
+    markDirty();
+  }
+
+  // ---- Test connections ----
+  function testConnection(which) {
+    const map = {
+      qbit:   {url:'qbit_url', extra:{username:'qbit_username', password:'qbit_password'}, endpoint:'/config/test/qbit'},
+      sonarr: {url:'sonarr_url', key:'sonarr_api_key', endpoint:'/config/test/sonarr'},
+      radarr: {url:'radarr_url', key:'radarr_api_key', endpoint:'/config/test/radarr'},
+      lidarr: {url:'lidarr_url', key:'lidarr_api_key', endpoint:'/config/test/lidarr'},
     };
-    fetch('/config/prowlarr/save', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload),
+    const cfg = map[which];
+    const el  = document.getElementById(`test-${which}-result`);
+    el.textContent = 'Testing…'; el.style.color = '';
+    const body = { url: document.querySelector(`[name="${cfg.url}"]`).value };
+    if (cfg.key)   body.api_key = document.querySelector(`[name="${cfg.key}"]`).value;
+    if (cfg.extra) {
+      body.username = document.querySelector(`[name="${cfg.extra.username}"]`).value;
+      body.password = document.querySelector(`[name="${cfg.extra.password}"]`).value;
+    }
+    fetch(cfg.endpoint, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
     })
     .then(r => r.json())
-    .then(d => {
-      const el = document.getElementById('prowlarr-save-status');
-      if (d.ok) {
-        el.textContent = 'Saved';
-        el.style.color = 'var(--success, #22c55e)';
-        document.getElementById('prowlarr-save-btn').style.display = 'none';
-        prowlarrDirty = false;
-      } else {
-        el.textContent = 'Error: ' + d.message;
-        el.style.color = 'var(--error, #ef4444)';
-      }
-    });
+    .then(d => { el.textContent = d.message; el.style.color = d.ok ? 'var(--success)' : 'var(--error)'; })
+    .catch(() => { el.textContent = 'Request failed'; el.style.color = 'var(--error)'; });
   }
 
   function testProwlarr() {
     const url     = document.getElementById('prowlarr_url').value;
     const api_key = document.getElementById('prowlarr_api_key').value;
     const el      = document.getElementById('prowlarr-status');
-    el.textContent = 'Testing…';
+    el.textContent = 'Testing…'; el.style.color = '';
     fetch('/config/test/prowlarr', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({url, api_key}),
     })
     .then(r => r.json())
-    .then(d => {
-      el.textContent = d.message;
-      el.style.color = d.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)';
-    });
+    .then(d => { el.textContent = d.message; el.style.color = d.ok ? 'var(--success)' : 'var(--error)'; });
   }
 
   function testPushover() {
     const app_token = document.querySelector('[name="pushover_app_token"]').value;
     const user_key  = document.querySelector('[name="pushover_user_key"]').value;
     const el        = document.getElementById('test-pushover-result');
-    el.textContent  = 'Sending…';
-    el.style.color  = '';
+    el.textContent  = 'Sending…'; el.style.color = '';
     fetch('/config/test/pushover', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({app_token, user_key}),
     })
     .then(r => r.json())
-    .then(d => {
-      el.textContent = d.message;
-      el.style.color = d.ok ? 'var(--success, #22c55e)' : 'var(--error, #ef4444)';
-    })
-    .catch(() => {
-      el.textContent = 'Request failed';
-      el.style.color = 'var(--error, #ef4444)';
-    });
+    .then(d => { el.textContent = d.message; el.style.color = d.ok ? 'var(--success)' : 'var(--error)'; })
+    .catch(() => { el.textContent = 'Request failed'; el.style.color = 'var(--error)'; });
   }
 </script>
 {% endblock %}

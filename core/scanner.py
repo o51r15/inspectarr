@@ -109,6 +109,9 @@ class Scanner:
             "actioned": 0,
             "last_flagged": None,
         }
+        # Track unique torrent hashes seen this scan so a torrent matched by
+        # more than one rule on the same category isn't counted multiple times.
+        checked_hashes: set[str] = set()
         for rule in self.config.rules:
             self.log.debug(f"Scanning rule '{rule.name}' (category: {rule.category})")
             try:
@@ -134,7 +137,7 @@ class Scanner:
             self.log.debug(f"  {len(torrents)} torrent(s) found")
             for torrent in torrents:
                 flagged, actioned = self._evaluate_torrent(torrent, rule)
-                stats["torrents_checked"] += 1
+                checked_hashes.add(torrent["hash"])
                 if flagged:
                     stats["flagged"] += 1
                     if actioned:
@@ -145,6 +148,7 @@ class Scanner:
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
 
+        stats["torrents_checked"] = len(checked_hashes)
         self.state.write_log({
             "level": "INFO", "event": "scan_complete", **stats
         })

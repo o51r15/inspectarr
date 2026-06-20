@@ -38,6 +38,7 @@ def _read_log_page(log_path: str, page: int, level_filter: str) -> tuple[list, i
 
 
 @logs_bp.route("/logs")
+@logs_bp.route("/system/events")
 def logs_view():
     config_path  = current_app.config["CONFIG_PATH"]
     log_path     = _get_log_path(config_path)

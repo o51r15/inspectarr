@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}System Status — inspectarr{% endblock %}
+{% block page_title %}System Status{% endblock %}
+
+{% block content %}
+
+<div class="grid grid-2" style="align-items:start">
+
+  <!-- About -->
+  <div class="card">
+    <div class="card-title">About</div>
+    <table style="width:100%">
+      <tbody>
+        <tr><td class="text-muted" style="width:45%">Version</td><td id="about-version" class="mono">—</td></tr>
+        <tr><td class="text-muted">Python</td><td class="mono">{{ info.python_version }}</td></tr>
+        <tr><td class="text-muted">Platform</td><td class="mono">{{ info.platform }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Scheduler -->
+  <div class="card">
+    <div class="card-title">Scheduler</div>
+    <table style="width:100%">
+      <tbody>
+        <tr>
+          <td class="text-muted" style="width:45%">State</td>
+          <td>
+            {% if info.scheduler.running %}
+              <span class="status-dot running"></span> Running
+            {% else %}
+              <span class="status-dot stopped"></span> Stopped
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="text-muted">Last run</td>
+          <td class="mono">{{ info.scheduler.last_run[:19].replace('T',' ') if info.scheduler.last_run else '—' }}</td>
+        </tr>
+        <tr>
+          <td class="text-muted">Next run</td>
+          <td class="mono">{{ info.scheduler.next_run[:19].replace('T',' ') if info.scheduler.next_run else '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Storage -->
+  <div class="card">
+    <div class="card-title">Storage</div>
+    {% if storage.error %}
+      <p class="text-error" style="font-size:13px">{{ storage.error }}</p>
+    {% else %}
+    <table style="width:100%">
+      <tbody>
+        <tr><td class="text-muted" style="width:45%">Database</td><td class="mono">{{ storage.db_size }}</td></tr>
+        <tr><td class="text-muted">Event log</td><td class="mono">{{ storage.log_size }}</td></tr>
+        <tr><td class="text-muted">Disk free</td><td class="mono">{{ storage.disk_free }} / {{ storage.disk_total }}</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:10px">
+      <div style="background:var(--border);border-radius:4px;height:6px;overflow:hidden">
+        <div style="width:{{ storage.disk_pct }}%;height:100%;border-radius:4px;
+                    background:{{ 'var(--error)' if storage.disk_pct > 90 else 'var(--accent)' }}"></div>
+      </div>
+      <div class="hint" style="margin-top:4px">{{ storage.disk_used }} used ({{ storage.disk_pct }}%)</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Connections -->
+  <div class="card">
+    <div class="card-title">Connections</div>
+    <table style="width:100%" id="conn-table">
+      <tbody>
+        <tr><td colspan="2" class="text-muted" style="font-size:13px">Checking connections…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Version — reuse the GitHub release lookup, fall back to sidebar value
+  (function() {
+    const el = document.getElementById('about-version');
+    const cached = sessionStorage.getItem('inspectarr_version');
+    if (cached) { el.textContent = cached; return; }
+    const sidebar = document.getElementById('sidebar-version');
+    if (sidebar) el.textContent = sidebar.textContent;
+  })();
+
+  // Connection health — fetched async so the page renders immediately
+  fetch('/system/status/data')
+    .then(r => r.json())
+    .then(d => {
+      const tbody = document.querySelector('#conn-table tbody');
+      if (!d.ok) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-error">${d.message || 'Check failed'}</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = '';
+      d.connections.forEach(c => {
+        let cell;
+        if (!c.configured) {
+          cell = '<span class="status-dot stopped"></span> <span class="text-muted">Not configured</span>';
+        } else if (c.ok) {
+          cell = '<span class="status-dot running"></span> Connected';
+        } else {
+          cell = '<span class="status-dot stopped"></span> <span class="text-error">Unreachable</span>';
+        }
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="text-muted" style="width:45%">${c.name}</td><td>${cell}</td>`;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(() => {
+      document.querySelector('#conn-table tbody').innerHTML =
+        '<tr><td colspan="2" class="text-error">Connection check failed</td></tr>';
+    });
+</script>
+{% endblock %}

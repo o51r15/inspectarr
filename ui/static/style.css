@@ -119,6 +119,53 @@ a:hover { text-decoration: underline; }
 
 .nav .icon { width: 16px; text-align: center; font-size: 12px; opacity: 0.7; }
 
+/* Expandable nav group (System) */
+.nav-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.nav-group-toggle:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+.nav-group-toggle.active { color: var(--accent); }
+.nav-group-toggle .icon { width: 16px; text-align: center; font-size: 12px; opacity: 0.7; }
+.nav-group-caret {
+  margin-left: auto;
+  font-size: 9px;
+  transition: transform .15s;
+}
+.nav-group.open .nav-group-caret { transform: rotate(90deg); }
+
+.nav-group-items {
+  display: none;
+  flex-direction: column;
+}
+.nav-group.open .nav-group-items { display: flex; }
+
+.nav-group-items a {
+  display: block;
+  padding: 7px 16px 7px 42px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  border-left: 2px solid transparent;
+  transition: color .15s, background .15s;
+  text-decoration: none;
+}
+.nav-group-items a:hover { color: var(--text); background: rgba(255,255,255,0.03); text-decoration: none; }
+.nav-group-items a.active { color: var(--accent); background: var(--accent-glow); border-left-color: var(--accent); }
+
 .main {
   margin-left: 220px;
   flex: 1;
@@ -494,3 +541,83 @@ tbody td { padding: 9px 12px; vertical-align: top; }
   display: block;
 }
 .sidebar-donate:hover { opacity: 0.85; }
+
+/* ------------------------------------------------------------------ */
+/* Settings layout — panes driven by the sidebar Settings group        */
+/* ------------------------------------------------------------------ */
+
+.settings-content { min-width: 0; }
+
+.settings-pane { display: none; }
+.settings-pane.active { display: block; }
+
+/* Sticky save bar at the top of the content area */
+.settings-savebar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.settings-savebar .pane-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.settings-savebar .save-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-savebar .dirty-flag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--warning);
+  opacity: 0;
+  transition: opacity .15s;
+}
+.settings-savebar.dirty .dirty-flag { opacity: 1; }
+
+/* Save button starts dim, activates on dirty */
+.settings-savebar .btn-primary { opacity: 0.45; pointer-events: none; }
+.settings-savebar.dirty .btn-primary { opacity: 1; pointer-events: auto; }
+
+/* Connection status banner (rules pane) */
+.conn-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+.conn-banner.connected    { border-color: rgba(58,140,92,0.3); }
+.conn-banner.disconnected { border-color: rgba(192,57,43,0.3); }
+.conn-banner .conn-text { color: var(--text-muted); }
+.conn-banner.connected .conn-text    { color: #4ade80; }
+.conn-banner.disconnected .conn-text  { color: #f87171; }
+
+/* Disabled rule cards when qBit unreachable */
+.rules-disabled .rule-card {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.rules-disabled .rule-card input,
+.rules-disabled .rule-card select,
+.rules-disabled .rule-card button { pointer-events: none; }

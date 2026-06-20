@@ -98,12 +98,43 @@ def test_sonarr():
         return jsonify({"ok": False, "message": str(e)})
 
 
+@config_bp.route("/config/qbit/categories", methods=["GET"])
+def qbit_categories():
+    """
+    Return qBittorrent's category list for the rule builder dropdown.
+    On any failure returns ok=false with an empty list so the frontend can
+    render the rules pane in its disabled/disconnected state.
+    """
+    config_path = current_app.config["CONFIG_PATH"]
+    try:
+        from core.config import load_config
+        from core.qbit import QBittorrentClient
+        cfg    = load_config(config_path)
+        client = QBittorrentClient(
+            cfg.qbittorrent.url,
+            cfg.qbittorrent.username,
+            cfg.qbittorrent.password,
+        )
+        cat_map = client.get_categories()
+        categories = sorted(name for name in cat_map.keys() if name)
+        return jsonify({"ok": True, "categories": categories})
+    except Exception as exc:
+        return jsonify({"ok": False, "categories": [], "message": str(exc)})
+
+
 def _form_to_config(form, existing: dict) -> dict:
     """Rebuild the config dict from submitted form data."""
     # Parse rules (dynamic fields: rule_name_0, rule_category_0, etc.)
+    # Indices may be non-contiguous after the user deletes a rule in the UI
+    # (e.g. 0, 1, 3), so collect all present indices rather than stopping at
+    # the first gap — otherwise rules after a gap would be silently dropped.
+    rule_indices = sorted({
+        int(k.rsplit("_", 1)[1])
+        for k in form.keys()
+        if k.startswith("rule_name_") and k.rsplit("_", 1)[1].isdigit()
+    })
     rules = []
-    i = 0
-    while f"rule_name_{i}" in form:
+    for i in rule_indices:
         exts     = [e.strip() for e in form.get(f"rule_extensions_{i}", "").split(",") if e.strip()]
         patterns = [p.strip() for p in form.get(f"rule_patterns_{i}", "").split(",") if p.strip()]
         min_size_raw = form.get(f"rule_min_size_mb_{i}", "").strip()
@@ -124,9 +155,26 @@ def _form_to_config(form, existing: dict) -> dict:
             "app":        form.get(f"rule_app_{i}", "sonarr"),
             "conditions": conditions,
         })
-        i += 1
 
     notify_on = form.getlist("notify_on")
+
+    # Fold Prowlarr's visible fields into the unified save WITHOUT clobbering
+    # the nested `scoring` block (which has no form fields). Start from whatever
+    # is already in the file and overwrite only the keys the form controls.
+    prowlarr_block = dict(existing.get("prowlarr", {}) or {})
+    if "prowlarr_url" in form:  # the Prowlarr pane was rendered/submitted
+        prowlarr_block.update({
+            "enabled":                  "prowlarr_enabled" in form,
+            "url":                      form.get("prowlarr_url", ""),
+            "api_key":                  form.get("prowlarr_api_key", ""),
+            "base_priority":            int(form.get("prowlarr_base_priority", 10) or 10),
+            "reorder_interval_hours":   int(form.get("prowlarr_reorder_interval", 24) or 24),
+            "history_window_days":      int(form.get("prowlarr_history_window", 90) or 90),
+            "min_grabs_before_scoring": int(form.get("prowlarr_min_grabs", 10) or 10),
+        })
+        # Preserve the scoring sub-block exactly as-is; never reset it here.
+        if "scoring" in (existing.get("prowlarr") or {}):
+            prowlarr_block["scoring"] = existing["prowlarr"]["scoring"]
 
     return {
         "qbittorrent": {
@@ -175,7 +223,7 @@ def _form_to_config(form, existing: dict) -> dict:
                 "password": form.get("auth_password", "changeme"),
             },
         },
-        "prowlarr": existing.get("prowlarr", {}),
+        "prowlarr": prowlarr_block,
         "notifications": {
             "pushover": {
                 "enabled":   "pushover_enabled" in form,
