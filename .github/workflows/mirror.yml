@@ -1,0 +1,19 @@
+name: Mirror to Gitea
+
+on:
+  push:
+  delete:
+  create:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push mirror to Gitea
+        run: |
+          git remote add gitea https://o51r15:${{ secrets.GITEA_TOKEN }}@git.sickbot.org/o51r15/${{ github.event.repository.name }}.git
+          git push --mirror gitea
