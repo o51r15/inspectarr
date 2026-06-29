@@ -87,6 +87,10 @@ class ProwlarrClient:
         """
         Return history records for one indexer within a rolling window.
         Paginates automatically; stops at the window cutoff or the record limit.
+
+        NOTE (BUG-08 / dead code): as of v1.2.0 the scorer uses get_indexer_stats()
+        instead of per-indexer history. This method is no longer called by any
+        production code path and is a candidate for removal.
         """
         cutoff  = datetime.now(timezone.utc) - timedelta(days=days)
         records: list[dict] = []
@@ -105,7 +109,9 @@ class ProwlarrClient:
                 break
             for r in batch:
                 rec_dt = _parse_dt(r.get("date"))
-                if rec_dt is not None and rec_dt < cutoff:
+                # BUG-08: treat unparseable dates as "before cutoff" so they
+                # terminate pagination rather than accumulating indefinitely.
+                if rec_dt is None or rec_dt < cutoff:
                     return records
                 records.append(r)
             if len(batch) < 100:

@@ -5,6 +5,22 @@ import os
 config_bp = Blueprint("config", __name__)
 
 
+# BUG-06: safe cast helpers — bare int()/float() calls raise ValueError on
+# non-numeric form/JSON input and return HTTP 500 with no user feedback.
+def _int(val, default: int) -> int:
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def _float(val, default: float) -> float:
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 def _load_raw(config_path: str) -> dict:
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
@@ -32,12 +48,19 @@ def config_save():
         raw_yaml = request.form.get("raw_yaml", "")
         try:
             data = yaml.safe_load(raw_yaml)
-            _save_raw(config_path, data)
-            return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
         except yaml.YAMLError as e:
             raw = _load_raw(config_path)
             return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
                                    error=f"YAML error: {e}", edit_mode="yaml")
+        # BUG-05: yaml.safe_load("") returns None; writing None destroys the
+        # config file (yaml.dump(None) → "null\n") and bricks the app.
+        if not isinstance(data, dict):
+            raw = _load_raw(config_path)
+            return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
+                                   error="YAML must be a mapping — cannot save empty or scalar content.",
+                                   edit_mode="yaml")
+        _save_raw(config_path, data)
+        return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
 
     # Form mode — rebuild config dict from form fields
     data = _form_to_config(request.form, _load_raw(config_path))
@@ -167,10 +190,10 @@ def _form_to_config(form, existing: dict) -> dict:
             "enabled":                  "prowlarr_enabled" in form,
             "url":                      form.get("prowlarr_url", ""),
             "api_key":                  form.get("prowlarr_api_key", ""),
-            "base_priority":            int(form.get("prowlarr_base_priority", 10) or 10),
-            "reorder_interval_hours":   int(form.get("prowlarr_reorder_interval", 24) or 24),
-            "history_window_days":      int(form.get("prowlarr_history_window", 90) or 90),
-            "min_grabs_before_scoring": int(form.get("prowlarr_min_grabs", 10) or 10),
+            "base_priority":            _int(form.get("prowlarr_base_priority"), 10),
+            "reorder_interval_hours":   _int(form.get("prowlarr_reorder_interval"), 24),
+            "history_window_days":      _int(form.get("prowlarr_history_window"), 90),
+            "min_grabs_before_scoring": _int(form.get("prowlarr_min_grabs"), 10),
         })
         # Preserve the scoring sub-block exactly as-is; never reset it here.
         if "scoring" in (existing.get("prowlarr") or {}):
@@ -201,21 +224,21 @@ def _form_to_config(form, existing: dict) -> dict:
         },
         "rules": rules,
         "on_arr_failure":        form.get("on_arr_failure", "delete"),
-        "poll_interval_seconds": int(form.get("poll_interval_seconds", 300)),
+        "poll_interval_seconds": _int(form.get("poll_interval_seconds"), 300),
         "dry_run":               "dry_run" in form,
         "retry": {
             "enabled":          "retry_enabled" in form,
-            "max_attempts":     int(form.get("retry_max_attempts", 10)),
-            "interval_seconds": int(form.get("retry_interval_seconds", 600)),
+            "max_attempts":     _int(form.get("retry_max_attempts"), 10),
+            "interval_seconds": _int(form.get("retry_interval_seconds"), 600),
         },
         "logging": {
             "log_file":       form.get("log_file", "./data/inspectarr.log.json"),
-            "retention_days": int(form.get("retention_days", 30)),
+            "retention_days": _int(form.get("retention_days"), 30),
             "level":          form.get("log_level", "INFO"),
         },
         "state":  {"db_file": form.get("db_file", "./data/inspectarr.db")},
         "web":    {
-            "port": int(form.get("web_port", 8585)),
+            "port": _int(form.get("web_port"), 8585),
             "scheduler_autostart": "scheduler_autostart" in form,
             "auth": {
                 "enabled":  "auth_enabled" in form,
@@ -230,7 +253,7 @@ def _form_to_config(form, existing: dict) -> dict:
                 "app_token": form.get("pushover_app_token", ""),
                 "user_key":  form.get("pushover_user_key", ""),
                 "notify_on": notify_on,
-                "priority":  int(form.get("pushover_priority", 0)),
+                "priority":  _int(form.get("pushover_priority"), 0),
             }
         },
     }
@@ -253,6 +276,9 @@ def prowlarr_indexers():
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        # BUG-09: per-request StateManager opens a new SQLite connection; cleanup
+        # relies on GC (__del__). TODO: pass scheduler._state through app.config
+        # and reuse it here to avoid connection proliferation under load.
         state    = StateManager(
             db_path=cfg.state.db_file,
             log_path=cfg.logging.log_file,
@@ -278,16 +304,16 @@ def prowlarr_save():
             "enabled":                data.get("enabled", False),
             "url":                    data.get("url", ""),
             "api_key":                data.get("api_key", ""),
-            "base_priority":          int(data.get("base_priority", 10)),
-            "reorder_interval_hours": int(data.get("reorder_interval_hours", 24)),
-            "history_window_days":    int(data.get("history_window_days", 90)),
-            "min_grabs_before_scoring": int(data.get("min_grabs_before_scoring", 10)),
+            "base_priority":          _int(data.get("base_priority"), 10),
+            "reorder_interval_hours": _int(data.get("reorder_interval_hours"), 24),
+            "history_window_days":    _int(data.get("history_window_days"), 90),
+            "min_grabs_before_scoring": _int(data.get("min_grabs_before_scoring"), 10),
             "scoring": {
-                "response_time_weight":      float(data.get("response_time_weight", 0.35)),
-                "failure_rate_weight":       float(data.get("failure_rate_weight", 0.40)),
-                "malicious_weight":          float(data.get("malicious_weight", 0.25)),
-                "backoff_penalty":           float(data.get("backoff_penalty", 20.0)),
-                "malicious_penalty_per_hit": float(data.get("malicious_penalty_per_hit", 10.0)),
+                "response_time_weight":      _float(data.get("response_time_weight"), 0.35),
+                "failure_rate_weight":       _float(data.get("failure_rate_weight"), 0.40),
+                "malicious_weight":          _float(data.get("malicious_weight"), 0.25),
+                "backoff_penalty":           _float(data.get("backoff_penalty"), 20.0),
+                "malicious_penalty_per_hit": _float(data.get("malicious_penalty_per_hit"), 10.0),
             },
         }
         _save_raw(config_path, raw)
@@ -305,7 +331,7 @@ def prowlarr_set_ignored():
         from core.config import load_config
         from core.state import StateManager
         cfg   = load_config(config_path)
-        state = StateManager(
+        state = StateManager(  # BUG-09: per-request connection; see prowlarr_indexers TODO
             db_path=cfg.state.db_file,
             log_path=cfg.logging.log_file,
             retention_days=cfg.logging.retention_days,
@@ -334,7 +360,7 @@ def prowlarr_rescore():
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-        state    = StateManager(
+        state    = StateManager(  # BUG-09: per-request connection; see prowlarr_indexers TODO
             db_path=cfg.state.db_file,
             log_path=cfg.logging.log_file,
             retention_days=cfg.logging.retention_days,

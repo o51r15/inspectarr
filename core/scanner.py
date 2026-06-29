@@ -136,17 +136,36 @@ class Scanner:
 
             self.log.debug(f"  {len(torrents)} torrent(s) found")
             for torrent in torrents:
-                flagged, actioned = self._evaluate_torrent(torrent, rule)
+                # BUG-01: per-torrent try/except so one failure can't zero the
+                # entire scan's stats by propagating to _execute_scan.
+                try:
+                    flagged, actioned = self._evaluate_torrent(torrent, rule)
+                except Exception as exc:
+                    self.log.error(
+                        f"  Unexpected error evaluating "
+                        f"'{torrent.get('name', torrent.get('hash', '?'))}': {exc}"
+                    )
+                    self.state.write_log({
+                        "level":        "ERROR",
+                        "event":        "evaluation_error",
+                        "torrent_name": torrent.get("name", torrent.get("hash", "?")),
+                        "hash":         torrent.get("hash", "?"),
+                        "reason":       str(exc),
+                    })
+                    continue
                 checked_hashes.add(torrent["hash"])
                 if flagged:
                     stats["flagged"] += 1
+                    # BUG-02: set last_flagged on any detection, not just actioned.
+                    # Dry-run and retry-queued detections were previously invisible
+                    # to get_last_detection() because last_flagged stayed None.
+                    stats["last_flagged"] = {
+                        "torrent_name": torrent.get("name", torrent["hash"]),
+                        "rule": rule.name,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
                     if actioned:
                         stats["actioned"] += 1
-                        stats["last_flagged"] = {
-                            "torrent_name": torrent.get("name", torrent["hash"]),
-                            "rule": rule.name,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        }
 
         stats["torrents_checked"] = len(checked_hashes)
         self.state.write_log({
@@ -289,8 +308,24 @@ class Scanner:
         self.log.info(f"  DONE — deleted: {name}")
 
         # Step 4 — record malicious hit against the indexer
-        if self.config.prowlarr.enabled and indexer_id:
-            self._record_malicious_hit(hash, name, indexer_id, indexer_name)
+        # BUG-03: when attribution failed (indexer_id is None) emit a WARNING
+        # rather than silently dropping the hit with no trace in the logs.
+        if self.config.prowlarr.enabled:
+            if indexer_id:
+                self._record_malicious_hit(hash, name, indexer_id, indexer_name)
+            else:
+                self.log.warning(
+                    f"  Malicious hit NOT recorded for '{name}' — indexer "
+                    f"attribution failed (no indexer_id). Check for "
+                    f"grab_attribution_no_match / grab_attribution_error events."
+                )
+                self.state.write_log({
+                    "level":        "WARNING",
+                    "event":        "malicious_hit_skipped",
+                    "torrent_name": name,
+                    "hash":         hash,
+                    "reason":       "indexer attribution failed — indexer_id is None",
+                })
 
         return True
 
@@ -300,6 +335,13 @@ class Scanner:
     # ------------------------------------------------------------------
 
     def _process_one_retry(self, entry: dict):
+        # BUG-04 (by design, documented): when a retry here succeeds,
+        # _attempt_action() records the deletion in processed_hashes and
+        # calls write_log, but there is no path back to update the originating
+        # scan's run_history row. That row permanently shows actioned=0 even
+        # after the torrent is resolved. The flagged count was correct at the
+        # time; actioned will always lag flagged by the number of retry-resolved
+        # torrents. This is expected — do not treat the gap as a bug.
         h        = entry["hash"]
         name     = entry["torrent_name"]
         max_att  = self.config.retry.max_attempts

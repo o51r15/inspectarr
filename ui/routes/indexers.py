@@ -33,7 +33,7 @@ def indexers_sync():
 
         cfg      = load_config(config_path)
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-        state    = StateManager(
+        state    = StateManager(  # BUG-09: per-request connection; TODO reuse scheduler._state
             db_path=cfg.state.db_file,
             log_path=cfg.logging.log_file,
             retention_days=cfg.logging.retention_days,

@@ -73,7 +73,8 @@ def logs_clear():
     config_path = current_app.config["CONFIG_PATH"]
     log_path    = _get_log_path(config_path)
     if os.path.exists(log_path):
-        open(log_path, "w").close()
+        with open(log_path, "w"):   # BUG-07: use context manager, not bare open()
+            pass
     return redirect(url_for("logs.logs_view"))
 
 

@@ -136,6 +136,11 @@ class Scheduler:
             "error":            None,
         }
 
+        # BUG-01: keep stats separate so result.update() always runs even if
+        # an earlier step raises. run_scan() itself now catches per-torrent
+        # exceptions internally, so stats should always be returned on a
+        # normal scan; this is belt-and-suspenders for config/init failures.
+        stats = None
         try:
             config  = load_config(self.config_path)
             scanner = Scanner(config)
@@ -144,11 +149,16 @@ class Scheduler:
             else:
                 scanner.prepare()      # prune only, no notification
             if config.retry.enabled:
+                # BUG-04 (documented): retries that succeed here do NOT update
+                # the originating scan's run_history actioned count — that row
+                # permanently shows actioned=0. Expected; see _process_one_retry.
                 scanner.process_retries()
             stats = scanner.run_scan()
-            result.update(stats)
         except Exception as exc:
             result["error"] = str(exc)
+
+        if stats is not None:
+            result.update(stats)
 
         end = datetime.now(timezone.utc)
         result["scan_end"]         = end.isoformat()
