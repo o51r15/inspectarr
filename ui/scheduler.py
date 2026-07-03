@@ -208,6 +208,7 @@ class Scheduler:
             from core.indexer_scorer import IndexerScorer
             prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
             scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
+            scorer.score_all(skip_ai=False)   # rescore (with AI if configured) before auto-reorder
             changed  = scorer.reorder()
             self.last_reorder = now
             if self._state:

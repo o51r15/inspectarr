@@ -91,6 +91,14 @@ def _check_one(name: str, cfg) -> dict:
             from core.prowlarr import ProwlarrClient
             c = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
             return {"name": name, "configured": True, "ok": c.test_connection()}
+        if name == "Ollama":
+            url = cfg.prowlarr.ollama.url
+            model = cfg.prowlarr.ollama.model
+            if not url or not model:
+                return {"name": name, "configured": False, "ok": False}
+            import requests
+            resp = requests.get(f"{url}/api/tags", timeout=10)
+            return {"name": f"{name} ({model})", "configured": True, "ok": resp.status_code == 200}
     except Exception:
         return {"name": name, "configured": True, "ok": False}
     return {"name": name, "configured": False, "ok": False}
@@ -110,7 +118,7 @@ def system_status_data():
     except Exception as exc:
         return jsonify({"ok": False, "message": str(exc), "connections": []})
 
-    names = ["qBittorrent", "Sonarr", "Radarr", "Lidarr", "Prowlarr"]
+    names = ["qBittorrent", "Sonarr", "Radarr", "Lidarr", "Prowlarr", "Ollama"]
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
         results = list(pool.map(lambda n: _check_one(n, cfg), names))
 

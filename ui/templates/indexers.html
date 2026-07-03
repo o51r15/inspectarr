@@ -79,12 +79,52 @@
       .catch(e => { msg.textContent = 'Request failed: ' + e; });
   }
 
+  function loadAiScores() {
+    const status = document.getElementById('indexer-status');
+    status.textContent = 'AI scoring in progress…';
+    status.style.color = 'var(--warning, #f59e0b)';
+    fetch('/config/prowlarr/indexers/ai')
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          renderTable(d.indexers);
+          status.textContent = 'AI scores applied';
+          status.style.color = 'var(--success, #22c55e)';
+          setTimeout(() => { status.textContent = ''; }, 3000);
+        } else {
+          status.textContent = 'AI scoring unavailable — showing deterministic scores';
+          status.style.color = 'var(--warning, #f59e0b)';
+          setTimeout(() => { status.textContent = ''; }, 5000);
+        }
+      })
+      .catch(() => {
+        status.textContent = 'AI scoring failed';
+        status.style.color = 'var(--error, #ef4444)';
+        setTimeout(() => { status.textContent = ''; }, 5000);
+      });
+  }
+
   function rescoreIndexers() {
     const el = document.getElementById('indexer-status');
     el.textContent = 'Rescoring\u2026';
     el.style.color = '';
-    loadIndexers();
-    setTimeout(() => { el.textContent = 'Scores refreshed'; el.style.color = 'var(--success, #22c55e)'; }, 400);
+    const msg   = document.getElementById('indexer-msg');
+    const table = document.getElementById('indexer-table');
+    fetch('/config/prowlarr/indexers')
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) { msg.textContent = 'Error: ' + d.message; return; }
+        renderTable(d.indexers);
+        table.style.display = 'table';
+        if (d.ai_available) {
+          loadAiScores();
+        } else {
+          el.textContent = 'Scores refreshed';
+          el.style.color = 'var(--success, #22c55e)';
+          setTimeout(() => { el.textContent = ''; }, 3000);
+        }
+      })
+      .catch(e => { el.textContent = 'Rescore failed: ' + e; el.style.color = 'var(--error, #ef4444)'; });
   }
 
   function reorderAndSync() {

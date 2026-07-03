@@ -114,6 +114,20 @@ class StateManager:
                 conn.commit()
         except Exception:
             pass  # Column already exists — safe to ignore
+        # Migrate indexer_stats to add cached score columns
+        for col, default in [
+            ("health_score REAL", "NULL"),
+            ("ai_scored INTEGER", "0"),
+            ("ai_reasoning TEXT", "''"),
+        ]:
+            try:
+                with self._conn() as conn:
+                    conn.execute(
+                        f"ALTER TABLE indexer_stats ADD COLUMN {col} DEFAULT {default}"
+                    )
+                    conn.commit()
+            except Exception:
+                pass
 
 
     # ------------------------------------------------------------------
@@ -392,6 +406,40 @@ class StateManager:
                 (_now_iso(), indexer_id),
             )
             conn.commit()
+
+    def save_cached_score(
+        self,
+        indexer_id: int,
+        indexer_name: str,
+        health_score: float | None,
+        ai_scored: bool = False,
+        ai_reasoning: str = "",
+    ):
+        """Persist a health score so reorder can use it without rescoring."""
+        with self._conn() as conn:
+            self._upsert_indexer(conn, indexer_id, indexer_name)
+            conn.execute(
+                """UPDATE indexer_stats
+                   SET health_score = ?, ai_scored = ?, ai_reasoning = ?, last_scored = ?
+                   WHERE indexer_id = ?""",
+                (health_score, int(ai_scored), ai_reasoning, _now_iso(), indexer_id),
+            )
+            conn.commit()
+
+    def get_cached_scores(self) -> dict[int, dict]:
+        """Return {indexer_id: {health_score, ai_scored, ai_reasoning}} for all scored indexers."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT indexer_id, health_score, ai_scored, ai_reasoning FROM indexer_stats WHERE health_score IS NOT NULL"
+            ).fetchall()
+        return {
+            r["indexer_id"]: {
+                "health_score": r["health_score"],
+                "ai_scored": bool(r["ai_scored"]),
+                "ai_reasoning": r["ai_reasoning"] or "",
+            }
+            for r in rows
+        }
 
     def increment_total_grabs(self, indexer_id: int, indexer_name: str) -> int:
         """Increment total_grabs for this indexer. Returns the new count."""

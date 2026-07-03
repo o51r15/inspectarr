@@ -71,41 +71,65 @@ class IndexerScorer:
     # Public entry points
     # ------------------------------------------------------------------
 
-    def score_all(self) -> list[dict]:
+    def score_all(self, skip_ai: bool = False) -> list[dict]:
         """
         Score all torrent indexers. Returns a list of score dicts sorted by
         current Prowlarr priority (ascending = best first).
         Does NOT reorder — purely informational.
+
+        skip_ai=True returns deterministic scores only (fast path for UI).
         """
         indexers       = self.prowlarr.get_torrent_indexers()
         backoff_map    = self.prowlarr.get_indexer_status()
         stats_by_id    = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
         prowlarr_stats = self.prowlarr.get_indexer_stats()
         scored = [self._score_one(idx, backoff_map, stats_by_id, prowlarr_stats) for idx in indexers]
-        return self._apply_ai_scoring(scored, prowlarr_stats)
+        if not skip_ai:
+            scored = self._apply_ai_scoring(scored, prowlarr_stats)
+        # Persist scores so reorder can use them without rescoring
+        for s in scored:
+            if s["health_score"] is not None:
+                self.state.save_cached_score(
+                    s["id"], s["name"], s["health_score"],
+                    s.get("ai_scored", False), s.get("ai_reasoning", ""),
+                )
+        return scored
 
     def reorder(self) -> int:
         """
-        Reorder torrent indexers in Prowlarr by health score.
+        Reorder torrent indexers in Prowlarr using cached health scores.
 
-        All torrent indexers are scored. The best-scoring indexer is assigned
-        `base_priority`, the next `base_priority + 1`, and so on. Ignored
-        indexers keep their current priority value and are skipped — the free
-        indexers fill the remaining numbers around them.
+        Uses the most recent scores from the database (written by score_all).
+        Does NOT rescore — call score_all() first if fresh scores are needed.
+
+        The best-scoring indexer is assigned `base_priority`, the next
+        `base_priority + 1`, and so on. Ignored indexers keep their current
+        priority value and are skipped.
 
         Returns the number of priority changes written to Prowlarr.
         """
-        indexers       = self.prowlarr.get_torrent_indexers()   # sorted by priority asc
-        backoff_map    = self.prowlarr.get_indexer_status()
-        stats_by_id    = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
-        prowlarr_stats = self.prowlarr.get_indexer_stats()
+        indexers = self.prowlarr.get_torrent_indexers()   # sorted by priority asc
 
         if not indexers:
             log.info("No torrent indexers found — nothing to reorder.")
             return 0
 
-        scored = [self._score_one(i, backoff_map, stats_by_id, prowlarr_stats) for i in indexers]
-        scored = self._apply_ai_scoring(scored, prowlarr_stats)
+        cached      = self.state.get_cached_scores()
+        stats_by_id = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
+
+        scored = []
+        for idx in indexers:
+            iid      = idx["id"]
+            db_stats = stats_by_id.get(iid, {})
+            cache    = cached.get(iid, {})
+            scored.append({
+                "id":           iid,
+                "name":         idx["name"],
+                "priority":     idx.get("priority", 0),
+                "health_score": cache.get("health_score"),
+                "ignored":      bool(db_stats.get("ignored", False)),
+                "_raw":         idx,
+            })
 
         base = self.cfg.base_priority
 

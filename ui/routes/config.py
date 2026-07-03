@@ -285,7 +285,37 @@ def prowlarr_indexers():
             retention_days=cfg.logging.retention_days,
         )
         scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
-        results = scorer.score_all()
+        results = scorer.score_all(skip_ai=True)
+        for r in results:
+            r.pop("_raw", None)
+        ai_available = bool(cfg.prowlarr.ollama.url and cfg.prowlarr.ollama.model)
+        return jsonify({"ok": True, "indexers": results, "ai_available": ai_available})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
+@config_bp.route("/config/prowlarr/indexers/ai", methods=["GET"])
+def prowlarr_indexers_ai():
+    """Return AI-scored indexer list. Separate endpoint so UI can call it async."""
+    config_path = current_app.config["CONFIG_PATH"]
+    try:
+        from core.config import load_config
+        from core.prowlarr import ProwlarrClient
+        from core.indexer_scorer import IndexerScorer
+        from core.state import StateManager
+        cfg = load_config(config_path)
+        if not cfg.prowlarr.enabled:
+            return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
+        if not cfg.prowlarr.ollama.url or not cfg.prowlarr.ollama.model:
+            return jsonify({"ok": False, "message": "Ollama is not configured"})
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        state    = StateManager(
+            db_path=cfg.state.db_file,
+            log_path=cfg.logging.log_file,
+            retention_days=cfg.logging.retention_days,
+        )
+        scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
+        results = scorer.score_all(skip_ai=False)
         for r in results:
             r.pop("_raw", None)
         return jsonify({"ok": True, "indexers": results})
