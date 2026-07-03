@@ -16,9 +16,10 @@ Reorder model (torrent indexers only):
   remaining numbers around them.
 """
 import logging
-from .prowlarr import ProwlarrClient
-from .state    import StateManager
-from .config   import ProwlarrConfig
+from .prowlarr    import ProwlarrClient
+from .state       import StateManager
+from .config      import ProwlarrConfig
+from .llm_client  import ollama_score_indexers
 
 
 WORST_RESPONSE_MS = 5000.0
@@ -80,7 +81,8 @@ class IndexerScorer:
         backoff_map    = self.prowlarr.get_indexer_status()
         stats_by_id    = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
         prowlarr_stats = self.prowlarr.get_indexer_stats()
-        return [self._score_one(idx, backoff_map, stats_by_id, prowlarr_stats) for idx in indexers]
+        scored = [self._score_one(idx, backoff_map, stats_by_id, prowlarr_stats) for idx in indexers]
+        return self._apply_ai_scoring(scored, prowlarr_stats)
 
     def reorder(self) -> int:
         """
@@ -103,6 +105,7 @@ class IndexerScorer:
             return 0
 
         scored = [self._score_one(i, backoff_map, stats_by_id, prowlarr_stats) for i in indexers]
+        scored = self._apply_ai_scoring(scored, prowlarr_stats)
 
         base = self.cfg.base_priority
 
@@ -144,6 +147,63 @@ class IndexerScorer:
             "Prowlarr reorder complete — no changes needed."
         )
         return changed
+
+    # ------------------------------------------------------------------
+    # AI scoring overlay
+    # ------------------------------------------------------------------
+
+    def _apply_ai_scoring(
+        self, scored: list[dict], prowlarr_stats: dict[int, dict],
+    ) -> list[dict]:
+        """
+        If Ollama is configured, send all indexer data in one batch and
+        overwrite health_score with the AI result. On any failure, returns
+        the original deterministic scores unchanged.
+        """
+        ocfg = self.cfg.ollama
+        if not ocfg.url or not ocfg.model:
+            return scored
+
+        # Build the payload — everything we have per indexer
+        payload = []
+        for s in scored:
+            ps = prowlarr_stats.get(s["id"], {})
+            payload.append({
+                "indexer_id":               s["id"],
+                "name":                     s["name"],
+                "deterministic_health_score": s["health_score"],
+                "avg_response_ms":          s["avg_response_ms"],
+                "success_rate_pct":         s["success_rate"],
+                "total_queries":            ps.get("numberOfQueries", 0),
+                "failed_queries":           ps.get("numberOfFailedQueries", 0),
+                "total_grabs":              ps.get("numberOfGrabs", 0),
+                "failed_grabs":             ps.get("numberOfFailedGrabs", 0),
+                "total_rss_queries":        ps.get("numberOfRssQueries", 0),
+                "failed_rss_queries":       ps.get("numberOfFailedRssQueries", 0),
+                "total_auth_queries":       ps.get("numberOfAuthQueries", 0),
+                "failed_auth_queries":      ps.get("numberOfFailedAuthQueries", 0),
+                "malicious_hits":           s["malicious_hits"],
+                "in_backoff":               s["in_backoff"],
+                "total_records":            s["total_records"],
+                "priority":                 s["priority"],
+            })
+
+        ai_results = ollama_score_indexers(
+            payload, ocfg.url, ocfg.model, ocfg.timeout,
+        )
+
+        if not ai_results:
+            log.info("AI scoring unavailable — using deterministic scores")
+            return scored
+
+        for s in scored:
+            ai = ai_results.get(s["id"])
+            if ai is not None:
+                s["health_score"] = ai["health_score"]
+                s["ai_scored"]    = True
+                s["ai_reasoning"] = ai.get("reasoning", "")
+
+        return scored
 
     # ------------------------------------------------------------------
     # Per-indexer scoring
@@ -202,5 +262,7 @@ class IndexerScorer:
             "ignored":         bool(db_stats.get("ignored", False)),
             "pinned_position": db_stats.get("pinned_position"),
             "has_enough_data": has_enough,
+            "ai_scored":       False,
+            "ai_reasoning":    "",
             "_raw":            idx,   # full Prowlarr object needed for PUT
         }

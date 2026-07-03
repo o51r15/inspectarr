@@ -151,6 +151,14 @@ prowlarr:
     malicious_weight: 0.25
     backoff_penalty: 20          # Points deducted if currently in Prowlarr backoff
     malicious_penalty_per_hit: 10  # Points deducted per confirmed malicious torrent
+  # Optional: AI-powered scoring via Ollama
+  # When configured, Ollama analyzes all available indexer data and produces
+  # the final health score. When not configured (or if Ollama is unreachable),
+  # the deterministic formula above is used automatically as a fallback.
+  ollama:
+    url: ""                      # e.g. http://192.168.1.125:11434
+    model: ""                    # e.g. gemma3:latest — must be set explicitly
+    timeout: 120                 # seconds — hard cutoff per scoring run
 
 # ---------------------------------------------------------------------------
 # Web UI

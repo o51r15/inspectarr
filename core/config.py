@@ -87,6 +87,13 @@ class AuthConfig:
 
 
 @dataclass
+class OllamaConfig:
+    url: str = ""
+    model: str = ""
+    timeout: int = 120
+
+
+@dataclass
 class ProwlarrScoringConfig:
     response_time_weight: float = 0.35
     failure_rate_weight: float  = 0.40
@@ -105,6 +112,7 @@ class ProwlarrConfig:
     history_window_days: int = 90
     min_grabs_before_scoring: int = 10
     scoring: ProwlarrScoringConfig = field(default_factory=ProwlarrScoringConfig)
+    ollama: OllamaConfig = field(default_factory=OllamaConfig)
 
 
 @dataclass
@@ -217,6 +225,7 @@ def _parse_config(raw: dict) -> AppConfig:
 
     p_raw = raw.get("prowlarr", {})
     s_raw = p_raw.get("scoring", {})
+    o_raw = p_raw.get("ollama", {})
     prowlarr_cfg = ProwlarrConfig(
         enabled=p_raw.get("enabled", False),
         url=p_raw.get("url", "").rstrip("/"),
@@ -231,6 +240,11 @@ def _parse_config(raw: dict) -> AppConfig:
             malicious_weight=s_raw.get("malicious_weight", 0.25),
             backoff_penalty=s_raw.get("backoff_penalty", 20.0),
             malicious_penalty_per_hit=s_raw.get("malicious_penalty_per_hit", 10.0),
+        ),
+        ollama=OllamaConfig(
+            url=o_raw.get("url", "").rstrip("/"),
+            model=o_raw.get("model", ""),
+            timeout=o_raw.get("timeout", 120),
         ),
     )
 
