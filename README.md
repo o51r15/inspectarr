@@ -12,7 +12,9 @@ files, logs all events to JSON Lines, and notifies via Pushover.
 Also monitors Prowlarr torrent indexer health — scoring each indexer by response
 time, failure rate, and malicious content served — automatically reorders them so
 your best indexers are always searched first, and tracks per-indexer grab and
-malicious-hit statistics over time.
+malicious-hit statistics over time. Optionally integrates with a local
+[Ollama](https://ollama.com) instance to apply AI-powered health scoring that
+considers the full picture of each indexer's behaviour.
 
 Runs two ways: a **web UI with a built-in scheduler daemon** (`web.py`), or a
 **one-shot CLI** (`inspectarr.py`) for manual runs and testing.
@@ -45,6 +47,7 @@ python3 inspectarr.py              # live run
 - qBittorrent with Web UI enabled (v4.x or v5.x)
 - One or more of: Sonarr v4, Radarr v3, Lidarr v2
 - Prowlarr (optional — required only for indexer health scoring and attribution)
+- Ollama (optional — enables AI-powered indexer health scoring via a local LLM)
 
 ```bash
 pip install -r requirements.txt   # requests, pyyaml, flask
@@ -61,7 +64,7 @@ Served on port `8585` by default (configurable via `web.port`). Seven pages:
 | **Dashboard** | Scheduler status, last-scan stats (checked / flagged / actioned), last flagged torrent (persists across clean scans), recent run history. Live-updates every 5s. |
 | **Scheduler** | Start/stop the daemon, run-now, poll interval, last/next run, run history. |
 | **Torrents** | Quick-look dashboard of all qBittorrent torrents. Filter by status/category, change categories, pause/resume, and delete. Per-torrent detail view with tracker status and file list. Compatible with qBittorrent 4.x and 5.x. |
-| **Indexers** | Prowlarr torrent indexer health table. Rescore to refresh scores; Reorder & Sync to apply priority changes and push the updated order to all connected apps (Sonarr, Radarr, Whisparr, etc.). Per-indexer Ignore toggle to pin an indexer at its current priority. |
+| **Indexers** | Prowlarr torrent indexer health table. Rescore computes deterministic scores and, if Ollama is configured, runs AI scoring in the background. Reorder & Sync applies priority changes using cached scores and pushes the updated order to all connected apps. Per-indexer Ignore toggle to pin an indexer at its current priority. |
 | **Stats** | Per-indexer grab and malicious-hit statistics. Total grabs attributed on first scan of each torrent; malicious hits increment when Inspectarr flags and deletes a torrent from that indexer. |
 | **Logs** | Paginated JSON Lines viewer (100/page), level filter, color-coded badges, auto-refresh, clear-log. |
 | **Config** | Full form editor for every option, plus a raw-YAML mode for advanced edits. Test-connection buttons for qBittorrent, Sonarr, Radarr, Lidarr, Prowlarr, and Pushover. Rules are a dynamic add/remove builder. |
@@ -159,6 +162,9 @@ Key settings:
 | `prowlarr.history_window_days` | Rolling window for response time and failure rate scoring |
 | `prowlarr.min_grabs_before_scoring` | Minimum history records required before scoring an indexer |
 | `prowlarr.scoring.*` | Weights for response time, failure rate, malicious hits, backoff penalty |
+| `prowlarr.ollama.url` | Ollama API base URL (e.g. `http://192.168.1.125:11434`) |
+| `prowlarr.ollama.model` | Model name to use for AI scoring (e.g. `gemma4:latest`) |
+| `prowlarr.ollama.timeout` | Request timeout in seconds (default: 120) |
 
 ---
 
@@ -199,6 +205,7 @@ inspectarr/
 │   ├── qbit.py              # qBittorrent Web API v2 client (4.x + 5.x compatible)
 │   ├── prowlarr.py          # Prowlarr API client (indexers, priority, sync)
 │   ├── indexer_scorer.py    # Indexer health score computation + reorder logic
+│   ├── llm_client.py        # Ollama LLM client for AI-powered indexer scoring
 │   ├── arrs/
 │   │   ├── base.py          # AbstractArrClient (history lookup, grab attribution)
 │   │   ├── sonarr.py        # Sonarr v4 client
@@ -216,6 +223,7 @@ inspectarr/
 │   │   ├── torrents.py      # Torrents page + AJAX actions
 │   │   ├── indexers.py      # Indexer health page + reorder & sync
 │   │   ├── stats.py         # Indexer grab/malicious stats page
+│   │   ├── system.py         # System status, connection checks (incl. Ollama)
 │   │   └── config.py        # Config form + test connection endpoints
 │   ├── templates/
 │   │   ├── base.html        # Sidebar, nav, fonts, toast system
