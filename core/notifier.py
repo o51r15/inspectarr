@@ -56,11 +56,12 @@ class Notifier:
 
     def notify_action(
         self, torrent_name: str, bad_files: list[str],
-        arr_blocklisted: bool, qbit_deleted: bool
+        arr_blocklisted: bool, qbit_deleted: bool, app_name: str = "arr"
     ):
         if not self._should("action"):
             return
-        arr_status  = "blocklisted" if arr_blocklisted else "arr FAILED"
+        # BUG-15: label was hardcoded "Sonarr" regardless of which arr acted
+        arr_status  = "blocklisted" if arr_blocklisted else "FAILED"
         qbit_status = "deleted"     if qbit_deleted    else "qbit FAILED"
         files = ", ".join(bad_files[:3])
         if len(bad_files) > 3:
@@ -68,7 +69,7 @@ class Notifier:
         self._send(
             "inspectarr: Torrent removed",
             f"{torrent_name}\nFiles: {files}\n"
-            f"Sonarr: {arr_status}  |  qBit: {qbit_status}",
+            f"{app_name.capitalize()}: {arr_status}  |  qBit: {qbit_status}",
         )
 
     def notify_error(self, context: str, reason: str):

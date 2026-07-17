@@ -42,14 +42,33 @@ class Scheduler:
     # Public controls
     # ------------------------------------------------------------------
 
-    def start(self):
+    def start(self) -> bool:
+        """
+        Start the scheduler loop. Returns True if the loop is running.
+
+        BUG-11: after stop(), the old thread may still be mid-scan. start()
+        used to clear _stop_event immediately, letting the old loop miss the
+        stop signal and survive alongside the new one (two loops). Now we wait
+        briefly for the old thread to exit and refuse to double-start.
+        """
+        old = None
         with self._lock:
             if self.running:
-                return
+                return True
+            if self._thread is not None and self._thread.is_alive():
+                old = self._thread
+        if old is not None:
+            old.join(timeout=10)   # never join while holding self._lock
+            if old.is_alive():
+                return False       # previous loop still finishing a scan
+        with self._lock:
+            if self.running:
+                return True
             self._stop_event.clear()
             self._thread = threading.Thread(target=self._loop, daemon=True, name="inspectarr-scheduler")
             self._thread.start()
             self.running = True
+        return True
 
     def stop(self):
         self._stop_event.set()
@@ -57,11 +76,18 @@ class Scheduler:
             self.running  = False
             self.next_run = None
 
-    def trigger(self):
-        """Fire an immediate one-shot scan (non-blocking)."""
+    def trigger(self) -> bool:
+        """
+        Fire an immediate one-shot scan (non-blocking).
+        Returns False if a scan is already in flight (BUG-12).
+        """
+        with self._lock:
+            if self._scanning:
+                return False
         t = threading.Thread(target=lambda: self._execute_scan(is_first=False),
                              daemon=True, name="inspectarr-manual")
         t.start()
+        return True
 
     def is_scanning(self) -> bool:
         with self._lock:
@@ -122,6 +148,11 @@ class Scheduler:
         from core.scanner import Scanner
 
         with self._lock:
+            if self._scanning:
+                # BUG-12: another scan (scheduler loop vs manual trigger) is
+                # already in flight. Two concurrent Scanners mean two SQLite
+                # writers and doubled qbit/arr traffic — skip this cycle.
+                return
             self._scanning = True
 
         start  = datetime.now(timezone.utc)
@@ -197,6 +228,28 @@ class Scheduler:
             if not config.prowlarr.enabled:
                 return
 
+            # BUG-17: _state can be None (config/DB unavailable at startup).
+            # Passing None into IndexerScorer raised AttributeError which was
+            # swallowed below with zero trace — reorder just never happened.
+            if self._state is None:
+                self._state = self._init_state()
+            if self._state is None:
+                import logging
+                logging.getLogger("inspectarr").warning(
+                    "Prowlarr auto-reorder skipped — state DB unavailable"
+                )
+                return
+
+            # BUG-20: recover last_reorder from the DB after a restart so the
+            # reorder interval survives process restarts.
+            if self.last_reorder is None:
+                stored = self._state.get_app_state("last_prowlarr_reorder")
+                if stored:
+                    try:
+                        self.last_reorder = datetime.fromisoformat(stored)
+                    except ValueError:
+                        pass
+
             interval_h = config.prowlarr.reorder_interval_hours
             now = datetime.now(timezone.utc)
             if self.last_reorder is not None:
@@ -211,11 +264,11 @@ class Scheduler:
             scorer.score_all(skip_ai=False)   # rescore (with AI if configured) before auto-reorder
             changed  = scorer.reorder()
             self.last_reorder = now
-            if self._state:
-                self._state.write_log({
-                    "level": "INFO", "event": "prowlarr_auto_reorder",
-                    "indexers_moved": changed,
-                })
+            self._state.set_app_state("last_prowlarr_reorder", now.isoformat())
+            self._state.write_log({
+                "level": "INFO", "event": "prowlarr_auto_reorder",
+                "indexers_moved": changed,
+            })
         except Exception as exc:
             if self._state:
                 try:

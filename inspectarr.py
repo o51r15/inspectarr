@@ -42,28 +42,7 @@ def main():
         print("run the web UI instead:  python web.py")
         sys.exit(1)
 
-    if args.retry_now:
-        from core.config import load_config
-        from core.scanner import Scanner
-
-        if not os.path.exists(args.config):
-            print(f"ERROR: Config file not found: {args.config}")
-            sys.exit(1)
-        try:
-            config = load_config(args.config)
-        except Exception as exc:
-            print(f"ERROR: Failed to load config: {exc}")
-            sys.exit(1)
-        if args.dry_run:
-            config.dry_run = True
-        scanner = Scanner(config)
-        scanner.prepare()
-        print("Force-flushing retry queue (bypassing timing and exhaustion cap)...")
-        scanner.process_retries(force=True)
-        print("Done. Running scan...")
-        scanner.run_scan()
-        return
-
+    # IMP-5: single config-load path for both --retry-now and normal runs
     from core.config import load_config
     from core.scanner import Scanner
 
@@ -81,6 +60,15 @@ def main():
         config.dry_run = True
 
     scanner = Scanner(config)
+
+    if args.retry_now:
+        scanner.prepare()
+        print("Force-flushing retry queue (bypassing timing and exhaustion cap)...")
+        scanner.process_retries(force=True)
+        print("Done. Running scan...")
+        scanner.run_scan()
+        return
+
     scanner.startup()
 
     if config.retry.enabled:

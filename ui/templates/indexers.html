@@ -165,23 +165,25 @@
         : idx.ignored
         ? '<span style="opacity:0.6">Pinned</span>'
         : '';
-      const ignoreCell = `<input type="checkbox" title="Lock this indexer at its current priority"
-             ${idx.ignored ? 'checked' : ''}
-             onchange="setIgnored(${idx.id}, '${idx.name.replace(/'/g,"\\'")}', this.checked)">`;
-
+      // SEC-2: idx.name comes from Prowlarr — escape it (esc from app.js) and
+      // attach the change handler via addEventListener instead of building an
+      // inline onchange string from the name.
       const tr = document.createElement('tr');
       tr.style.borderBottom = '1px solid var(--border)';
       tr.style.opacity = idx.ignored ? '0.75' : '1';
       tr.innerHTML = `
-        <td style="padding:6px 8px">${idx.priority}</td>
-        <td style="padding:6px 8px">${idx.name}</td>
-        <td style="padding:6px 8px">${idx.avg_response_ms > 0 ? idx.avg_response_ms + ' ms' : '\u2014'}</td>
-        <td style="padding:6px 8px">${idx.total_records > 0 ? idx.success_rate + '%' : '\u2014'}</td>
-        <td style="padding:6px 8px">${idx.malicious_hits > 0 ? '<span style="color:#ef4444">' + idx.malicious_hits + '</span>' : '0'}</td>
+        <td style="padding:6px 8px">${esc(idx.priority)}</td>
+        <td style="padding:6px 8px">${esc(idx.name)}</td>
+        <td style="padding:6px 8px">${idx.avg_response_ms > 0 ? esc(idx.avg_response_ms) + ' ms' : '\u2014'}</td>
+        <td style="padding:6px 8px">${idx.total_records > 0 ? esc(idx.success_rate) + '%' : '\u2014'}</td>
+        <td style="padding:6px 8px">${idx.malicious_hits > 0 ? '<span style="color:#ef4444">' + esc(idx.malicious_hits) + '</span>' : '0'}</td>
         <td style="padding:6px 8px;${scoreColor}">${score}</td>
         <td style="padding:6px 8px">${statusBadge}</td>
-        <td style="padding:6px 8px">${ignoreCell}</td>
+        <td style="padding:6px 8px"><input type="checkbox" class="ignore-toggle"
+             title="Lock this indexer at its current priority" ${idx.ignored ? 'checked' : ''}></td>
       `;
+      tr.querySelector('.ignore-toggle').addEventListener('change',
+        e => setIgnored(idx.id, idx.name, e.target.checked));
       tbody.appendChild(tr);
     });
   }

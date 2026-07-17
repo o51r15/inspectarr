@@ -1,9 +1,13 @@
 import sqlite3
 import json
+import logging
 import os
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger("inspectarr")
 
 
 class StateManager:
@@ -17,8 +21,19 @@ class StateManager:
         self.log_path = log_path
         self.retention_days = retention_days
         self._ensure_dirs()
-        self._db = sqlite3.connect(self.db_path, check_same_thread=False)
+        # BUG-13: the single shared connection is used from Flask request
+        # threads, the scheduler loop, and manual-scan threads. The RLock
+        # serializes every multi-statement operation; WAL + busy_timeout
+        # (BUG-12) prevent "database is locked" errors across the separate
+        # connections still created per Scanner/per request.
+        self._lock = threading.RLock()
+        self._db = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
         self._db.row_factory = sqlite3.Row
+        try:
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA busy_timeout=30000")
+        except sqlite3.OperationalError as exc:
+            log.warning(f"Could not set SQLite pragmas: {exc}")
         self._init_db()
 
     def __del__(self):
@@ -40,7 +55,7 @@ class StateManager:
         return self._db
 
     def _init_db(self):
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS processed_hashes (
                     hash         TEXT PRIMARY KEY,
@@ -104,16 +119,25 @@ class StateManager:
                     first_seen   TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_state (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
             conn.commit()
         # Migrate indexer_stats to add total_grabs if not present
         try:
-            with self._conn() as conn:
+            with self._lock, self._conn() as conn:
                 conn.execute(
                     "ALTER TABLE indexer_stats ADD COLUMN total_grabs INTEGER DEFAULT 0"
                 )
                 conn.commit()
-        except Exception:
-            pass  # Column already exists — safe to ignore
+        except sqlite3.OperationalError as exc:
+            # BUG-16: only "duplicate column" is expected — anything else is a
+            # real migration failure and must not be silently swallowed.
+            if "duplicate column" not in str(exc).lower():
+                log.warning(f"indexer_stats migration failed (total_grabs): {exc}")
         # Migrate indexer_stats to add cached score columns
         for col, default in [
             ("health_score REAL", "NULL"),
@@ -121,13 +145,15 @@ class StateManager:
             ("ai_reasoning TEXT", "''"),
         ]:
             try:
-                with self._conn() as conn:
+                with self._lock, self._conn() as conn:
                     conn.execute(
                         f"ALTER TABLE indexer_stats ADD COLUMN {col} DEFAULT {default}"
                     )
                     conn.commit()
-            except Exception:
-                pass
+            except sqlite3.OperationalError as exc:
+                # BUG-16: see above — log real failures, ignore duplicates.
+                if "duplicate column" not in str(exc).lower():
+                    log.warning(f"indexer_stats migration failed ({col}): {exc}")
 
 
     # ------------------------------------------------------------------
@@ -140,7 +166,7 @@ class StateManager:
         dry_run still active). dry_run records are NOT skipped once dry_run
         is turned off — they re-evaluate on the next scan.
         """
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             row = conn.execute(
                 "SELECT action FROM processed_hashes WHERE hash = ?", (hash,)
             ).fetchone()
@@ -153,7 +179,7 @@ class StateManager:
         self, hash: str, torrent_name: str, category: str,
         rule_name: str, action: str, arr_success: bool, qbit_success: bool
     ):
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO processed_hashes
                     (hash, torrent_name, category, rule_name, action,
@@ -172,7 +198,7 @@ class StateManager:
         rule_name: str, failure_reason: str, interval_seconds: int
     ) -> int:
         """Upsert a retry entry. Returns the new attempt_count."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             existing = conn.execute(
                 "SELECT attempt_count FROM retry_queue WHERE hash = ?", (hash,)
             ).fetchone()
@@ -195,7 +221,7 @@ class StateManager:
         Exhausted entries (attempt_count >= max_attempts) are excluded so we
         stop hammering them — they remain in the table as a permanent record.
         """
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             rows = conn.execute("""
                 SELECT * FROM retry_queue
                 WHERE resolved = 0
@@ -209,7 +235,7 @@ class StateManager:
         Return ALL unresolved retries regardless of timing or attempt count.
         Used by --retry-now to force-flush everything including exhausted entries.
         """
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM retry_queue WHERE resolved = 0"
             ).fetchall()
@@ -221,7 +247,7 @@ class StateManager:
         exhausted). Used so the normal scan skips it and lets the retry queue
         own the timing — preventing reprocessing on every poll cycle.
         """
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             row = conn.execute(
                 "SELECT 1 FROM retry_queue WHERE hash = ? AND resolved = 0",
                 (hash,)
@@ -229,14 +255,14 @@ class StateManager:
         return row is not None
 
     def get_retry_count(self, hash: str) -> int:
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             row = conn.execute(
                 "SELECT attempt_count FROM retry_queue WHERE hash = ?", (hash,)
             ).fetchone()
         return row["attempt_count"] if row else 0
 
     def resolve_retry(self, hash: str):
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             conn.execute(
                 "UPDATE retry_queue SET resolved = 1 WHERE hash = ?", (hash,)
             )
@@ -250,7 +276,7 @@ class StateManager:
     def save_run(self, result: dict):
         """Persist a scan result. Keeps the latest 50 rows."""
         lf = result.get("last_flagged")
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             conn.execute("""
                 INSERT INTO run_history
                     (scan_start, scan_end, duration_seconds,
@@ -277,7 +303,7 @@ class StateManager:
 
     def get_recent_runs(self, limit: int = 10) -> list[dict]:
         """Return the most recent scan results, newest first."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             rows = conn.execute("""
                 SELECT * FROM run_history ORDER BY id DESC LIMIT ?
             """, (limit,)).fetchall()
@@ -298,7 +324,7 @@ class StateManager:
         a flagged torrent, regardless of how many clean scans have run since.
         Returns None if no flagged run exists.
         """
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             row = conn.execute("""
                 SELECT last_flagged FROM run_history
                 WHERE flagged > 0 AND last_flagged IS NOT NULL
@@ -317,7 +343,7 @@ class StateManager:
 
     def get_error_state(self, context: str) -> Optional[str]:
         """Return the last recorded error for this context, or None."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             row = conn.execute(
                 "SELECT last_error FROM error_state WHERE context = ?", (context,)
             ).fetchone()
@@ -328,7 +354,7 @@ class StateManager:
         Record the current error for this context.
         Pass error=None to clear (e.g. when the operation succeeds again).
         """
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             if error is None:
                 conn.execute(
                     "DELETE FROM error_state WHERE context = ?", (context,)
@@ -345,7 +371,7 @@ class StateManager:
     # ------------------------------------------------------------------
 
     def get_all_indexer_stats(self) -> list[dict]:
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             rows = conn.execute("SELECT * FROM indexer_stats").fetchall()
         return [dict(r) for r in rows]
 
@@ -362,7 +388,7 @@ class StateManager:
 
     def increment_malicious_hit(self, indexer_id: int, indexer_name: str) -> int:
         """Increment malicious_hits for this indexer. Returns the new count."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             self._upsert_indexer(conn, indexer_id, indexer_name)
             conn.execute(
                 "UPDATE indexer_stats SET malicious_hits = malicious_hits + 1 WHERE indexer_id = ?",
@@ -383,7 +409,7 @@ class StateManager:
         pinned_position: int | None = None,
     ):
         """Set or clear the ignore/pin state for an indexer."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             self._upsert_indexer(conn, indexer_id, indexer_name)
             conn.execute(
                 "UPDATE indexer_stats SET ignored = ?, pinned_position = ? WHERE indexer_id = ?",
@@ -392,7 +418,7 @@ class StateManager:
             conn.commit()
 
     def update_last_reorder(self, indexer_id: int):
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             conn.execute(
                 "UPDATE indexer_stats SET last_reorder = ? WHERE indexer_id = ?",
                 (_now_iso(), indexer_id),
@@ -400,7 +426,7 @@ class StateManager:
             conn.commit()
 
     def update_last_scored(self, indexer_id: int):
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             conn.execute(
                 "UPDATE indexer_stats SET last_scored = ? WHERE indexer_id = ?",
                 (_now_iso(), indexer_id),
@@ -416,7 +442,7 @@ class StateManager:
         ai_reasoning: str = "",
     ):
         """Persist a health score so reorder can use it without rescoring."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             self._upsert_indexer(conn, indexer_id, indexer_name)
             conn.execute(
                 """UPDATE indexer_stats
@@ -428,7 +454,7 @@ class StateManager:
 
     def get_cached_scores(self) -> dict[int, dict]:
         """Return {indexer_id: {health_score, ai_scored, ai_reasoning}} for all scored indexers."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             rows = conn.execute(
                 "SELECT indexer_id, health_score, ai_scored, ai_reasoning FROM indexer_stats WHERE health_score IS NOT NULL"
             ).fetchall()
@@ -443,7 +469,7 @@ class StateManager:
 
     def increment_total_grabs(self, indexer_id: int, indexer_name: str) -> int:
         """Increment total_grabs for this indexer. Returns the new count."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             self._upsert_indexer(conn, indexer_id, indexer_name)
             conn.execute(
                 "UPDATE indexer_stats SET total_grabs = total_grabs + 1 WHERE indexer_id = ?",
@@ -462,7 +488,7 @@ class StateManager:
 
     def get_torrent_seen(self, hash: str) -> dict | None:
         """Return the seen_torrents record for this hash, or None."""
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             row = conn.execute(
                 "SELECT * FROM seen_torrents WHERE hash = ?", (hash,)
             ).fetchone()
@@ -476,7 +502,7 @@ class StateManager:
         Returns True if newly inserted, False if already existed.
         Uses INSERT OR IGNORE so it is safe to call multiple times.
         """
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             existing = conn.execute(
                 "SELECT 1 FROM seen_torrents WHERE hash = ?", (hash,)
             ).fetchone()
@@ -492,12 +518,32 @@ class StateManager:
         return True
 
     # ------------------------------------------------------------------
+    # app_state — small persistent key/value store (e.g. last reorder time)
+    # ------------------------------------------------------------------
+
+    def get_app_state(self, key: str) -> Optional[str]:
+        """Return the stored value for this key, or None."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_state WHERE key = ?", (key,)
+            ).fetchone()
+        return row["value"] if row else None
+
+    def set_app_state(self, key: str, value: str):
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            conn.commit()
+
+    # ------------------------------------------------------------------
     # Retention + log
     # ------------------------------------------------------------------
 
     def prune_old_records(self):
         cutoff = (_now_dt() - timedelta(days=self.retention_days)).isoformat()
-        with self._conn() as conn:
+        with self._lock, self._conn() as conn:
             conn.execute(
                 "DELETE FROM processed_hashes WHERE actioned_at < ?", (cutoff,)
             )
@@ -509,30 +555,37 @@ class StateManager:
         self._prune_log_file(cutoff)
 
     def _prune_log_file(self, cutoff_iso: str):
-        if not os.path.exists(self.log_path):
-            return
-        kept: list[str] = []
-        with open(self.log_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if entry.get("timestamp", "") >= cutoff_iso:
-                        kept.append(line)
-                except (json.JSONDecodeError, KeyError):
-                    kept.append(line)   # preserve malformed lines
-        with open(self.log_path, "w", encoding="utf-8") as f:
-            if kept:
-                f.write("\n".join(kept) + "\n")
+        # BUG-18: hold the lock so a concurrent write_log() append can't be
+        # lost between read and rewrite, and replace atomically so a crash
+        # mid-write can't truncate the log.
+        with self._lock:
+            if not os.path.exists(self.log_path):
+                return
+            kept: list[str] = []
+            with open(self.log_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("timestamp", "") >= cutoff_iso:
+                            kept.append(line)
+                    except (json.JSONDecodeError, KeyError):
+                        kept.append(line)   # preserve malformed lines
+            tmp_path = self.log_path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                if kept:
+                    f.write("\n".join(kept) + "\n")
+            os.replace(tmp_path, self.log_path)
 
     def write_log(self, entry: dict):
         """Append a single event to the JSON Lines log file."""
         if "timestamp" not in entry:
             entry["timestamp"] = _now_iso()
-        with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry) + "\n")
+        with self._lock:
+            with open(self.log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
 
 
 # ---------------------------------------------------------------------------

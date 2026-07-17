@@ -304,7 +304,7 @@ class Scanner:
             "arr": rule.app, "bad_files": bad_files,
             "arr_blocklisted": arr_success, "qbit_deleted": qbit_ok,
         })
-        self.notifier.notify_action(name, bad_files, arr_success, qbit_ok)
+        self.notifier.notify_action(name, bad_files, arr_success, qbit_ok, rule.app)
         self.log.info(f"  DONE — deleted: {name}")
 
         # Step 4 — record malicious hit against the indexer

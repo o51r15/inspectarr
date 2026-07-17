@@ -99,7 +99,8 @@
     .then(d => {
       const tbody = document.querySelector('#conn-table tbody');
       if (!d.ok) {
-        tbody.innerHTML = `<tr><td colspan="2" class="text-error">${d.message || 'Check failed'}</td></tr>`;
+        // SEC-2: escape server-provided message (esc from app.js)
+        tbody.innerHTML = `<tr><td colspan="2" class="text-error">${esc(d.message || 'Check failed')}</td></tr>`;
         return;
       }
       tbody.innerHTML = '';
@@ -113,7 +114,7 @@
           cell = '<span class="status-dot stopped"></span> <span class="text-error">Unreachable</span>';
         }
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td class="text-muted" style="width:45%">${c.name}</td><td>${cell}</td>`;
+        tr.innerHTML = `<td class="text-muted" style="width:45%">${esc(c.name)}</td><td>${cell}</td>`;   // SEC-2
         tbody.appendChild(tr);
       });
     })

@@ -7,7 +7,6 @@ are never touched by Inspectarr.
 """
 import logging
 import requests
-from datetime import datetime, timezone, timedelta
 
 log = logging.getLogger("inspectarr")
 
@@ -78,48 +77,6 @@ class ProwlarrClient:
         data = self._get("indexerstats")
         return {s["indexerId"]: s for s in data.get("indexers", [])}
 
-    def get_indexer_history(
-        self,
-        indexer_id: int,
-        days: int = 90,
-        limit: int = 1000,
-    ) -> list[dict]:
-        """
-        Return history records for one indexer within a rolling window.
-        Paginates automatically; stops at the window cutoff or the record limit.
-
-        NOTE (BUG-08 / dead code): as of v1.2.0 the scorer uses get_indexer_stats()
-        instead of per-indexer history. This method is no longer called by any
-        production code path and is a candidate for removal.
-        """
-        cutoff  = datetime.now(timezone.utc) - timedelta(days=days)
-        records: list[dict] = []
-        page    = 1
-
-        while len(records) < limit:
-            data  = self._get("history", params={
-                "indexerId":     indexer_id,
-                "pageSize":      100,
-                "page":          page,
-                "sortKey":       "date",
-                "sortDirection": "descending",
-            })
-            batch = data.get("records", [])
-            if not batch:
-                break
-            for r in batch:
-                rec_dt = _parse_dt(r.get("date"))
-                # BUG-08: treat unparseable dates as "before cutoff" so they
-                # terminate pagination rather than accumulating indefinitely.
-                if rec_dt is None or rec_dt < cutoff:
-                    return records
-                records.append(r)
-            if len(batch) < 100:
-                break
-            page += 1
-
-        return records
-
     def sync_to_apps(self) -> bool:
         """
         Trigger Prowlarr to push the current indexer list to all connected
@@ -181,17 +138,3 @@ class ProwlarrClient:
         except Exception as exc:
             log.warning(f"Prowlarr priority write failed for '{indexer.get('name')}': {exc}")
             return False
-
-
-def _parse_dt(value: str | None) -> datetime | None:
-    """
-    Parse a Prowlarr ISO date (e.g. '2026-06-10T15:55:40Z') into an
-    offset-aware UTC datetime. Returns None if unparseable.
-    """
-    if not value:
-        return None
-    try:
-        # Normalise trailing Z to +00:00 for fromisoformat
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None

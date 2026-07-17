@@ -31,6 +31,37 @@ def _save_raw(config_path: str, data: dict):
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
+def _get_state(cfg):
+    """
+    IMP-2 (retires BUG-09): reuse the app-wide StateManager (shared with the
+    scheduler) instead of opening a new SQLite connection per request.
+    Falls back to a fresh instance only if the shared one is unavailable.
+    """
+    state = current_app.config.get("STATE")
+    if state is not None:
+        return state
+    from core.state import StateManager
+    return StateManager(
+        db_path=cfg.state.db_file,
+        log_path=cfg.logging.log_file,
+        retention_days=cfg.logging.retention_days,
+    )
+
+
+def _validation_error(data: dict) -> str | None:
+    """
+    IMP-4: run a candidate config dict through the core parser/validator
+    before writing it to disk. Returns an error string or None if valid.
+    A config that saves but fails load_config() silently stops all scans.
+    """
+    try:
+        from core.config import _parse_config
+        _parse_config(data)
+        return None
+    except Exception as exc:
+        return str(exc)
+
+
 @config_bp.route("/config", methods=["GET"])
 def config_view():
     config_path = current_app.config["CONFIG_PATH"]
@@ -59,11 +90,25 @@ def config_save():
             return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
                                    error="YAML must be a mapping — cannot save empty or scalar content.",
                                    edit_mode="yaml")
+        # IMP-4: refuse to write a config the core cannot load
+        err = _validation_error(data)
+        if err:
+            raw = _load_raw(config_path)
+            return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
+                                   error=f"Config invalid — not saved: {err}",
+                                   edit_mode="yaml")
         _save_raw(config_path, data)
         return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
 
     # Form mode — rebuild config dict from form fields
     data = _form_to_config(request.form, _load_raw(config_path))
+    # IMP-4: refuse to write a config the core cannot load
+    err = _validation_error(data)
+    if err:
+        raw      = _load_raw(config_path)
+        raw_yaml = yaml.dump(raw, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
+                               error=f"Config invalid — not saved: {err}")
     _save_raw(config_path, data)
     return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
 
@@ -71,9 +116,10 @@ def config_save():
 @config_bp.route("/config/test/qbit", methods=["POST"])
 def test_qbit():
     from core.qbit import QBittorrentClient
-    url      = request.json.get("url", "")
-    username = request.json.get("username", "")
-    password = request.json.get("password", "")
+    body     = request.get_json(silent=True) or {}   # SEC-5: no 415 on bad body
+    url      = body.get("url", "")
+    username = body.get("username", "")
+    password = body.get("password", "")
     try:
         client = QBittorrentClient(url, username, password)
         ok     = client.test_connection()
@@ -85,8 +131,9 @@ def test_qbit():
 @config_bp.route("/config/test/lidarr", methods=["POST"])
 def test_lidarr():
     from core.arrs.lidarr import LidarrClient
-    url     = request.json.get("url", "")
-    api_key = request.json.get("api_key", "")
+    body    = request.get_json(silent=True) or {}   # SEC-5
+    url     = body.get("url", "")
+    api_key = body.get("api_key", "")
     try:
         client = LidarrClient(url, api_key)
         ok     = client.test_connection()
@@ -98,8 +145,9 @@ def test_lidarr():
 @config_bp.route("/config/test/radarr", methods=["POST"])
 def test_radarr():
     from core.arrs.radarr import RadarrClient
-    url     = request.json.get("url", "")
-    api_key = request.json.get("api_key", "")
+    body    = request.get_json(silent=True) or {}   # SEC-5
+    url     = body.get("url", "")
+    api_key = body.get("api_key", "")
     try:
         client = RadarrClient(url, api_key)
         ok     = client.test_connection()
@@ -111,8 +159,9 @@ def test_radarr():
 @config_bp.route("/config/test/sonarr", methods=["POST"])
 def test_sonarr():
     from core.arrs.sonarr import SonarrClient
-    url     = request.json.get("url", "")
-    api_key = request.json.get("api_key", "")
+    body    = request.get_json(silent=True) or {}   # SEC-5
+    url     = body.get("url", "")
+    api_key = body.get("api_key", "")
     try:
         client = SonarrClient(url, api_key)
         ok     = client.test_connection()
@@ -271,19 +320,11 @@ def prowlarr_indexers():
         from core.config import load_config
         from core.prowlarr import ProwlarrClient
         from core.indexer_scorer import IndexerScorer
-        from core.state import StateManager
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-        # BUG-09: per-request StateManager opens a new SQLite connection; cleanup
-        # relies on GC (__del__). TODO: pass scheduler._state through app.config
-        # and reuse it here to avoid connection proliferation under load.
-        state    = StateManager(
-            db_path=cfg.state.db_file,
-            log_path=cfg.logging.log_file,
-            retention_days=cfg.logging.retention_days,
-        )
+        state    = _get_state(cfg)   # IMP-2: shared app-wide StateManager
         scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
         results = scorer.score_all(skip_ai=True)
         for r in results:
@@ -302,18 +343,13 @@ def prowlarr_indexers_ai():
         from core.config import load_config
         from core.prowlarr import ProwlarrClient
         from core.indexer_scorer import IndexerScorer
-        from core.state import StateManager
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
         if not cfg.prowlarr.ollama.url or not cfg.prowlarr.ollama.model:
             return jsonify({"ok": False, "message": "Ollama is not configured"})
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-        state    = StateManager(
-            db_path=cfg.state.db_file,
-            log_path=cfg.logging.log_file,
-            retention_days=cfg.logging.retention_days,
-        )
+        state    = _get_state(cfg)   # IMP-2: shared app-wide StateManager
         scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
         results = scorer.score_all(skip_ai=False)
         for r in results:
@@ -327,10 +363,15 @@ def prowlarr_indexers_ai():
 def prowlarr_save():
     """Merge the Prowlarr config block into config.yaml."""
     config_path = current_app.config["CONFIG_PATH"]
-    data        = request.json or {}
+    data        = request.get_json(silent=True) or {}   # SEC-5
     try:
         raw = _load_raw(config_path)
-        raw["prowlarr"] = {
+        # BUG-10: merge onto the existing block instead of replacing it.
+        # Replacing dropped every key without a UI field — most importantly
+        # the `ollama` sub-block, silently disabling AI scoring on every save
+        # (same clobber class as the old `scoring` bug).
+        block = dict(raw.get("prowlarr", {}) or {})
+        block.update({
             "enabled":                data.get("enabled", False),
             "url":                    data.get("url", ""),
             "api_key":                data.get("api_key", ""),
@@ -345,7 +386,8 @@ def prowlarr_save():
                 "backoff_penalty":           _float(data.get("backoff_penalty"), 20.0),
                 "malicious_penalty_per_hit": _float(data.get("malicious_penalty_per_hit"), 10.0),
             },
-        }
+        })
+        raw["prowlarr"] = block
         _save_raw(config_path, raw)
         return jsonify({"ok": True})
     except Exception as exc:
@@ -356,16 +398,11 @@ def prowlarr_save():
 def prowlarr_set_ignored():
     """Toggle the ignore/pin state for a single indexer."""
     config_path = current_app.config["CONFIG_PATH"]
-    data        = request.json or {}
+    data        = request.get_json(silent=True) or {}   # SEC-5
     try:
         from core.config import load_config
-        from core.state import StateManager
         cfg   = load_config(config_path)
-        state = StateManager(  # BUG-09: per-request connection; see prowlarr_indexers TODO
-            db_path=cfg.state.db_file,
-            log_path=cfg.logging.log_file,
-            retention_days=cfg.logging.retention_days,
-        )
+        state = _get_state(cfg)   # IMP-2: shared app-wide StateManager
         state.set_indexer_ignored(
             indexer_id=int(data["indexer_id"]),
             indexer_name=data["indexer_name"],
@@ -385,16 +422,11 @@ def prowlarr_rescore():
         from core.config import load_config
         from core.prowlarr import ProwlarrClient
         from core.indexer_scorer import IndexerScorer
-        from core.state import StateManager
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-        state    = StateManager(  # BUG-09: per-request connection; see prowlarr_indexers TODO
-            db_path=cfg.state.db_file,
-            log_path=cfg.logging.log_file,
-            retention_days=cfg.logging.retention_days,
-        )
+        state    = _get_state(cfg)   # IMP-2: shared app-wide StateManager
         scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
         changed = scorer.reorder()
         return jsonify({"ok": True, "changed": changed})
@@ -405,8 +437,9 @@ def prowlarr_rescore():
 @config_bp.route("/config/test/prowlarr", methods=["POST"])
 def test_prowlarr():
     from core.prowlarr import ProwlarrClient
-    url     = request.json.get("url", "")
-    api_key = request.json.get("api_key", "")
+    body    = request.get_json(silent=True) or {}   # SEC-5
+    url     = body.get("url", "")
+    api_key = body.get("api_key", "")
     try:
         client = ProwlarrClient(url, api_key)
         ok     = client.test_connection()
@@ -419,8 +452,9 @@ def test_prowlarr():
 def test_pushover():
     """Send a test Pushover notification to verify credentials."""
     import requests as req
-    app_token = request.json.get("app_token", "")
-    user_key  = request.json.get("user_key", "")
+    body      = request.get_json(silent=True) or {}   # SEC-5
+    app_token = body.get("app_token", "")
+    user_key  = body.get("user_key", "")
     if not app_token or not user_key:
         return jsonify({"ok": False, "message": "App token and user key are required"})
     try:

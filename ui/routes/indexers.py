@@ -29,15 +29,13 @@ def indexers_sync():
         from core.config import load_config
         from core.prowlarr import ProwlarrClient
         from core.indexer_scorer import IndexerScorer
-        from core.state import StateManager
+        from .config import _get_state
 
-        cfg      = load_config(config_path)
+        cfg = load_config(config_path)
+        if not cfg.prowlarr.enabled:
+            return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-        state    = StateManager(  # BUG-09: per-request connection; TODO reuse scheduler._state
-            db_path=cfg.state.db_file,
-            log_path=cfg.logging.log_file,
-            retention_days=cfg.logging.retention_days,
-        )
+        state    = _get_state(cfg)   # IMP-2: shared app-wide StateManager
         scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
         changed = scorer.reorder()
 

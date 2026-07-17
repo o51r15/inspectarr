@@ -47,6 +47,11 @@ def create_app(config_path: str) -> Flask:
     )
     app.config["CONFIG_PATH"] = config_path
     app.config["SCHEDULER"]   = Scheduler(config_path)
+    # IMP-2: share the scheduler's StateManager with all routes so requests
+    # reuse one SQLite connection instead of opening one per request (BUG-09).
+    # May be None if the config/DB was unavailable at startup — routes fall
+    # back to a fresh instance in that case.
+    app.config["STATE"] = app.config["SCHEDULER"]._state
 
     @app.context_processor
     def inject_auth_status():

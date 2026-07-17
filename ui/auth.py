@@ -14,8 +14,29 @@ never locks the user out of the UI.
 Fails open on any config read error (homelab posture: prefer access over
 lockout).
 """
+import hmac
+from urllib.parse import urlparse
+
 import yaml
 from flask import request, Response
+
+
+def _cross_origin_write() -> bool:
+    """
+    SEC-1 (CSRF): with HTTP Basic Auth the browser auto-attaches credentials,
+    so a malicious page can fire form POSTs at the UI (config save, torrent
+    delete, log clear). Browsers send Origin (and/or Referer) on such
+    requests — reject writes whose origin host doesn't match our Host.
+    Non-browser clients (curl, scripts) send neither header and are allowed.
+    """
+    if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
+        return False
+    for header in ("Origin", "Referer"):
+        val = request.headers.get(header)
+        if val:
+            host = urlparse(val).netloc
+            return bool(host) and host != request.host
+    return False
 
 
 def read_auth_block(config_path: str) -> dict:
@@ -41,16 +62,21 @@ def check_auth(config_path: str):
     if request.path == "/logout":
         return None
 
+    if _cross_origin_write():
+        return Response("Cross-origin request rejected.", 403)
+
     auth = read_auth_block(config_path)
 
     if not auth.get("enabled", False):
         return None
 
+    # SEC-3: compare_digest for constant-time comparison; str() because YAML
+    # can parse a numeric password as int.
     creds = request.authorization
     if (
         not creds
-        or creds.username != auth.get("username", "")
-        or creds.password != auth.get("password", "")
+        or not hmac.compare_digest(creds.username or "", str(auth.get("username", "")))
+        or not hmac.compare_digest(creds.password or "", str(auth.get("password", "")))
     ):
         return Response(
             "Authentication required.",

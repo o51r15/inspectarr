@@ -42,7 +42,13 @@ def _read_log_page(log_path: str, page: int, level_filter: str) -> tuple[list, i
 def logs_view():
     config_path  = current_app.config["CONFIG_PATH"]
     log_path     = _get_log_path(config_path)
-    page         = int(request.args.get("page", 1))
+    # BUG-14: bare int() returned HTTP 500 on ?page=abc, and page<1 produced
+    # negative slice indices.
+    try:
+        page = int(request.args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+    page         = max(1, page)
     level_filter = request.args.get("level", "ALL")
 
     entries, total = _read_log_page(log_path, page, level_filter)

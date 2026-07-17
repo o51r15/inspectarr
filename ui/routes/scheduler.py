@@ -23,8 +23,11 @@ def toggle():
         scheduler.stop()
         suffix = "?toast=Scheduler+stopped&level=info"
     else:
-        scheduler.start()
-        suffix = "?toast=Scheduler+started&level=success"
+        if scheduler.start():
+            suffix = "?toast=Scheduler+started&level=success"
+        else:
+            # BUG-11: previous loop still finishing a scan — did not start
+            suffix = "?toast=Scheduler+still+stopping+-+try+again+shortly&level=warning"
     referrer = request.referrer or url_for("dashboard.index")
     # Strip any existing toast params from referrer before appending new ones
     base = referrer.split("?")[0]
@@ -34,11 +37,15 @@ def toggle():
 @scheduler_bp.route("/scheduler/run", methods=["POST"])
 def run_now():
     scheduler = current_app.config["SCHEDULER"]
-    if not scheduler.is_scanning():
-        scheduler.trigger()
+    # BUG-12: trigger() itself now refuses when a scan is in flight (the old
+    # is_scanning()-then-trigger() pattern was a check-then-act race).
+    if scheduler.trigger():
+        suffix = "?toast=Scan+triggered&level=success"
+    else:
+        suffix = "?toast=Scan+already+running&level=warning"
     referrer = request.referrer or url_for("dashboard.index")
     base = referrer.split("?")[0]
-    return redirect(base + "?toast=Scan+triggered&level=success")
+    return redirect(base + suffix)
 
 
 @scheduler_bp.route("/scheduler/status")
