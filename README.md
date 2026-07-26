@@ -2,102 +2,79 @@
   <img src="assets/inspectarr-banner.svg" alt="Inspectarr" width="900">
 </p>
 
-# inspectarr
+<p align="center">
+  <b>Torrent watchdog for *arr ecosystems</b><br>
+  Detects bad downloads, blocklists them, and keeps your indexers honest.
+</p>
 
-Torrent watchdog for \*arr ecosystems. Polls qBittorrent categories, detects
-downloads that match configurable bad-file rules (e.g. `.exe` files in a TV
-category), blocklists them in Sonarr, Radarr, or Lidarr, deletes the torrent and
-files, logs all events to JSON Lines, and notifies via Pushover.
-
-Also monitors Prowlarr torrent indexer health — scoring each indexer by response
-time (logarithmic curve), weighted failure rate (auth > grab > query > RSS),
-malicious content rate, and grab success — automatically reorders them so your
-best indexers are always searched first, and tracks per-indexer grab and
-malicious-hit statistics over time. Optionally integrates with a local
-[Ollama](https://ollama.com) instance to apply AI-powered health scoring that
-considers the full picture of each indexer's behaviour.
-
-Runs two ways: a **web UI with a built-in scheduler daemon** (`web.py`), or a
-**one-shot CLI** (`inspectarr.py`) for manual runs and testing.
+<p align="center">
+  <a href="https://github.com/o51r15/inspectarr/releases/latest"><img src="https://img.shields.io/github/v/release/o51r15/inspectarr?style=flat-square&color=blue" alt="Release"></a>
+  <a href="https://github.com/o51r15/inspectarr/pkgs/container/inspectarr"><img src="https://img.shields.io/badge/ghcr.io-inspectarr-blue?style=flat-square&logo=docker" alt="GHCR"></a>
+  <a href="https://github.com/o51r15/inspectarr/actions"><img src="https://img.shields.io/github/actions/workflow/status/o51r15/inspectarr/devcontainer.yml?style=flat-square&label=build" alt="Build"></a>
+  <a href="https://github.com/o51r15/inspectarr/blob/main/LICENSE"><img src="https://img.shields.io/github/license/o51r15/inspectarr?style=flat-square" alt="License"></a>
+</p>
 
 ---
 
-## Quick Start (Web UI)
+## What it does
 
-```bash
-cp config.example.yaml config.yaml
-# edit config.yaml with your URLs, credentials, and rules
-pip install -r requirements.txt
-python3 web.py
-```
+Inspectarr polls your qBittorrent categories, finds downloads that match bad-file
+rules (`.exe` in a TV category, undersized files, suspicious filenames), blocklists
+them in Sonarr / Radarr / Lidarr, deletes the torrent, and notifies you via Pushover.
 
-Open `http://<host>:8585`. The scheduler starts **off** — enable it from the
-dashboard once you've confirmed your config and categories are correct.
-
-## Quick Start (CLI)
-
-```bash
-cp config.example.yaml config.yaml
-python3 inspectarr.py --dry-run    # confirm matches without deleting
-python3 inspectarr.py              # live run
-```
-
-## Requirements
-
-- Python 3.12+
-- qBittorrent with Web UI enabled (v4.x or v5.x)
-- One or more of: Sonarr v4, Radarr v3, Lidarr v2
-- Prowlarr (optional — required only for indexer health scoring and attribution)
-- Ollama (optional — enables AI-powered indexer health scoring via a local LLM)
-
-```bash
-pip install -r requirements.txt   # requests, pyyaml, flask
-```
+It also scores your Prowlarr torrent indexers by health — response time, failure
+rate, malicious content, and grab success — then automatically reorders them so
+your best indexers are searched first. Optionally uses a local
+[Ollama](https://ollama.com) LLM for AI-powered scoring.
 
 ---
 
-## Web UI
+## Features
 
-Served on port `8585` by default (configurable via `web.port`). Responsive layout works on desktop and mobile.
-
-| Page | What it does |
-|---|---|
-| **Dashboard** | Scheduler status, last-scan stats (checked / flagged / actioned), last flagged torrent (persists across clean scans), recent run history. Live-updates every 5s. |
-| **Scheduler** | Start/stop the daemon, run-now, poll interval, last/next run, run history. |
-| **Torrents** | Quick-look dashboard of all qBittorrent torrents. Filter by status/category, change categories, pause/resume, and delete. Per-torrent detail view with tracker status and file list. Compatible with qBittorrent 4.x and 5.x. |
-| **Indexers** | Prowlarr torrent indexer health table. Rescore computes deterministic scores and, if Ollama is configured, runs AI scoring in the background. Reorder & Sync applies priority changes using cached scores and pushes the updated order to all connected apps. Per-indexer Ignore toggle and stats reset. |
-| **Stats** | Per-indexer grab and malicious-hit statistics. Total grabs attributed on first scan of each torrent; malicious hits increment when Inspectarr flags and deletes a torrent from that indexer. |
-| **Logs** | Paginated JSON Lines viewer (100/page), level filter, color-coded badges, auto-refresh, clear-log. |
-| **Settings** | Full form editor organized into sub-panes: Connections, Rules, Indexers (with Ollama model selector), Notifications, General, Advanced, Backups. Test-connection buttons for all services. Raw-YAML mode for advanced edits. |
-| **System → Status** | Application info, scheduler state, storage usage, live connection checks for all services. |
-| **System → Tasks** | Scheduled jobs view with state indicators (à la \*arr apps). |
-| **System → Updates** | GitHub releases check with version comparison and release notes. |
-
-The scheduler reloads `config.yaml` from disk before every scan, so changes
-saved in the Config page take effect on the next cycle — no restart needed.
-Changing `web.port` is the one exception; that requires a restart.
-
-### Authentication
-
-Optional HTTP Basic Auth, configurable from the Config page (Form tab → Web UI
-Authentication). Takes effect immediately — no restart needed. Fails open on
-config errors so a broken `config.yaml` never locks you out.
+- **Bad torrent detection** — configurable rules per qBittorrent category: bad extensions, filename patterns, minimum file size
+- **Automatic remediation** — blocklist in the *arr, delete from qBit, retry on failure
+- **Prowlarr indexer health scoring** — weighted failure rates, logarithmic response time curve, malicious content tracking, grab success rate, historical trend analysis
+- **AI-powered scoring** — optional Ollama integration with in-UI model selector
+- **Grab attribution** — tracks which indexer served each torrent, increments malicious-hit counters automatically
+- **Auto-reorder** — demotes bad indexers, promotes good ones, syncs to all connected apps
+- **Pushover notifications** — with optional Ollama-narrated daily digests
+- **Full web UI** — dashboard, scheduler, torrents, indexer health, stats, settings, backups, system status
+- **Mobile responsive** — works on phone and tablet
+- **Docker-native** — single volume mount, GHCR images, dev container CI
 
 ---
 
-## Docker
+## Quick Start
 
-Pull the published image from GHCR:
+### Docker Compose (recommended)
 
-```bash
-docker pull ghcr.io/o51r15/inspectarr:latest
+```yaml
+services:
+  inspectarr:
+    image: ghcr.io/o51r15/inspectarr:latest
+    container_name: inspectarr
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    ports:
+      - "8585:8585"
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml
 ```
 
-Run it:
+```bash
+cp config.example.yaml config.yaml   # edit with your URLs and credentials
+docker compose up -d
+```
+
+Open `http://your-server:8585`. The scheduler starts **stopped** — configure and verify your settings first, then start it from the dashboard.
+
+> **Tip:** Set `user` to your host UID:GID (`id -u`:`id -g`) so mounted volumes are writable. The compose file defaults to `1000:1000`.
+
+### Docker Run
 
 ```bash
-docker run -d \
-  --name inspectarr \
+docker run -d --name inspectarr \
   --user "$(id -u):$(id -g)" \
   -p 8585:8585 \
   -v ./data:/app/data \
@@ -105,173 +82,115 @@ docker run -d \
   ghcr.io/o51r15/inspectarr:latest
 ```
 
-Or with Docker Compose (using the included `docker-compose.yml`):
+### From Source
 
 ```bash
-docker compose up -d
-```
-
-The compose file uses `PUID`/`PGID` environment variables (defaulting to `1000:1000`)
-to run the container as your host user, avoiding permission issues with mounted volumes.
-
-A `ghcr.io/o51r15/inspectarr:dev` image is built automatically on every push to `main`.
-
-To run a one-off CLI scan against a running container:
-
-```bash
-docker exec inspectarr python inspectarr.py --dry-run
+git clone https://github.com/o51r15/inspectarr.git && cd inspectarr
+pip install -r requirements.txt
+cp config.example.yaml config.yaml
+python3 web.py
 ```
 
 ---
 
-## Systemd (auto-start on boot)
+## Web UI
 
-A `inspectarr.service` unit file is included. Copy it and enable it:
+Responsive dark theme. Works on desktop and mobile.
+
+| Page | Purpose |
+|---|---|
+| **Dashboard** | Scheduler status, scan stats, last flagged torrent, run history |
+| **Torrents** | Browse qBittorrent — filter, pause, resume, delete, detail view |
+| **Indexers** | Health scores, rescore, reorder & sync, per-indexer ignore/reset |
+| **Stats** | Grab attribution — total grabs, malicious hits, % malicious per indexer |
+| **Settings** | Connections, rules, indexers + AI model selector, notifications, general, advanced, backups |
+| **System** | Status, scheduled tasks, update checker |
+| **Events** | Paginated log viewer with level filter |
+
+Settings are saved to `config.yaml` and take effect on the next scan cycle — no restart needed.
+
+---
+
+## CLI
 
 ```bash
-sudo cp inspectarr.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable inspectarr
-sudo systemctl start inspectarr
+python3 inspectarr.py                    # single scan
+python3 inspectarr.py --dry-run          # log matches, take no action
+python3 inspectarr.py --retry-now        # flush retry queue, then scan
+python3 inspectarr.py --daemon           # continuous loop with graceful shutdown
+python3 inspectarr.py --config /path     # alternate config file
 ```
 
-Check status and logs:
+---
 
-```bash
-sudo systemctl status inspectarr
-sudo journalctl -u inspectarr -f
-```
+## Indexer Health Scoring
+
+Each torrent indexer gets a **0–100% health score** from six signals:
+
+| Signal | What it measures | Weight |
+|---|---|---|
+| Response time | Logarithmic curve — gentle on fast, harsh on slow | 0.25 |
+| Failure rate | Weighted by type: auth 3×, grab 2×, query 1×, RSS 0.5× | 0.30 |
+| Malicious rate | Flagged hits ÷ total grabs (normalized across volumes) | 0.20 |
+| Grab success | Distinct grab success rate | 0.25 |
+| Backoff penalty | Flat −20 if indexer is in Prowlarr backoff | — |
+| Trend | Linear regression over last 30 snapshots, ±10 | — |
+
+When [Ollama](https://ollama.com) is configured, the LLM receives all per-indexer data and returns its own score with reasoning. Select your model from **Settings → Indexers → AI Model**. Falls back to deterministic scoring silently on any failure.
+
+All weights, multipliers, and thresholds are configurable. See the [wiki](https://github.com/o51r15/inspectarr/wiki/Prowlarr-Indexer-Scoring) for the full breakdown.
+
+---
+
+## Requirements
+
+- **qBittorrent** with Web UI enabled (v4.x or v5.x)
+- **One or more of:** Sonarr v4, Radarr v3, Lidarr v2
+- **Prowlarr** *(optional)* — for indexer scoring and grab attribution
+- **Ollama** *(optional)* — for AI-powered health scoring
+- **Python 3.12+** *(only if running from source)*
 
 ---
 
 ## Configuration
 
-See `config.example.yaml` for all options with inline documentation.
+All settings live in `config.yaml` — copy `config.example.yaml` to get started. Most options are also editable from the web UI Settings page.
 
-Key settings:
-
-| Setting | Purpose |
-|---|---|
-| `rules[].conditions.match_mode` | `any` = flag on any bad file; `primary` = only if largest file is bad |
-| `rules[].conditions.bad_extensions` | List of file extensions to flag (e.g. `.exe`, `.zip`) |
-| `rules[].conditions.min_file_size_mb` | Flag if the primary (largest) file is below this size in MB |
-| `rules[].conditions.bad_filename_patterns` | List of regex patterns matched against filenames |
-| `on_arr_failure` | `delete` = remove from qBit anyway; `abort` = skip and retry |
-| `poll_interval_seconds` | How often the scheduler daemon scans (default: 300) |
-| `retry.max_attempts` | How many times to retry before giving up (default: 10) |
-| `retry.interval_seconds` | Seconds between retry attempts (default: 600) |
-| `web.port` | Web UI port (default: 8585) |
-| `web.scheduler_autostart` | `true` = start the scheduler automatically on launch (default: false) |
-| `web.auth.enabled` | `true` = require Basic Auth login to access the web UI |
-| `web.auth.username` / `web.auth.password` | Credentials for Basic Auth |
-| `dry_run` | `true` = log matches only, no deletions |
-| `prowlarr.enabled` | Enable Prowlarr indexer health scoring, auto-reorder, and grab attribution |
-| `prowlarr.url` | Prowlarr URL including base path if set (e.g. `http://host:9696/prowlarr`) |
-| `prowlarr.base_priority` | Priority number assigned to the best-scoring torrent indexer; others count up from here |
-| `prowlarr.reorder_interval_hours` | How often the auto-reorder runs (driven by the scheduler) |
-| `prowlarr.history_window_days` | Rolling window for response time and failure rate scoring |
-| `prowlarr.min_grabs_before_scoring` | Minimum history records required before scoring an indexer |
-| `prowlarr.scoring.response_time_weight` | Weight for logarithmic response time score (default 0.25) |
-| `prowlarr.scoring.failure_rate_weight` | Weight for weighted failure rate score (default 0.30) |
-| `prowlarr.scoring.malicious_weight` | Weight for malicious content rate score (default 0.20) |
-| `prowlarr.scoring.grab_success_weight` | Weight for grab success sub-score (default 0.25) |
-| `prowlarr.scoring.auth_failure_mult` | Auth failure severity multiplier (default 3.0) |
-| `prowlarr.scoring.grab_failure_mult` | Grab failure severity multiplier (default 2.0) |
-| `prowlarr.scoring.query_failure_mult` | Query failure severity multiplier (default 1.0) |
-| `prowlarr.scoring.rss_failure_mult` | RSS failure severity multiplier (default 0.5) |
-| `prowlarr.ollama.url` | Ollama API base URL (e.g. `http://192.168.1.125:11434`) |
-| `prowlarr.ollama.model` | Model name to use for AI scoring (e.g. `gemma4:latest`) |
-| `prowlarr.ollama.timeout` | Request timeout in seconds (default: 120) |
-
----
-
-## CLI Flags
-
-```
-python3 inspectarr.py                    # single scan run
-python3 inspectarr.py --config /path     # alternate config location
-python3 inspectarr.py --dry-run          # override config dry_run=true
-python3 inspectarr.py --retry-now        # force flush retry queue, then scan
-python3 inspectarr.py --daemon           # continuous loop (poll_interval_seconds)
-```
-
-The web UI scheduler lives in `web.py`. The CLI is single-shot by default;
-`--daemon` runs a continuous scan loop with graceful SIGINT/SIGTERM handling.
+See the [Configuration wiki page](https://github.com/o51r15/inspectarr/wiki/Configuration) for every option.
 
 ---
 
 ## Persistent Data
 
-Everything in `data/` — mount as a Docker volume:
+Mount `data/` as a volume — it holds everything Inspectarr remembers:
 
 | File | Contents |
 |---|---|
-| `inspectarr.db` | SQLite: processed hashes, retry queue, run history, indexer stats, grab attribution |
-| `inspectarr.log.json` | JSON Lines: one event object per line |
+| `inspectarr.db` | SQLite — processed hashes, retry queue, run history, indexer stats, score history |
+| `inspectarr.log.json` | JSON Lines event log |
+| `data/backups/` | Timestamped zip backups (config + database) created from the UI |
 
 ---
 
-## Project Layout
+## Docker Images
 
-```
-inspectarr/
-├── inspectarr.py            # CLI entry point (single-shot)
-├── web.py                   # Web UI + scheduler daemon entry point
-├── core/                    # Core logic — no awareness of the UI
-│   ├── config.py            # Config loader + dataclasses
-│   ├── scanner.py           # Main orchestrator (scan, flag, action, attribute)
-│   ├── rules.py             # Rule evaluation engine
-│   ├── qbit.py              # qBittorrent Web API v2 client (4.x + 5.x compatible)
-│   ├── prowlarr.py          # Prowlarr API client (indexers, priority, sync)
-│   ├── indexer_scorer.py    # Indexer health score computation + reorder logic
-│   ├── llm_client.py        # Ollama LLM client for AI-powered indexer scoring
-│   ├── arrs/
-│   │   ├── base.py          # AbstractArrClient (history lookup, grab attribution)
-│   │   ├── sonarr.py        # Sonarr v4 client
-│   │   ├── radarr.py        # Radarr v3 client
-│   │   └── lidarr.py        # Lidarr v2 client
-│   ├── notifier.py          # Pushover client
-│   └── state.py             # SQLite + JSON Lines log + grab attribution tables
-├── ui/                      # Web UI layer
-│   ├── auth.py              # HTTP Basic Auth enforcement
-│   ├── scheduler.py         # Background scheduler daemon thread
-│   ├── routes/
-│   │   ├── dashboard.py     # Dashboard page + /status JSON endpoint
-│   │   ├── scheduler.py     # Scheduler controls
-│   │   ├── logs.py          # Log viewer
-│   │   ├── torrents.py      # Torrents page + AJAX actions
-│   │   ├── indexers.py      # Indexer health page + reorder & sync
-│   │   ├── stats.py         # Indexer grab/malicious stats page
-│   │   ├── system.py        # System status, tasks, updates pages
-│   │   └── config.py        # Config form + test/backup/Ollama model endpoints
-│   ├── templates/
-│   │   ├── base.html        # Sidebar, nav, fonts, toast system
-│   │   ├── dashboard.html
-│   │   ├── scheduler.html
-│   │   ├── logs.html
-│   │   ├── torrents.html
-│   │   ├── torrent_detail.html
-│   │   ├── indexers.html
-│   │   ├── stats.html
-│   │   ├── config.html
-│   │   ├── system_tasks.html
-│   │   └── system_updates.html
-│   └── static/
-│       ├── style.css        # Dark theme — IBM Plex + Syne typography, mobile responsive
-│       ├── app.js
-│       └── logo.svg         # Vector logo mark
-├── assets/
-│   └── inspectarr-banner.jpg
-├── .devcontainer/
-│   └── devcontainer.json    # Dev container configuration
-├── .github/workflows/
-│   ├── release.yml          # Build + push Docker image to GHCR on tag
-│   ├── devcontainer.yml     # Build dev container on push to main
-│   └── mirror.yml           # Mirror to Gitea
-├── config.example.yaml
-├── docker-compose.yml
-├── inspectarr.service
-├── data/                    # Runtime state (gitignored, Docker volume)
-├── Dockerfile
-└── requirements.txt
-```
+| Tag | When it's built |
+|---|---|
+| `ghcr.io/o51r15/inspectarr:latest` | On tagged releases |
+| `ghcr.io/o51r15/inspectarr:dev` | On every push to `main` |
+
+A [dev container](https://containers.dev/) config is included for VS Code / Codespaces.
+
+---
+
+## Links
+
+- [Wiki](https://github.com/o51r15/inspectarr/wiki) — installation, configuration, scoring, rules, troubleshooting
+- [Issues](https://github.com/o51r15/inspectarr/issues) — bugs and feature requests
+- [Releases](https://github.com/o51r15/inspectarr/releases) — changelog and downloads
+
+---
+
+## License
+
+[MIT](LICENSE)
