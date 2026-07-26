@@ -215,6 +215,8 @@ class Scheduler:
 
         # After each scan cycle, check whether a Prowlarr reorder is due.
         self._maybe_reorder()
+        # Check if a periodic log summary is due.
+        self._maybe_summary()
 
     def _maybe_reorder(self):
         """
@@ -274,6 +276,51 @@ class Scheduler:
                 try:
                     self._state.write_log({
                         "level": "ERROR", "event": "prowlarr_auto_reorder_failed",
+                        "reason": str(exc),
+                    })
+                except Exception:
+                    pass
+
+    def _maybe_summary(self):
+        """
+        If notifications.summary is enabled and enough time has elapsed since
+        the last summary, generate and send one. Best-effort.
+        """
+        try:
+            from core.config import load_config
+            config = load_config(self.config_path)
+            if not config.notifications.summary.enabled:
+                return
+            if self._state is None:
+                return
+
+            # Check timing — daily = 24h, weekly = 168h
+            schedule = config.notifications.summary.schedule
+            interval_h = 168 if schedule == "weekly" else 24
+            now = datetime.now(timezone.utc)
+
+            stored = self._state.get_app_state("last_log_summary")
+            if stored:
+                try:
+                    last = datetime.fromisoformat(stored)
+                    elapsed_h = (now - last).total_seconds() / 3600.0
+                    if elapsed_h < interval_h:
+                        return
+                except ValueError:
+                    pass
+
+            from core.summarizer import LogSummarizer
+            summarizer = LogSummarizer(config)
+            sent = summarizer.generate_and_send(self._state)
+            if sent:
+                self._state.set_app_state("last_log_summary", now.isoformat())
+
+        except Exception as exc:
+            if self._state:
+                try:
+                    self._state.write_log({
+                        "level": "ERROR",
+                        "event": "log_summary_failed",
                         "reason": str(exc),
                     })
                 except Exception:

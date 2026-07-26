@@ -28,19 +28,72 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dry-run",   action="store_true",
                    help="Flag matches but take no action (overrides config)")
     p.add_argument("--daemon",    action="store_true",
-                   help="Not in the CLI — use web.py for the scheduler daemon")
+                   help="Run as a headless daemon — continuous scan loop without the web UI")
     p.add_argument("--retry-now", action="store_true",
                    help="Force flush retry queue — bypasses timing and exhaustion cap, then scans")
     return p.parse_args()
+
+
+def _run_daemon(args):
+    """Headless scan loop — no web UI, just scan → sleep → repeat."""
+    import signal
+    import time
+    from core.config import load_config
+    from core.scanner import Scanner
+
+    if not os.path.exists(args.config):
+        print(f"ERROR: Config file not found: {args.config}")
+        sys.exit(1)
+
+    try:
+        config = load_config(args.config)
+    except Exception as exc:
+        print(f"ERROR: Failed to load config: {exc}")
+        sys.exit(1)
+
+    if args.dry_run:
+        config.dry_run = True
+
+    interval = config.poll_interval_seconds
+    print(f"inspectarr daemon starting — scanning every {interval}s")
+    print("Press Ctrl+C to stop")
+
+    _running = True
+
+    def _shutdown(sig, frame):
+        nonlocal _running
+        print("\nShutdown signal received — finishing current cycle…")
+        _running = False
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    scanner = Scanner(config)
+    scanner.startup()
+
+    while _running:
+        try:
+            if config.retry.enabled:
+                scanner.process_retries()
+            scanner.run_scan()
+        except Exception as exc:
+            print(f"ERROR during scan: {exc}")
+
+        # Sleep in 1s ticks so we can respond to shutdown quickly
+        for _ in range(interval):
+            if not _running:
+                break
+            time.sleep(1)
+
+    print("inspectarr daemon stopped")
 
 
 def main():
     args = parse_args()
 
     if args.daemon:
-        print("The CLI runs a single scan. For a continuous scheduler daemon,")
-        print("run the web UI instead:  python web.py")
-        sys.exit(1)
+        _run_daemon(args)
+        return  # unreachable; _run_daemon loops forever
 
     # IMP-5: single config-load path for both --retry-now and normal runs
     from core.config import load_config

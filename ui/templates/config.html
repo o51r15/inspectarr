@@ -439,6 +439,34 @@
         </div>
       </div>
 
+      <!-- PANE: Backups -->
+      <div class="settings-pane" data-pane="backups">
+        <div class="form-section">
+          <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Configuration &amp; Database Backups</span>
+            <button type="button" class="btn btn-primary btn-sm" onclick="createBackup()">Create Backup Now</button>
+          </div>
+          <p class="hint" style="margin-bottom:1rem">
+            Backups include your <code>config.yaml</code> and <code>inspectarr.db</code> SQLite database,
+            bundled into a timestamped zip file stored in the <code>data/backups/</code> directory.
+          </p>
+          <div id="backup-status" class="hint" style="margin-bottom:1rem"></div>
+          <table class="table" id="backups-table">
+            <thead>
+              <tr>
+                <th>Filename</th>
+                <th>Created</th>
+                <th>Size</th>
+                <th style="width:140px"></th>
+              </tr>
+            </thead>
+            <tbody id="backups-body">
+              <tr><td colspan="4" class="hint" style="text-align:center">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div><!-- /settings-content -->
   </div><!-- /form-view -->
 
@@ -476,6 +504,7 @@
   const paneNames = {
     connections: 'Connections', rules: 'Rules', indexers: 'Indexers',
     notifications: 'Notifications', general: 'General', advanced: 'Advanced',
+    backups: 'Backups',
   };
 
   function showPane(pane) {
@@ -768,5 +797,62 @@
     .then(d => { el.textContent = d.message; el.style.color = d.ok ? 'var(--success)' : 'var(--error)'; })
     .catch(() => { el.textContent = 'Request failed'; el.style.color = 'var(--error)'; });
   }
+
+  // ---- Backup management ----
+  function loadBackups() {
+    fetch('/config/backups')
+      .then(r => r.json())
+      .then(d => {
+        const tbody = document.getElementById('backups-body');
+        if (!d.ok || !d.backups.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="hint" style="text-align:center">No backups yet</td></tr>';
+          return;
+        }
+        tbody.innerHTML = d.backups.map(b => `<tr>
+          <td style="font-family:var(--font-mono);font-size:12px">${b.name}</td>
+          <td>${b.created}</td>
+          <td>${b.size}</td>
+          <td style="text-align:right">
+            <a href="/config/backups/download/${b.name}" class="btn btn-ghost btn-sm" style="font-size:0.75rem;padding:2px 8px">Download</a>
+            <button class="btn btn-ghost btn-sm" style="font-size:0.75rem;padding:2px 8px;color:var(--error)" onclick="deleteBackup('${b.name}')">Delete</button>
+          </td>
+        </tr>`).join('');
+      });
+  }
+
+  function createBackup() {
+    const el = document.getElementById('backup-status');
+    el.textContent = 'Creating backup…'; el.style.color = '';
+    fetch('/config/backups/create', {method:'POST'})
+      .then(r => r.json())
+      .then(d => {
+        el.textContent = d.message;
+        el.style.color = d.ok ? 'var(--success)' : 'var(--error)';
+        if (d.ok) loadBackups();
+      })
+      .catch(() => { el.textContent = 'Request failed'; el.style.color = 'var(--error)'; });
+  }
+
+  function deleteBackup(name) {
+    if (!confirm('Delete backup ' + name + '?')) return;
+    fetch('/config/backups/delete', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name}),
+    })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('backup-status');
+      el.textContent = d.message;
+      el.style.color = d.ok ? 'var(--success)' : 'var(--error)';
+      if (d.ok) loadBackups();
+    });
+  }
+
+  // Load backups when pane is first shown
+  const origShowPane = showPane;
+  showPane = function(pane) {
+    origShowPane(pane);
+    if (pane === 'backups') loadBackups();
+  };
 </script>
 {% endblock %}

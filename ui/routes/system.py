@@ -123,3 +123,109 @@ def system_status_data():
         results = list(pool.map(lambda n: _check_one(n, cfg), names))
 
     return jsonify({"ok": True, "connections": results})
+
+
+@system_bp.route("/system/tasks")
+def system_tasks():
+    """System → Tasks: show scheduled internal jobs and their state."""
+    config_path = current_app.config["CONFIG_PATH"]
+    scheduler   = current_app.config["SCHEDULER"]
+    status      = scheduler.get_status()
+
+    tasks = []
+    try:
+        from core.config import load_config
+        cfg = load_config(config_path)
+
+        # 1. Torrent Scan
+        tasks.append({
+            "name":          "Torrent Scan",
+            "interval":      f"Every {cfg.poll_interval_seconds}s",
+            "last_execution": status.get("last_run"),
+            "next_execution": status.get("next_run"),
+            "state":         "running" if status.get("scanning") else
+                             ("queued" if status.get("running") else "idle"),
+        })
+
+        # 2. Retry Processing
+        tasks.append({
+            "name":          "Retry Processing",
+            "interval":      f"Before each scan (every {cfg.retry.interval_seconds}s between attempts)"
+                             if cfg.retry.enabled else "Disabled",
+            "last_execution": status.get("last_run"),  # runs at scan time
+            "next_execution": status.get("next_run") if cfg.retry.enabled else None,
+            "state":         "idle" if cfg.retry.enabled else "disabled",
+        })
+
+        # 3. Prowlarr Auto-Reorder
+        prowlarr_enabled = cfg.prowlarr.enabled
+        last_reorder = None
+        if scheduler.last_reorder:
+            last_reorder = scheduler.last_reorder.isoformat()
+        tasks.append({
+            "name":          "Prowlarr Auto-Reorder",
+            "interval":      f"Every {cfg.prowlarr.reorder_interval_hours}h"
+                             if prowlarr_enabled else "Disabled",
+            "last_execution": last_reorder,
+            "next_execution": None,  # calculated relative to last_reorder
+            "state":         "idle" if prowlarr_enabled else "disabled",
+        })
+
+        # 4. Log & State Pruning
+        tasks.append({
+            "name":          "Log & State Pruning",
+            "interval":      "On startup / before each scan",
+            "last_execution": status.get("last_run"),
+            "next_execution": status.get("next_run"),
+            "state":         "idle",
+        })
+
+    except Exception as exc:
+        return render_template("system_tasks.html", tasks=[], error=str(exc))
+
+    return render_template("system_tasks.html", tasks=tasks, error=None)
+
+
+@system_bp.route("/system/updates")
+def system_updates():
+    """System → Updates: show current version and check GitHub for newer releases."""
+    return render_template("system_updates.html")
+
+
+@system_bp.route("/system/updates/check")
+def system_updates_check():
+    """Fetch the latest release from GitHub and compare to the running version."""
+    import requests
+    import re
+    current = "v1.2.0"  # hardcoded; matches sidebar fallback
+    try:
+        resp = requests.get(
+            "https://api.github.com/repos/o51r15/inspectarr/releases/latest",
+            timeout=10,
+            headers={"Accept": "application/vnd.github.v3+json"},
+        )
+        if resp.status_code == 404:
+            return jsonify({"ok": True, "current": current, "latest": current,
+                            "up_to_date": True, "message": "No releases published yet"})
+        resp.raise_for_status()
+        data = resp.json()
+        latest = data.get("tag_name", current)
+        published = data.get("published_at", "")
+        body = data.get("body", "")
+        html_url = data.get("html_url", "")
+
+        def _ver_tuple(v):
+            return tuple(int(x) for x in re.findall(r"\d+", v))
+
+        up_to_date = _ver_tuple(latest) <= _ver_tuple(current)
+        return jsonify({
+            "ok": True,
+            "current": current,
+            "latest": latest,
+            "up_to_date": up_to_date,
+            "published": published,
+            "release_notes": body[:2000],
+            "url": html_url,
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc), "current": current})

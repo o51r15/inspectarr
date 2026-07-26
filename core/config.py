@@ -75,8 +75,23 @@ class PushoverConfig:
 
 
 @dataclass
+class DigestConfig:
+    enabled: bool = False
+    use_ollama: bool = False
+
+
+@dataclass
+class SummaryConfig:
+    enabled: bool = False
+    schedule: str = "daily"        # "daily" | "weekly"
+    use_ollama: bool = True
+
+
+@dataclass
 class NotificationsConfig:
     pushover: PushoverConfig
+    digest: DigestConfig = field(default_factory=DigestConfig)
+    summary: SummaryConfig = field(default_factory=SummaryConfig)
 
 
 @dataclass
@@ -211,6 +226,8 @@ def _parse_config(raw: dict) -> AppConfig:
     # Notifications
     notif_raw = raw.get("notifications", {})
     push_raw = notif_raw.get("pushover", {})
+    dig_raw = notif_raw.get("digest", {})
+    sum_raw = notif_raw.get("summary", {})
     notif_cfg = NotificationsConfig(
         pushover=PushoverConfig(
             enabled=push_raw.get("enabled", False),
@@ -218,7 +235,16 @@ def _parse_config(raw: dict) -> AppConfig:
             user_key=push_raw.get("user_key", ""),
             notify_on=push_raw.get("notify_on", ["action", "error"]),
             priority=push_raw.get("priority", 0),
-        )
+        ),
+        digest=DigestConfig(
+            enabled=dig_raw.get("enabled", False),
+            use_ollama=dig_raw.get("use_ollama", False),
+        ),
+        summary=SummaryConfig(
+            enabled=sum_raw.get("enabled", False),
+            schedule=sum_raw.get("schedule", "daily"),
+            use_ollama=sum_raw.get("use_ollama", True),
+        ),
     )
 
     _validate(raw, rules, arrs_cfg)

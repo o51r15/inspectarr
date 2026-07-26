@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Updates — inspectarr{% endblock %}
+{% block page_title %}Updates{% endblock %}
+
+{% block topbar_actions %}
+  <button class="btn btn-ghost btn-sm" onclick="checkUpdates()">Check for Updates</button>
+{% endblock %}
+
+{% block content %}
+<div class="form-section" style="max-width:640px">
+  <div id="update-loading" class="hint">Checking for updates…</div>
+  <div id="update-result" style="display:none">
+    <div class="form-row" style="margin-bottom:1rem">
+      <div class="form-group">
+        <label>Installed Version</label>
+        <span id="ver-current" style="font-family:var(--font-mono);font-size:14px"></span>
+      </div>
+      <div class="form-group">
+        <label>Latest Release</label>
+        <span id="ver-latest" style="font-family:var(--font-mono);font-size:14px"></span>
+      </div>
+    </div>
+    <div id="update-badge" style="margin-bottom:1rem"></div>
+    <div id="release-notes" style="display:none">
+      <label style="font-size:13px;color:var(--text-dim);margin-bottom:6px;display:block">Release Notes</label>
+      <pre id="release-body" style="font-size:12px;font-family:var(--font-mono);white-space:pre-wrap;color:var(--text);background:var(--bg-card);padding:12px;border-radius:6px;max-height:300px;overflow-y:auto"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+function checkUpdates() {
+  document.getElementById('update-loading').style.display = 'block';
+  document.getElementById('update-result').style.display = 'none';
+  fetch('/system/updates/check')
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('update-loading').style.display = 'none';
+      document.getElementById('update-result').style.display = 'block';
+      document.getElementById('ver-current').textContent = d.current || '?';
+      document.getElementById('ver-latest').textContent = d.latest || d.current || '?';
+      const badge = document.getElementById('update-badge');
+      if (!d.ok) {
+        badge.innerHTML = '<span style="color:var(--error)">Failed to check: ' + (d.message||'unknown error') + '</span>';
+        return;
+      }
+      if (d.up_to_date) {
+        badge.innerHTML = '<span style="color:var(--success)">✓ You are running the latest version</span>';
+      } else {
+        badge.innerHTML = '<span style="color:var(--warning)">⬆ Update available: ' + d.latest + '</span>' +
+          (d.url ? ' — <a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--accent)">View release</a>' : '');
+      }
+      if (d.release_notes) {
+        document.getElementById('release-notes').style.display = 'block';
+        document.getElementById('release-body').textContent = d.release_notes;
+      }
+    })
+    .catch(() => {
+      document.getElementById('update-loading').textContent = 'Failed to reach GitHub';
+    });
+}
+checkUpdates();
+</script>
+{% endblock %}

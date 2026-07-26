@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}System Tasks — inspectarr{% endblock %}
+{% block page_title %}Tasks{% endblock %}
+
+{% block content %}
+
+{% if error %}
+  <div class="form-section">
+    <p class="text-error">{{ error }}</p>
+  </div>
+{% else %}
+
+<div class="form-section">
+  <div class="form-section-title">Scheduled Tasks</div>
+  <p class="hint" style="margin-bottom:0.75rem">
+    Internal jobs managed by the inspectarr scheduler. Start the scheduler from the
+    <a href="/scheduler">Scheduler</a> page to activate queued tasks.
+  </p>
+  <table style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:8px">Name</th>
+        <th style="padding:8px">Interval</th>
+        <th style="padding:8px">Last Execution</th>
+        <th style="padding:8px">Next Execution</th>
+        <th style="padding:8px">State</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for task in tasks %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-weight:500">{{ task.name }}</td>
+        <td style="padding:8px" class="mono">{{ task.interval }}</td>
+        <td style="padding:8px" class="mono">
+          {{ task.last_execution[:19].replace('T',' ') if task.last_execution else '—' }}
+        </td>
+        <td style="padding:8px" class="mono">
+          {{ task.next_execution[:19].replace('T',' ') if task.next_execution else '—' }}
+        </td>
+        <td style="padding:8px">
+          {% if task.state == 'running' %}
+            <span class="status-dot running"></span> Running
+          {% elif task.state == 'queued' %}
+            <span class="status-dot running" style="opacity:0.6"></span> Queued
+          {% elif task.state == 'disabled' %}
+            <span class="text-muted">Disabled</span>
+          {% else %}
+            <span class="status-dot stopped"></span> Idle
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+
+{% endblock %}

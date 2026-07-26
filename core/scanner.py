@@ -171,6 +171,9 @@ class Scanner:
         self.state.write_log({
             "level": "INFO", "event": "scan_complete", **stats
         })
+        # Flush digest buffer — sends a single summary notification if digest
+        # mode is enabled and events were buffered during this scan.
+        self.notifier.flush_digest()
         return stats
 
     # ------------------------------------------------------------------

@@ -1,17 +1,36 @@
+import logging
 import requests
 from typing import Optional
 
 PUSHOVER_API = "https://api.pushover.net/1/messages.json"
+
+log = logging.getLogger("inspectarr")
 
 
 class Notifier:
     """
     Dispatches Pushover notifications.
     Notification failures are swallowed — they never crash the main flow.
+
+    Digest mode (notifications.digest.enabled):
+      Instead of sending per-event notifications, events are buffered in
+      memory. Call flush_digest() after a scan completes to send a single
+      summary notification. If use_ollama is true and Ollama is reachable,
+      the summary is narrated by the LLM; otherwise a plain bullet list.
+      Startup and retry_exhausted notifications are always sent immediately.
     """
 
     def __init__(self, config):
         self.cfg = config.notifications.pushover
+        self.digest_cfg = config.notifications.digest
+        self._ollama_url = config.prowlarr.ollama.url if config.prowlarr.ollama.url else ""
+        self._ollama_model = config.prowlarr.ollama.model if config.prowlarr.ollama.model else ""
+        self._ollama_timeout = config.prowlarr.ollama.timeout
+        self._buffer: list[dict] = []
+
+    @property
+    def _digest_mode(self) -> bool:
+        return self.digest_cfg.enabled and self.cfg.enabled
 
     def _should(self, event_type: str) -> bool:
         return self.cfg.enabled and event_type in self.cfg.notify_on
@@ -28,7 +47,6 @@ class Notifier:
             "priority": p,
         }
         if p == 2:
-            # Emergency priority requires retry + expire
             payload["retry"]  = 60
             payload["expire"] = 3600
         try:
@@ -36,7 +54,12 @@ class Notifier:
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # Event methods — buffer in digest mode, send immediately otherwise
+    # ------------------------------------------------------------------
+
     def notify_startup(self, rules_count: int, dry_run: bool):
+        """Always immediate — never buffered."""
         if not self._should("startup"):
             return
         tag = " [DRY RUN]" if dry_run else ""
@@ -51,8 +74,14 @@ class Notifier:
         files = ", ".join(bad_files[:3])
         if len(bad_files) > 3:
             files += f" (+{len(bad_files) - 3} more)"
+        if self._digest_mode:
+            self._buffer.append({
+                "type": "dry_run",
+                "torrent": torrent_name,
+                "files": files,
+            })
+            return
         self._send("[DRY RUN] Would remove", f"{torrent_name}\nBad files: {files}")
-
 
     def notify_action(
         self, torrent_name: str, bad_files: list[str],
@@ -60,12 +89,21 @@ class Notifier:
     ):
         if not self._should("action"):
             return
-        # BUG-15: label was hardcoded "Sonarr" regardless of which arr acted
         arr_status  = "blocklisted" if arr_blocklisted else "FAILED"
         qbit_status = "deleted"     if qbit_deleted    else "qbit FAILED"
         files = ", ".join(bad_files[:3])
         if len(bad_files) > 3:
             files += f" (+{len(bad_files) - 3} more)"
+        if self._digest_mode:
+            self._buffer.append({
+                "type": "action",
+                "torrent": torrent_name,
+                "files": files,
+                "app": app_name,
+                "arr_status": arr_status,
+                "qbit_status": qbit_status,
+            })
+            return
         self._send(
             "inspectarr: Torrent removed",
             f"{torrent_name}\nFiles: {files}\n"
@@ -75,11 +113,18 @@ class Notifier:
     def notify_error(self, context: str, reason: str):
         if not self._should("error"):
             return
-        # Errors are sent at least at normal priority regardless of config
         p = max(self.cfg.priority, 0)
+        if self._digest_mode:
+            self._buffer.append({
+                "type": "error",
+                "context": context,
+                "reason": reason,
+            })
+            return
         self._send("inspectarr: Error", f"{context}\n{reason}", priority=p)
 
     def notify_retry_exhausted(self, torrent_name: str, hash: str, attempts: int):
+        """Always immediate — retry exhaustion is critical."""
         if not self._should("error"):
             return
         p = max(self.cfg.priority, 0)
@@ -88,3 +133,87 @@ class Notifier:
             f"{torrent_name}\nHash: {hash[:12]}...\nFailed after {attempts} attempts.",
             priority=p,
         )
+
+    # ------------------------------------------------------------------
+    # Digest flush — call after scan completes
+    # ------------------------------------------------------------------
+
+    def flush_digest(self):
+        """
+        Send all buffered events as a single summary notification.
+        If use_ollama is enabled and reachable, the summary is AI-narrated.
+        Otherwise falls back to a plain bullet-point list.
+        Clears the buffer regardless of success.
+        """
+        if not self._buffer:
+            return
+        events = list(self._buffer)
+        self._buffer.clear()
+
+        if not self.cfg.enabled:
+            return
+
+        # Try AI narration first
+        if self.digest_cfg.use_ollama and self._ollama_url and self._ollama_model:
+            narrated = self._ollama_narrate(events)
+            if narrated:
+                self._send("inspectarr: Scan Digest", narrated)
+                return
+
+        # Fallback: plain summary
+        self._send("inspectarr: Scan Digest", self._plain_summary(events))
+
+    def _plain_summary(self, events: list[dict]) -> str:
+        """Build a plain-text bullet summary from buffered events."""
+        actions  = [e for e in events if e["type"] == "action"]
+        dry_runs = [e for e in events if e["type"] == "dry_run"]
+        errors   = [e for e in events if e["type"] == "error"]
+
+        lines = []
+        if actions:
+            lines.append(f"Removed {len(actions)} torrent(s):")
+            for e in actions[:5]:
+                lines.append(f"  - {e['torrent']} ({e['files']})")
+            if len(actions) > 5:
+                lines.append(f"  ... and {len(actions) - 5} more")
+        if dry_runs:
+            lines.append(f"Flagged {len(dry_runs)} torrent(s) [DRY RUN]:")
+            for e in dry_runs[:5]:
+                lines.append(f"  - {e['torrent']}")
+            if len(dry_runs) > 5:
+                lines.append(f"  ... and {len(dry_runs) - 5} more")
+        if errors:
+            lines.append(f"{len(errors)} error(s):")
+            for e in errors[:3]:
+                lines.append(f"  - {e['context']}: {e['reason']}")
+        return "\n".join(lines) if lines else "Scan complete — no events."
+
+    def _ollama_narrate(self, events: list[dict]) -> str | None:
+        """
+        Send buffered events to Ollama for a narrative digest.
+        Returns the narrated string, or None on any failure.
+        """
+        import json
+        prompt = (
+            "You are a concise notification writer for a torrent watchdog called inspectarr. "
+            "Summarize the following scan events into a brief, readable Pushover notification "
+            "(max 500 chars). Use plain language, no markdown. Group by event type.\n\n"
+            f"Events:\n{json.dumps(events, indent=2)}"
+        )
+        try:
+            resp = requests.post(
+                f"{self._ollama_url.rstrip('/')}/api/generate",
+                json={"model": self._ollama_model, "prompt": prompt, "stream": False},
+                timeout=self._ollama_timeout,
+            )
+            if resp.status_code != 200:
+                log.warning("Digest Ollama returned HTTP %d", resp.status_code)
+                return None
+            text = resp.json().get("response", "").strip()
+            # Strip any <think> blocks from reasoning models
+            import re
+            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+            return text if text else None
+        except Exception as exc:
+            log.warning("Digest Ollama narration failed: %s", exc)
+            return None

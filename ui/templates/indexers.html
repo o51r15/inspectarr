@@ -45,6 +45,7 @@
           <th style="padding:6px 8px">Health Score</th>
           <th style="padding:6px 8px">Status</th>
           <th style="padding:6px 8px">Ignore</th>
+          <th style="padding:6px 8px"></th>
         </tr>
       </thead>
       <tbody id="indexer-tbody"></tbody>
@@ -181,9 +182,14 @@
         <td style="padding:6px 8px">${statusBadge}</td>
         <td style="padding:6px 8px"><input type="checkbox" class="ignore-toggle"
              title="Lock this indexer at its current priority" ${idx.ignored ? 'checked' : ''}></td>
+        <td style="padding:6px 8px"><button class="btn btn-ghost btn-sm reset-btn"
+             title="Reset grabs, malicious hits, and cached scores for this indexer"
+             style="font-size:0.75rem;padding:2px 8px">Reset</button></td>
       `;
       tr.querySelector('.ignore-toggle').addEventListener('change',
         e => setIgnored(idx.id, idx.name, e.target.checked));
+      tr.querySelector('.reset-btn').addEventListener('click',
+        () => resetIndexer(idx.id, idx.name));
       tbody.appendChild(tr);
     });
   }
@@ -201,6 +207,25 @@
     })
       .then(r => r.json())
       .then(d => { if (!d.ok) alert('Could not update ignore state: ' + d.message); });
+  }
+
+  function resetIndexer(indexerId, indexerName) {
+    if (!confirm('Reset all stats (grabs, malicious hits, health scores) for "' + indexerName + '"?')) return;
+    fetch('/indexers/reset', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ indexer_id: indexerId }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          showToast('Stats reset for ' + indexerName, 'success');
+          loadIndexers();
+        } else {
+          showToast('Reset failed: ' + d.msg, 'error');
+        }
+      })
+      .catch(e => showToast('Request failed: ' + e, 'error'));
   }
 </script>
 {% endblock %}

@@ -5,9 +5,13 @@ Provides a quick-look dashboard of all qBittorrent torrents with controls
 for category changes, pause/resume, and delete. Also a per-torrent detail
 view with tracker and file information.
 """
-from flask import Blueprint, render_template, request, jsonify, current_app
+import re
+
+from flask import Blueprint, render_template, request, jsonify, current_app, abort
 from core.config import load_config
 from core.qbit import QBittorrentClient, QBittorrentError
+
+_HASH_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 torrents_bp = Blueprint("torrents", __name__)
 
@@ -50,6 +54,9 @@ def torrents():
 
 @torrents_bp.route("/torrents/<hash>")
 def torrent_detail(hash: str):
+    # SEC-7: validate hash is a 40-hex-char infohash before passing to qBit
+    if not _HASH_RE.match(hash):
+        abort(400, description="Invalid torrent hash format")
     error = None
     torrent = None
     properties = {}

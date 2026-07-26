@@ -1,6 +1,8 @@
 FROM python:3.12-slim
-LABEL org.opencontainers.image.source="https://github.com/o51r15/inspectarr"
-LABEL org.opencontainers.image.description="Torrent watchdog for *arr ecosystems"
+
+# Create a non-root user for the app
+RUN groupadd -r inspectarr && useradd -r -g inspectarr -d /app inspectarr
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -10,6 +12,11 @@ COPY . .
 
 # data/ holds inspectarr.db and inspectarr.log.json — mount this as a volume
 VOLUME ["/app/data"]
+
+# Ensure the non-root user can write to data/
+RUN mkdir -p /app/data && chown -R inspectarr:inspectarr /app
+
+USER inspectarr
 
 # Web UI + built-in scheduler daemon
 EXPOSE 8585

@@ -48,12 +48,32 @@ def _get_state(cfg):
     )
 
 
+def _validate_paths(data: dict) -> str | None:
+    """
+    SEC-5: reject log_file / db_file paths that escape the project directory.
+    Blocks path traversal via '..' components.
+    """
+    import os
+    for section, key in [("logging", "log_file"), ("state", "db_file")]:
+        path = data.get(section, {}).get(key, "")
+        if not path:
+            continue
+        normalized = os.path.normpath(path)
+        if ".." in normalized.split(os.sep) or ".." in normalized.split("/"):
+            return f"{section}.{key} must not contain '..' path components"
+    return None
+
+
 def _validation_error(data: dict) -> str | None:
     """
     IMP-4: run a candidate config dict through the core parser/validator
     before writing it to disk. Returns an error string or None if valid.
     A config that saves but fails load_config() silently stops all scans.
     """
+    # SEC-5: path traversal check before core validation
+    path_err = _validate_paths(data)
+    if path_err:
+        return path_err
     try:
         from core.config import _parse_config
         _parse_config(data)
@@ -474,5 +494,105 @@ def test_pushover():
             return jsonify({"ok": True, "message": "Test notification sent"})
         errors = ", ".join(data.get("errors", ["Unknown error"]))
         return jsonify({"ok": False, "message": errors})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
+# ---------------------------------------------------------------------------
+# Backup endpoints
+# ---------------------------------------------------------------------------
+
+def _backup_dir() -> str:
+    """Return (and create) the backups directory next to the config file."""
+    config_path = current_app.config["CONFIG_PATH"]
+    base = os.path.dirname(os.path.abspath(config_path))
+    backup_path = os.path.join(base, "data", "backups")
+    os.makedirs(backup_path, exist_ok=True)
+    return backup_path
+
+
+def _human_size(nbytes: int) -> str:
+    for unit in ("B", "KB", "MB"):
+        if nbytes < 1024:
+            return f"{nbytes:.1f} {unit}" if unit != "B" else f"{nbytes} {unit}"
+        nbytes /= 1024
+    return f"{nbytes:.1f} GB"
+
+
+@config_bp.route("/config/backups", methods=["GET"])
+def backups_list():
+    """List existing backup zip files."""
+    import re as _re
+    backup_path = _backup_dir()
+    backups = []
+    for name in sorted(os.listdir(backup_path), reverse=True):
+        if not name.startswith("inspectarr-backup-") or not name.endswith(".zip"):
+            continue
+        full = os.path.join(backup_path, name)
+        stat = os.stat(full)
+        from datetime import datetime
+        created = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+        backups.append({"name": name, "created": created, "size": _human_size(stat.st_size)})
+    return jsonify({"ok": True, "backups": backups})
+
+
+@config_bp.route("/config/backups/create", methods=["POST"])
+def backups_create():
+    """Create a new backup zip containing config.yaml and the SQLite DB."""
+    import zipfile
+    from datetime import datetime
+    config_path = current_app.config["CONFIG_PATH"]
+    raw = _load_raw(config_path)
+    db_file = raw.get("state", {}).get("db_file", "./data/inspectarr.db")
+    # Resolve db_file relative to the config directory
+    base = os.path.dirname(os.path.abspath(config_path))
+    db_path = os.path.join(base, db_file) if not os.path.isabs(db_file) else db_file
+
+    backup_path = _backup_dir()
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    zip_name = f"inspectarr-backup-{ts}.zip"
+    zip_path = os.path.join(backup_path, zip_name)
+
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(config_path, "config.yaml")
+            if os.path.isfile(db_path):
+                zf.write(db_path, "inspectarr.db")
+        size = _human_size(os.path.getsize(zip_path))
+        return jsonify({"ok": True, "message": f"Backup created: {zip_name} ({size})"})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
+@config_bp.route("/config/backups/download/<filename>", methods=["GET"])
+def backups_download(filename):
+    """Download a backup zip file."""
+    import re as _re
+    from flask import send_from_directory, abort
+    # SEC: validate filename to prevent path traversal
+    if not _re.match(r"^inspectarr-backup-[\d\-]+\.zip$", filename):
+        abort(400, description="Invalid backup filename")
+    backup_path = _backup_dir()
+    full = os.path.join(backup_path, filename)
+    if not os.path.isfile(full):
+        abort(404, description="Backup not found")
+    return send_from_directory(backup_path, filename, as_attachment=True)
+
+
+@config_bp.route("/config/backups/delete", methods=["POST"])
+def backups_delete():
+    """Delete a backup zip file."""
+    import re as _re
+    data = request.get_json(silent=True) or {}
+    filename = data.get("name", "")
+    if not _re.match(r"^inspectarr-backup-[\d\-]+\.zip$", filename):
+        return jsonify({"ok": False, "message": "Invalid backup filename"})
+    backup_path = _backup_dir()
+    full = os.path.join(backup_path, filename)
+    if not os.path.isfile(full):
+        return jsonify({"ok": False, "message": "Backup not found"})
+    try:
+        os.remove(full)
+        return jsonify({"ok": True, "message": f"Deleted {filename}"})
     except Exception as exc:
         return jsonify({"ok": False, "message": str(exc)})

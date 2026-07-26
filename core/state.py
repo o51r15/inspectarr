@@ -125,6 +125,18 @@ class StateManager:
                     value TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS score_history (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    indexer_id   INTEGER NOT NULL,
+                    health_score REAL NOT NULL,
+                    scored_at    TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_score_history_indexer
+                ON score_history (indexer_id, scored_at DESC)
+            """)
             conn.commit()
         # Migrate indexer_stats to add total_grabs if not present
         try:
@@ -466,6 +478,68 @@ class StateManager:
             }
             for r in rows
         }
+
+    def reset_indexer_stats(self, indexer_id: int):
+        """
+        Reset grab count, malicious hits, and cached health scores for a
+        single indexer. Leaves the row in place (preserving ignored/pinned
+        state) so the indexer re-enters scoring with a clean slate.
+        """
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                """UPDATE indexer_stats
+                   SET malicious_hits = 0,
+                       total_grabs = 0,
+                       health_score = NULL,
+                       ai_scored = 0,
+                       ai_reasoning = '',
+                       last_scored = NULL
+                   WHERE indexer_id = ?""",
+                (indexer_id,),
+            )
+            conn.commit()
+
+    def record_score_history(self, indexer_id: int, health_score: float):
+        """Append a score snapshot for trend analysis. Keeps last 30 per indexer."""
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO score_history (indexer_id, health_score, scored_at) VALUES (?, ?, ?)",
+                (indexer_id, health_score, _now_iso()),
+            )
+            # Trim to latest 30 per indexer
+            conn.execute("""
+                DELETE FROM score_history
+                WHERE indexer_id = ? AND id NOT IN (
+                    SELECT id FROM score_history
+                    WHERE indexer_id = ? ORDER BY id DESC LIMIT 30
+                )
+            """, (indexer_id, indexer_id))
+            conn.commit()
+
+    def get_score_trend(self, indexer_id: int, window: int = 5) -> float | None:
+        """
+        Return a trend factor based on the last `window` score snapshots.
+        Positive = improving, negative = declining, None = not enough data.
+        Value is the slope of a simple linear regression, scaled to ±10 max.
+        """
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT health_score FROM score_history WHERE indexer_id = ? ORDER BY id DESC LIMIT ?",
+                (indexer_id, window),
+            ).fetchall()
+        if len(rows) < 3:
+            return None
+        scores = [r["health_score"] for r in reversed(rows)]  # oldest first
+        n = len(scores)
+        x_mean = (n - 1) / 2.0
+        y_mean = sum(scores) / n
+        num = sum((i - x_mean) * (s - y_mean) for i, s in enumerate(scores))
+        den = sum((i - x_mean) ** 2 for i in range(n))
+        if den == 0:
+            return 0.0
+        slope = num / den
+        # Clamp to ±10 so trend never dominates the score
+        return round(max(-10.0, min(10.0, slope)), 2)
 
     def increment_total_grabs(self, indexer_id: int, indexer_name: str) -> int:
         """Increment total_grabs for this indexer. Returns the new count."""

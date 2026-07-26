@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, current_app, jsonify
+from flask import Blueprint, render_template, current_app, jsonify, request
 
 indexers_bp = Blueprint("indexers", __name__)
 
@@ -51,5 +51,29 @@ def indexers_sync():
                 f"{changed} indexer(s) reordered, but sync to apps failed — check Prowlarr logs."
             ),
         })
+    except Exception as exc:
+        return jsonify({"ok": False, "msg": str(exc)}), 500
+
+
+@indexers_bp.route("/indexers/reset", methods=["POST"])
+def indexers_reset():
+    """Reset grab count, malicious hits, and cached scores for one indexer."""
+    config_path = current_app.config["CONFIG_PATH"]
+    try:
+        from core.config import load_config
+        from .config import _get_state
+
+        data = request.get_json(silent=True) or {}
+        indexer_id = data.get("indexer_id")
+        if indexer_id is None:
+            return jsonify({"ok": False, "msg": "indexer_id is required"}), 400
+
+        cfg   = load_config(config_path)
+        if not cfg.prowlarr.enabled:
+            return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
+
+        state = _get_state(cfg)
+        state.reset_indexer_stats(int(indexer_id))
+        return jsonify({"ok": True, "msg": f"Stats reset for indexer {indexer_id}"})
     except Exception as exc:
         return jsonify({"ok": False, "msg": str(exc)}), 500

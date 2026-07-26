@@ -44,6 +44,8 @@
         </button>
         <div class="nav-group-items">
           <a href="/system/status" class="{{ 'active' if request.path.startswith('/system/status') else '' }}">Status</a>
+          <a href="/system/tasks" class="{{ 'active' if request.path.startswith('/system/tasks') else '' }}">Tasks</a>
+          <a href="/system/updates" class="{{ 'active' if request.path.startswith('/system/updates') else '' }}">Updates</a>
           <a href="/system/events" class="{{ 'active' if request.path.startswith('/system/events') or request.path.startswith('/logs') else '' }}">Events</a>
         </div>
       </div>
@@ -59,6 +61,7 @@
           <a href="/config#notifications" data-pane="notifications">Notifications</a>
           <a href="/config#general"       data-pane="general">General</a>
           <a href="/config#advanced"      data-pane="advanced">Advanced</a>
+          <a href="/config#backups"       data-pane="backups">Backups</a>
         </div>
       </div>
       {% if auth_enabled %}
@@ -73,9 +76,13 @@
        class="sidebar-version">v1.2.0</a>
   </aside>
 
+  <!-- Overlay for mobile sidebar -->
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
   <!-- Main -->
   <div class="main">
     <div class="topbar">
+      <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Menu">☰</button>
       <h2>{% block page_title %}{% endblock %}</h2>
       <div class="flex gap-8 items-center">{% block topbar_actions %}{% endblock %}</div>
     </div>
@@ -89,6 +96,19 @@
 {% block scripts %}{% endblock %}
 <div id="toast-container"></div>
 <script>
+  // Mobile sidebar toggle
+  function toggleSidebar() {
+    document.querySelector('.sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('visible');
+  }
+  function closeSidebar() {
+    document.querySelector('.sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('visible');
+  }
+  // Close sidebar on nav click (mobile)
+  document.querySelectorAll('.nav a').forEach(a =>
+    a.addEventListener('click', closeSidebar));
+
   // Expandable nav groups (System, etc.)
   function toggleNavGroup(id) {
     document.getElementById(id).classList.toggle('open');

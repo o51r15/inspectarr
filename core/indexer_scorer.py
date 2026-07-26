@@ -36,6 +36,7 @@ def compute_health_score(
     malicious_hits: int,
     in_backoff: bool,
     cfg: ProwlarrConfig,
+    trend: float | None = None,
 ) -> float:
     s = cfg.scoring
     rt_score = max(0.0, 100.0 * (1.0 - avg_response_ms / WORST_RESPONSE_MS))
@@ -48,6 +49,10 @@ def compute_health_score(
     )
     if in_backoff:
         raw -= s.backoff_penalty
+    # Historical trend adjustment: improving indexers get a small boost,
+    # declining ones get a penalty. trend is already clamped to ±10.
+    if trend is not None:
+        raw += trend
     return round(max(0.0, min(100.0, raw)), 1)
 
 
@@ -86,13 +91,14 @@ class IndexerScorer:
         scored = [self._score_one(idx, backoff_map, stats_by_id, prowlarr_stats) for idx in indexers]
         if not skip_ai:
             scored = self._apply_ai_scoring(scored, prowlarr_stats)
-        # Persist scores so reorder can use them without rescoring
+        # Persist scores and record history for trend analysis
         for s in scored:
             if s["health_score"] is not None:
                 self.state.save_cached_score(
                     s["id"], s["name"], s["health_score"],
                     s.get("ai_scored", False), s.get("ai_reasoning", ""),
                 )
+                self.state.record_score_history(s["id"], s["health_score"])
         return scored
 
     def reorder(self) -> int:
@@ -268,8 +274,9 @@ class IndexerScorer:
         malicious_hits = db_stats.get("malicious_hits", 0)
         in_backoff     = iid in backoff_map
 
+        trend = self.state.get_score_trend(iid) if has_enough else None
         health = (
-            compute_health_score(avg_ms, success_rate, malicious_hits, in_backoff, self.cfg)
+            compute_health_score(avg_ms, success_rate, malicious_hits, in_backoff, self.cfg, trend)
             if has_enough else None
         )
 
@@ -282,6 +289,7 @@ class IndexerScorer:
             "total_records":   total_queries,
             "malicious_hits":  malicious_hits,
             "health_score":    health,
+            "trend":           trend,
             "in_backoff":      in_backoff,
             "ignored":         bool(db_stats.get("ignored", False)),
             "pinned_position": db_stats.get("pinned_position"),

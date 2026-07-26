@@ -46,6 +46,8 @@ def create_app(config_path: str) -> Flask:
         static_folder=os.path.join(base_dir, "ui", "static"),
     )
     app.config["CONFIG_PATH"] = config_path
+    # SEC-8: cap request body size to 1 MB to prevent memory-spike attacks
+    app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
     app.config["SCHEDULER"]   = Scheduler(config_path)
     # IMP-2: share the scheduler's StateManager with all routes so requests
     # reuse one SQLite connection instead of opening one per request (BUG-09).
@@ -131,7 +133,14 @@ def main():
         print(f"Config: {config_path}")
         print("Scheduler is OFF at startup — enable it from the dashboard.")
 
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    # Use waitress (production WSGI) if available, fall back to Flask dev server
+    try:
+        from waitress import serve
+        print("Server: waitress (production)")
+        serve(app, host="0.0.0.0", port=port, threads=4)
+    except ImportError:
+        print("WARNING: waitress not installed — using Flask dev server (not recommended for production)")
+        app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
