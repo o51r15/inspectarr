@@ -283,6 +283,29 @@
             </div>
           </div>
         </div>
+
+        <div class="form-section">
+          <div class="form-section-title">AI Model (Ollama)</div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            Select which Ollama model to use for AI-powered indexer scoring and analysis.
+            Requires a valid Ollama URL configured above.
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Model</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <select id="ollama-model-select" style="flex:1" disabled>
+                  <option value="">Loading…</option>
+                </select>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="loadOllamaModels()" title="Refresh model list">↻</button>
+              </div>
+            </div>
+            <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
+              <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn" onclick="applyOllamaModel()" disabled>Apply</button>
+              <span id="ollama-model-status" class="hint"></span>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- PANE: Notifications -->
@@ -853,6 +876,54 @@
   showPane = function(pane) {
     origShowPane(pane);
     if (pane === 'backups') loadBackups();
+    if (pane === 'indexers') loadOllamaModels();
   };
+
+  // ---- Ollama model selection ----
+  function loadOllamaModels() {
+    const sel = document.getElementById('ollama-model-select');
+    const btn = document.getElementById('ollama-apply-btn');
+    const st  = document.getElementById('ollama-model-status');
+    sel.disabled = true; btn.disabled = true;
+    sel.innerHTML = '<option value="">Loading…</option>';
+    st.textContent = ''; st.style.color = '';
+    fetch('/config/ollama/models')
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) {
+          sel.innerHTML = '<option value="">' + (d.message || 'Unavailable') + '</option>';
+          return;
+        }
+        if (!d.models.length) {
+          sel.innerHTML = '<option value="">No models found</option>';
+          return;
+        }
+        sel.innerHTML = d.models.map(m =>
+          `<option value="${m}"${m === d.current ? ' selected' : ''}>${m}</option>`
+        ).join('');
+        sel.disabled = false; btn.disabled = false;
+      })
+      .catch(() => {
+        sel.innerHTML = '<option value="">Failed to fetch models</option>';
+      });
+  }
+
+  function applyOllamaModel() {
+    const sel   = document.getElementById('ollama-model-select');
+    const st    = document.getElementById('ollama-model-status');
+    const model = sel.value;
+    if (!model) return;
+    st.textContent = 'Saving…'; st.style.color = '';
+    fetch('/config/ollama/model', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model}),
+    })
+    .then(r => r.json())
+    .then(d => {
+      st.textContent = d.message;
+      st.style.color = d.ok ? 'var(--success)' : 'var(--error)';
+    })
+    .catch(() => { st.textContent = 'Request failed'; st.style.color = 'var(--error)'; });
+  }
 </script>
 {% endblock %}

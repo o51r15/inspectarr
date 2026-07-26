@@ -454,6 +454,45 @@ def prowlarr_rescore():
         return jsonify({"ok": False, "message": str(exc)})
 
 
+@config_bp.route("/config/ollama/models", methods=["GET"])
+def ollama_models():
+    """Fetch available models from the configured Ollama instance."""
+    import requests as req
+    config_path = current_app.config["CONFIG_PATH"]
+    raw = _load_raw(config_path)
+    ollama_url = raw.get("prowlarr", {}).get("ollama", {}).get("url", "")
+    current_model = raw.get("prowlarr", {}).get("ollama", {}).get("model", "")
+    if not ollama_url:
+        return jsonify({"ok": False, "message": "Ollama URL not configured", "models": [], "current": ""})
+    try:
+        resp = req.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        models = sorted(m.get("name", "") for m in data.get("models", []) if m.get("name"))
+        return jsonify({"ok": True, "models": models, "current": current_model})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc), "models": [], "current": current_model})
+
+
+@config_bp.route("/config/ollama/model", methods=["POST"])
+def ollama_set_model():
+    """Save the selected Ollama model to config.yaml."""
+    config_path = current_app.config["CONFIG_PATH"]
+    data = request.get_json(silent=True) or {}
+    model = data.get("model", "").strip()
+    if not model:
+        return jsonify({"ok": False, "message": "No model specified"})
+    try:
+        raw = _load_raw(config_path)
+        prowlarr = raw.setdefault("prowlarr", {})
+        ollama = prowlarr.setdefault("ollama", {})
+        ollama["model"] = model
+        _save_raw(config_path, raw)
+        return jsonify({"ok": True, "message": f"Model set to {model}"})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
 @config_bp.route("/config/test/prowlarr", methods=["POST"])
 def test_prowlarr():
     from core.prowlarr import ProwlarrClient
