@@ -137,6 +137,21 @@ class StateManager:
                 CREATE INDEX IF NOT EXISTS idx_score_history_indexer
                 ON score_history (indexer_id, scored_at DESC)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS llm_cache (
+                    content_hash TEXT PRIMARY KEY,
+                    response_json TEXT NOT NULL,
+                    scored_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS auto_manage_state (
+                    indexer_id          INTEGER PRIMARY KEY,
+                    consecutive_low     INTEGER DEFAULT 0,
+                    disabled_at         TEXT,
+                    disabled_by_auto    INTEGER DEFAULT 0
+                )
+            """)
             conn.commit()
         # Migrate indexer_stats to add total_grabs if not present
         try:
@@ -610,6 +625,109 @@ class StateManager:
                 (key, value),
             )
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # LLM cache — content-hash based dedup for AI scoring
+    # ------------------------------------------------------------------
+
+    def get_llm_cache(self, content_hash: str, ttl_hours: int = 24) -> str | None:
+        """Return cached JSON response if fresh, else None."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT response_json, scored_at FROM llm_cache WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            scored = datetime.fromisoformat(row["scored_at"])
+            if (_now_dt() - scored).total_seconds() > ttl_hours * 3600:
+                return None
+        except (ValueError, TypeError):
+            return None
+        return row["response_json"]
+
+    def save_llm_cache(self, content_hash: str, response_json: str):
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO llm_cache (content_hash, response_json, scored_at) VALUES (?, ?, ?)",
+                (content_hash, response_json, _now_iso()),
+            )
+            conn.commit()
+
+    def prune_llm_cache(self, ttl_hours: int = 24):
+        cutoff = (_now_dt() - timedelta(hours=ttl_hours)).isoformat()
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM llm_cache WHERE scored_at < ?", (cutoff,))
+            conn.commit()
+
+    # ------------------------------------------------------------------
+    # Auto-manage state — track consecutive low scores for auto-disable
+    # ------------------------------------------------------------------
+
+    def get_auto_manage_state(self, indexer_id: int) -> dict:
+        with self._lock, self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM auto_manage_state WHERE indexer_id = ?",
+                (indexer_id,),
+            ).fetchone()
+        return dict(row) if row else {"indexer_id": indexer_id, "consecutive_low": 0, "disabled_at": None, "disabled_by_auto": 0}
+
+    def increment_consecutive_low(self, indexer_id: int) -> int:
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO auto_manage_state (indexer_id) VALUES (?)",
+                (indexer_id,),
+            )
+            conn.execute(
+                "UPDATE auto_manage_state SET consecutive_low = consecutive_low + 1 WHERE indexer_id = ?",
+                (indexer_id,),
+            )
+            row = conn.execute(
+                "SELECT consecutive_low FROM auto_manage_state WHERE indexer_id = ?",
+                (indexer_id,),
+            ).fetchone()
+            conn.commit()
+        return row["consecutive_low"] if row else 1
+
+    def reset_consecutive_low(self, indexer_id: int):
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO auto_manage_state (indexer_id) VALUES (?)",
+                (indexer_id,),
+            )
+            conn.execute(
+                "UPDATE auto_manage_state SET consecutive_low = 0 WHERE indexer_id = ?",
+                (indexer_id,),
+            )
+            conn.commit()
+
+    def mark_auto_disabled(self, indexer_id: int):
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO auto_manage_state (indexer_id) VALUES (?)",
+                (indexer_id,),
+            )
+            conn.execute(
+                "UPDATE auto_manage_state SET disabled_at = ?, disabled_by_auto = 1 WHERE indexer_id = ?",
+                (_now_iso(), indexer_id),
+            )
+            conn.commit()
+
+    def clear_auto_disabled(self, indexer_id: int):
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "UPDATE auto_manage_state SET disabled_at = NULL, disabled_by_auto = 0, consecutive_low = 0 WHERE indexer_id = ?",
+                (indexer_id,),
+            )
+            conn.commit()
+
+    def get_all_auto_disabled(self) -> list[dict]:
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM auto_manage_state WHERE disabled_by_auto = 1"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Retention + log

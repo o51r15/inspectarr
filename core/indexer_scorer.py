@@ -16,8 +16,11 @@ Reorder model (torrent indexers only):
   keep their current priority value and are skipped — free indexers fill the
   remaining numbers around them.
 """
+import hashlib
+import json
 import math
 import logging
+from datetime import datetime, timezone
 from .prowlarr    import ProwlarrClient
 from .state       import StateManager
 from .config      import ProwlarrConfig
@@ -94,7 +97,7 @@ class IndexerScorer:
 
         skip_ai=True returns deterministic scores only (fast path for UI).
         """
-        indexers       = self.prowlarr.get_torrent_indexers()
+        indexers       = self.prowlarr.get_torrent_indexers(include_disabled=True)
         backoff_map    = self.prowlarr.get_indexer_status()
         stats_by_id    = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
         prowlarr_stats = self.prowlarr.get_indexer_stats()
@@ -189,6 +192,64 @@ class IndexerScorer:
         return changed
 
     # ------------------------------------------------------------------
+    # Auto-manage: disable/re-enable indexers based on health
+    # ------------------------------------------------------------------
+
+    def auto_manage(self, scored: list[dict]) -> dict:
+        """
+        After scoring, check each indexer against the auto-manage rules.
+        Disable indexers below threshold for N consecutive runs.
+        Re-enable auto-disabled indexers after cooldown if score recovered.
+        Returns {"disabled": [...], "re_enabled": [...]}.
+        """
+        am = self.cfg.auto_manage
+        if not am.enabled:
+            return {"disabled": [], "re_enabled": []}
+
+        disabled = []
+        re_enabled = []
+
+        for s in scored:
+            if s["health_score"] is None or s.get("ignored"):
+                continue
+
+            iid = s["id"]
+            ams = self.state.get_auto_manage_state(iid)
+
+            if s["health_score"] < am.disable_threshold:
+                count = self.state.increment_consecutive_low(iid)
+                if count >= am.consecutive_runs and not ams.get("disabled_by_auto"):
+                    ok = self.prowlarr.set_indexer_enabled(s["_raw"], False)
+                    if ok:
+                        self.state.mark_auto_disabled(iid)
+                        disabled.append(s["name"])
+                        log.warning(
+                            f"Auto-disabled indexer '{s['name']}' — "
+                            f"score {s['health_score']} below {am.disable_threshold} "
+                            f"for {count} consecutive runs"
+                        )
+            else:
+                self.state.reset_consecutive_low(iid)
+                # Re-enable if it was auto-disabled and cooldown has passed
+                if ams.get("disabled_by_auto") and ams.get("disabled_at"):
+                    try:
+                        disabled_dt = datetime.fromisoformat(ams["disabled_at"])
+                        elapsed_h = (datetime.now(timezone.utc) - disabled_dt).total_seconds() / 3600
+                        if elapsed_h >= am.cooldown_hours:
+                            ok = self.prowlarr.set_indexer_enabled(s["_raw"], True)
+                            if ok:
+                                self.state.clear_auto_disabled(iid)
+                                re_enabled.append(s["name"])
+                                log.info(
+                                    f"Auto-re-enabled indexer '{s['name']}' — "
+                                    f"score recovered to {s['health_score']}"
+                                )
+                    except (ValueError, TypeError):
+                        pass
+
+        return {"disabled": disabled, "re_enabled": re_enabled}
+
+    # ------------------------------------------------------------------
     # AI scoring overlay
     # ------------------------------------------------------------------
 
@@ -197,8 +258,9 @@ class IndexerScorer:
     ) -> list[dict]:
         """
         If Ollama is configured, send all indexer data in one batch and
-        overwrite health_score with the AI result. On any failure, returns
-        the original deterministic scores unchanged.
+        overwrite health_score with the AI result. Uses content-hash caching
+        to skip Ollama when input hasn't changed within the TTL.
+        On any failure, returns the original deterministic scores unchanged.
         """
         ocfg = self.cfg.ollama
         if not ocfg.url or not ocfg.model:
@@ -231,13 +293,31 @@ class IndexerScorer:
                 "trend":                    s.get("trend"),
             })
 
-        ai_results = ollama_score_indexers(
-            payload, ocfg.url, ocfg.model, ocfg.timeout,
-        )
+        # Content-hash cache: skip Ollama if identical input was scored recently
+        content_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode()
+        ).hexdigest()
 
-        if not ai_results:
-            log.info("AI scoring unavailable — using deterministic scores")
-            return scored
+        cached = self.state.get_llm_cache(content_hash, ocfg.cache_ttl_hours)
+        if cached:
+            log.info("AI scoring cache hit — reusing previous result")
+            ai_results = json.loads(cached)
+        else:
+            ai_results_raw = ollama_score_indexers(
+                payload, ocfg.url, ocfg.model, ocfg.timeout,
+            )
+            if not ai_results_raw:
+                log.info("AI scoring unavailable — using deterministic scores")
+                return scored
+            # Cache the result
+            self.state.save_llm_cache(content_hash, json.dumps(
+                {int(k): v for k, v in ai_results_raw.items()}
+            ))
+            ai_results = ai_results_raw
+
+        # Convert keys back to int if loaded from cache (JSON keys are strings)
+        if isinstance(ai_results, dict):
+            ai_results = {int(k): v for k, v in ai_results.items()}
 
         for s in scored:
             ai = ai_results.get(s["id"])
@@ -330,5 +410,6 @@ class IndexerScorer:
             "has_enough_data": has_enough,
             "ai_scored":       False,
             "ai_reasoning":    "",
+            "enabled":         idx.get("enable", True),
             "_raw":            idx,
         }

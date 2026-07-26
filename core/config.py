@@ -106,6 +106,34 @@ class OllamaConfig:
     url: str = ""
     model: str = ""
     timeout: int = 120
+    cache_ttl_hours: int = 24
+
+
+@dataclass
+class PollingConfig:
+    enabled: bool = True
+    interval_seconds: int = 300
+
+
+@dataclass
+class WebhookConfig:
+    enabled: bool = False
+    secret: str = ""
+    scan_delay_seconds: int = 60
+
+
+@dataclass
+class ScanningConfig:
+    polling: PollingConfig = field(default_factory=PollingConfig)
+    webhooks: WebhookConfig = field(default_factory=WebhookConfig)
+
+
+@dataclass
+class AutoManageConfig:
+    enabled: bool = False
+    disable_threshold: float = 30.0
+    consecutive_runs: int = 3
+    cooldown_hours: int = 24
 
 
 @dataclass
@@ -134,6 +162,7 @@ class ProwlarrConfig:
     min_grabs_before_scoring: int = 10
     scoring: ProwlarrScoringConfig = field(default_factory=ProwlarrScoringConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
+    auto_manage: AutoManageConfig = field(default_factory=AutoManageConfig)
 
 
 @dataclass
@@ -155,7 +184,8 @@ class AppConfig:
     notifications: NotificationsConfig
     web: WebConfig = field(default_factory=WebConfig)
     prowlarr: ProwlarrConfig = field(default_factory=ProwlarrConfig)
-    poll_interval_seconds: int = 300
+    scanning: ScanningConfig = field(default_factory=ScanningConfig)
+    poll_interval_seconds: int = 300  # backward compat — overridden by scanning.polling
     dry_run: bool = False
 
 
@@ -258,6 +288,7 @@ def _parse_config(raw: dict) -> AppConfig:
     p_raw = raw.get("prowlarr", {})
     s_raw = p_raw.get("scoring", {})
     o_raw = p_raw.get("ollama", {})
+    am_raw = p_raw.get("auto_manage", {})
     prowlarr_cfg = ProwlarrConfig(
         enabled=p_raw.get("enabled", False),
         url=p_raw.get("url", "").rstrip("/"),
@@ -277,6 +308,30 @@ def _parse_config(raw: dict) -> AppConfig:
             url=o_raw.get("url", "").rstrip("/"),
             model=o_raw.get("model", ""),
             timeout=o_raw.get("timeout", 120),
+            cache_ttl_hours=o_raw.get("cache_ttl_hours", 24),
+        ),
+        auto_manage=AutoManageConfig(
+            enabled=am_raw.get("enabled", False),
+            disable_threshold=float(am_raw.get("disable_threshold", 30.0)),
+            consecutive_runs=int(am_raw.get("consecutive_runs", 3)),
+            cooldown_hours=int(am_raw.get("cooldown_hours", 24)),
+        ),
+    )
+
+    # Scanning config — backward compat: if no scanning block, use top-level poll_interval_seconds
+    sc_raw = raw.get("scanning", {})
+    pol_raw = sc_raw.get("polling", {})
+    wh_raw = sc_raw.get("webhooks", {})
+    legacy_interval = raw.get("poll_interval_seconds", 300)
+    scanning_cfg = ScanningConfig(
+        polling=PollingConfig(
+            enabled=pol_raw.get("enabled", True),
+            interval_seconds=pol_raw.get("interval_seconds", legacy_interval),
+        ),
+        webhooks=WebhookConfig(
+            enabled=wh_raw.get("enabled", False),
+            secret=wh_raw.get("secret", ""),
+            scan_delay_seconds=int(wh_raw.get("scan_delay_seconds", 60)),
         ),
     )
 
@@ -289,6 +344,7 @@ def _parse_config(raw: dict) -> AppConfig:
         logging=logging_cfg,
         state=state_cfg,
         notifications=notif_cfg,
+        scanning=scanning_cfg,
         web=WebConfig(
             port=raw.get("web", {}).get("port", 8585),
             scheduler_autostart=raw.get("web", {}).get("scheduler_autostart", False),

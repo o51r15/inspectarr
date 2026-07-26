@@ -53,12 +53,14 @@ class ProwlarrClient:
         except Exception:
             return False
 
-    def get_torrent_indexers(self) -> list[dict]:
-        """Return all enabled torrent indexers sorted by priority ascending."""
+    def get_torrent_indexers(self, include_disabled: bool = False) -> list[dict]:
+        """Return torrent indexers sorted by priority ascending.
+        By default only enabled indexers. Set include_disabled=True for auto-manage.
+        """
         all_idx = self._get("indexer")
         torrent = [
             i for i in all_idx
-            if i.get("protocol") == "torrent" and i.get("enable", True)
+            if i.get("protocol") == "torrent" and (include_disabled or i.get("enable", True))
         ]
         return sorted(torrent, key=lambda x: x.get("priority", 999))
 
@@ -102,6 +104,37 @@ class ProwlarrClient:
             return False
         except Exception as exc:
             log.warning(f"Prowlarr ApplicationIndexerSync failed: {exc}")
+            return False
+
+    def set_indexer_enabled(self, indexer: dict, enabled: bool) -> bool:
+        """
+        Enable or disable an indexer in Prowlarr.
+        Uses forceSave=true (same rationale as set_indexer_priority).
+        Returns True on success.
+        """
+        updated = dict(indexer)
+        updated["enable"] = enabled
+        try:
+            resp = requests.put(
+                f"{self.base_url}/api/v1/indexer/{indexer['id']}",
+                headers={**self.headers, "Content-Type": "application/json"},
+                params={"forceSave": "true"},
+                json=updated,
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            action = "enabled" if enabled else "disabled"
+            log.info(f"Prowlarr indexer '{indexer.get('name')}' {action}")
+            return True
+        except requests.HTTPError as exc:
+            body = exc.response.text[:300] if exc.response is not None else ""
+            log.warning(
+                f"Prowlarr enable/disable failed for '{indexer.get('name')}' "
+                f"(HTTP {exc.response.status_code if exc.response is not None else '?'}): {body}"
+            )
+            return False
+        except Exception as exc:
+            log.warning(f"Prowlarr enable/disable failed for '{indexer.get('name')}': {exc}")
             return False
 
     def set_indexer_priority(self, indexer: dict, new_priority: int) -> bool:

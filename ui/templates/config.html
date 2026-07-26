@@ -306,6 +306,43 @@
             </div>
           </div>
         </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Auto-Manage Indexers</div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            Automatically disable indexers that consistently score below a health threshold,
+            and re-enable them after a cooldown period. You can always manually override from the
+            <a href="/indexers">Indexers</a> page.
+          </p>
+          <div class="toggle-row" style="margin-bottom:0.75rem">
+            <input type="checkbox" name="prowlarr_auto_manage_enabled" id="prowlarr_auto_manage_enabled"
+                   {{ 'checked' if cfg.get('prowlarr',{}).get('auto_manage',{}).get('enabled') else '' }}>
+            <label for="prowlarr_auto_manage_enabled">Enable automatic disable/re-enable</label>
+          </div>
+          <div class="form-row form-row-3">
+            <div class="form-group">
+              <label>Disable threshold</label>
+              <input type="number" name="prowlarr_auto_manage_threshold"
+                     value="{{ cfg.get('prowlarr',{}).get('auto_manage',{}).get('disable_threshold', 30) }}"
+                     min="0" max="100" step="5">
+              <div class="hint">Score below this triggers disable</div>
+            </div>
+            <div class="form-group">
+              <label>Consecutive runs</label>
+              <input type="number" name="prowlarr_auto_manage_runs"
+                     value="{{ cfg.get('prowlarr',{}).get('auto_manage',{}).get('consecutive_runs', 3) }}"
+                     min="1" max="20">
+              <div class="hint">How many scoring runs below threshold before disabling</div>
+            </div>
+            <div class="form-group">
+              <label>Cooldown (hours)</label>
+              <input type="number" name="prowlarr_auto_manage_cooldown"
+                     value="{{ cfg.get('prowlarr',{}).get('auto_manage',{}).get('cooldown_hours', 24) }}"
+                     min="1" max="720">
+              <div class="hint">Wait this long before auto-re-enabling</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- PANE: Notifications -->
@@ -368,10 +405,6 @@
                 <option value="abort"  {{ 'selected' if cfg.get('on_arr_failure') == 'abort' else '' }}>Abort — skip deletion</option>
               </select>
             </div>
-            <div class="form-group">
-              <label>Poll Interval (seconds)</label>
-              <input type="number" name="poll_interval_seconds" value="{{ cfg.get('poll_interval_seconds', 300) }}" min="60">
-            </div>
           </div>
           <div class="toggle-row">
             <input type="checkbox" name="dry_run" id="dry_run"
@@ -382,6 +415,60 @@
             <input type="checkbox" name="scheduler_autostart" id="scheduler_autostart"
                    {{ 'checked' if cfg.get('web',{}).get('scheduler_autostart') else '' }}>
             <label for="scheduler_autostart">Auto-start scheduler on launch</label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Scan Triggers</div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            Configure how inspectarr detects new torrents. Polling and webhooks can be used independently or together.
+          </p>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">
+            <div style="border:1px solid var(--border);border-radius:8px;padding:1rem">
+              <div style="font-weight:600;margin-bottom:0.5rem">Polling</div>
+              <div class="toggle-row" style="margin-bottom:0.75rem">
+                <input type="checkbox" name="polling_enabled" id="polling_enabled"
+                       {{ 'checked' if cfg.get('scanning',{}).get('polling',{}).get('enabled', True) else '' }}>
+                <label for="polling_enabled">Enabled</label>
+              </div>
+              <div class="form-group">
+                <label>Interval (seconds)</label>
+                <input type="number" name="polling_interval_seconds"
+                       value="{{ cfg.get('scanning',{}).get('polling',{}).get('interval_seconds', cfg.get('poll_interval_seconds', 300)) }}"
+                       min="60">
+                <div class="hint">How often to poll qBittorrent for new torrents</div>
+              </div>
+            </div>
+
+            <div style="border:1px solid var(--border);border-radius:8px;padding:1rem">
+              <div style="font-weight:600;margin-bottom:0.5rem">Event-Driven (Webhooks)</div>
+              <div class="toggle-row" style="margin-bottom:0.75rem">
+                <input type="checkbox" name="webhooks_enabled" id="webhooks_enabled"
+                       {{ 'checked' if cfg.get('scanning',{}).get('webhooks',{}).get('enabled') else '' }}>
+                <label for="webhooks_enabled">Enabled</label>
+              </div>
+              <div class="form-group">
+                <label>Scan Delay (seconds)</label>
+                <input type="number" name="webhooks_scan_delay"
+                       value="{{ cfg.get('scanning',{}).get('webhooks',{}).get('scan_delay_seconds', 60) }}"
+                       min="5" max="600">
+                <div class="hint">Wait for torrent to connect to swarm before scanning</div>
+              </div>
+              <div class="form-group">
+                <label>Shared Secret</label>
+                <input type="text" name="webhooks_secret" autocomplete="off"
+                       value="{{ cfg.get('scanning',{}).get('webhooks',{}).get('secret', '') }}"
+                       placeholder="Optional — leave blank for no auth">
+                <div class="hint">Set in *arr webhook headers as X-Webhook-Secret</div>
+              </div>
+              <div class="hint" style="margin-top:0.5rem">
+                Webhook URLs:<br>
+                <code style="font-size:0.8rem">POST /webhook/sonarr</code> &nbsp;
+                <code style="font-size:0.8rem">POST /webhook/radarr</code> &nbsp;
+                <code style="font-size:0.8rem">POST /webhook/lidarr</code>
+              </div>
+            </div>
           </div>
         </div>
 

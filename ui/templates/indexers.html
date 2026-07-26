@@ -46,6 +46,7 @@
           <th style="padding:6px 8px">Status</th>
           <th style="padding:6px 8px">Ignore</th>
           <th style="padding:6px 8px"></th>
+          <th style="padding:6px 8px"></th>
         </tr>
       </thead>
       <tbody id="indexer-tbody"></tbody>
@@ -185,11 +186,16 @@
         <td style="padding:6px 8px"><button class="btn btn-ghost btn-sm reset-btn"
              title="Reset grabs, malicious hits, and cached scores for this indexer"
              style="font-size:0.75rem;padding:2px 8px">Reset</button></td>
+        <td style="padding:6px 8px"><button class="btn btn-ghost btn-sm enable-toggle-btn"
+             title="${idx.enabled === false ? 'Enable this indexer in Prowlarr' : 'Disable this indexer in Prowlarr'}"
+             style="font-size:0.75rem;padding:2px 8px;${idx.enabled === false ? 'color:#ef4444' : ''}">${idx.enabled === false ? 'Enable' : 'Disable'}</button></td>
       `;
       tr.querySelector('.ignore-toggle').addEventListener('change',
         e => setIgnored(idx.id, idx.name, e.target.checked));
       tr.querySelector('.reset-btn').addEventListener('click',
         () => resetIndexer(idx.id, idx.name));
+      tr.querySelector('.enable-toggle-btn').addEventListener('click',
+        () => toggleIndexerEnabled(idx.id, idx.name, idx.enabled === false));
       tbody.appendChild(tr);
     });
   }
@@ -223,6 +229,26 @@
           loadIndexers();
         } else {
           showToast('Reset failed: ' + d.msg, 'error');
+        }
+      })
+      .catch(e => showToast('Request failed: ' + e, 'error'));
+  }
+
+  function toggleIndexerEnabled(indexerId, indexerName, enable) {
+    const action = enable ? 'enable' : 'disable';
+    if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} "${indexerName}" in Prowlarr?`)) return;
+    fetch('/config/prowlarr/toggle-indexer', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ indexer_id: indexerId, enabled: enable }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          showToast(`Indexer ${action}d: ${indexerName}`, 'success');
+          loadIndexers();
+        } else {
+          showToast('Failed: ' + d.message, 'error');
         }
       })
       .catch(e => showToast('Request failed: ' + e, 'error'));

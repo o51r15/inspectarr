@@ -131,17 +131,28 @@ class Scheduler:
     def _loop(self):
         first = True
         while not self._stop_event.is_set():
-            self._execute_scan(is_first=first)
+            # Check if polling is enabled (webhooks-only mode skips polling scans)
+            polling_enabled = self._is_polling_enabled()
+            if first or polling_enabled:
+                self._execute_scan(is_first=first)
             first    = False
             interval = self._get_interval()
             next_dt  = datetime.now(timezone.utc) + timedelta(seconds=interval)
             with self._lock:
-                self.next_run = next_dt.isoformat()
+                self.next_run = next_dt.isoformat() if polling_enabled else None
             # Sleep interruptibly
             self._stop_event.wait(timeout=interval)
         with self._lock:
             self.running  = False
             self.next_run = None
+
+    def _is_polling_enabled(self) -> bool:
+        try:
+            from core.config import load_config
+            config = load_config(self.config_path)
+            return config.scanning.polling.enabled
+        except Exception:
+            return True  # fail-open: poll by default
 
     def _execute_scan(self, is_first: bool = False):
         from core.config import load_config
@@ -263,8 +274,16 @@ class Scheduler:
             from core.indexer_scorer import IndexerScorer
             prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
             scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
-            scorer.score_all(skip_ai=False)   # rescore (with AI if configured) before auto-reorder
+            scored   = scorer.score_all(skip_ai=False)   # rescore (with AI if configured) before auto-reorder
             changed  = scorer.reorder()
+            # Auto-manage: disable/re-enable indexers based on health
+            am_result = scorer.auto_manage(scored)
+            if am_result.get("disabled") or am_result.get("re_enabled"):
+                self._state.write_log({
+                    "level": "INFO", "event": "prowlarr_auto_manage",
+                    "disabled": am_result["disabled"],
+                    "re_enabled": am_result["re_enabled"],
+                })
             self.last_reorder = now
             self._state.set_app_state("last_prowlarr_reorder", now.isoformat())
             self._state.write_log({
@@ -330,6 +349,6 @@ class Scheduler:
         try:
             from core.config import load_config
             config = load_config(self.config_path)
-            return getattr(config, "poll_interval_seconds", 300)
+            return config.scanning.polling.interval_seconds
         except Exception:
             return 300

@@ -267,6 +267,13 @@ def _form_to_config(form, existing: dict) -> dict:
         # Preserve the scoring sub-block exactly as-is; never reset it here.
         if "scoring" in (existing.get("prowlarr") or {}):
             prowlarr_block["scoring"] = existing["prowlarr"]["scoring"]
+        # Auto-manage from form fields
+        prowlarr_block["auto_manage"] = {
+            "enabled": "prowlarr_auto_manage_enabled" in form,
+            "disable_threshold": _float(form.get("prowlarr_auto_manage_threshold"), 30.0),
+            "consecutive_runs": _int(form.get("prowlarr_auto_manage_runs"), 3),
+            "cooldown_hours": _int(form.get("prowlarr_auto_manage_cooldown"), 24),
+        }
 
     return {
         "qbittorrent": {
@@ -293,8 +300,19 @@ def _form_to_config(form, existing: dict) -> dict:
         },
         "rules": rules,
         "on_arr_failure":        form.get("on_arr_failure", "delete"),
-        "poll_interval_seconds": _int(form.get("poll_interval_seconds"), 300),
+        "poll_interval_seconds": _int(form.get("polling_interval_seconds"), 300),
         "dry_run":               "dry_run" in form,
+        "scanning": {
+            "polling": {
+                "enabled": "polling_enabled" in form,
+                "interval_seconds": _int(form.get("polling_interval_seconds"), 300),
+            },
+            "webhooks": {
+                "enabled": "webhooks_enabled" in form,
+                "secret": form.get("webhooks_secret", ""),
+                "scan_delay_seconds": _int(form.get("webhooks_scan_delay"), 60),
+            },
+        },
         "retry": {
             "enabled":          "retry_enabled" in form,
             "max_attempts":     _int(form.get("retry_max_attempts"), 10),
@@ -489,6 +507,36 @@ def ollama_set_model():
         ollama["model"] = model
         _save_raw(config_path, raw)
         return jsonify({"ok": True, "message": f"Model set to {model}"})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": str(exc)})
+
+
+@config_bp.route("/config/prowlarr/toggle-indexer", methods=["POST"])
+def prowlarr_toggle_indexer():
+    """Manually enable or disable an indexer in Prowlarr."""
+    config_path = current_app.config["CONFIG_PATH"]
+    data = request.get_json(silent=True) or {}
+    try:
+        from core.config import load_config
+        from core.prowlarr import ProwlarrClient
+        cfg = load_config(config_path)
+        if not cfg.prowlarr.enabled:
+            return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        indexers = prowlarr.get_torrent_indexers(include_disabled=True)
+        target = next((i for i in indexers if i["id"] == int(data["indexer_id"])), None)
+        if not target:
+            return jsonify({"ok": False, "message": "Indexer not found"})
+        enable = bool(data.get("enabled", True))
+        ok = prowlarr.set_indexer_enabled(target, enable)
+        if ok:
+            # Clear auto-disable state if manually re-enabled
+            state = _get_state(cfg)
+            if enable:
+                state.clear_auto_disabled(int(data["indexer_id"]))
+            action = "enabled" if enable else "disabled"
+            return jsonify({"ok": True, "message": f"Indexer {action}"})
+        return jsonify({"ok": False, "message": "Failed to update indexer"})
     except Exception as exc:
         return jsonify({"ok": False, "message": str(exc)})
 

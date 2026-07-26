@@ -62,6 +62,10 @@ def check_auth(config_path: str):
     if request.path == "/logout":
         return None
 
+    # Webhook endpoints use their own shared-secret auth
+    if request.path.startswith("/webhook/"):
+        return None
+
     if _cross_origin_write():
         return Response("Cross-origin request rejected.", 403)
 
