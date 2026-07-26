@@ -110,11 +110,17 @@ class OllamaConfig:
 
 @dataclass
 class ProwlarrScoringConfig:
-    response_time_weight: float = 0.35
-    failure_rate_weight: float  = 0.40
-    malicious_weight: float     = 0.25
+    response_time_weight: float = 0.25
+    failure_rate_weight: float  = 0.30
+    malicious_weight: float     = 0.20
+    grab_success_weight: float  = 0.25
     backoff_penalty: float      = 20.0
     malicious_penalty_per_hit: float = 10.0
+    # Failure type multipliers (weighted failure rate)
+    auth_failure_mult: float    = 3.0
+    grab_failure_mult: float    = 2.0
+    query_failure_mult: float   = 1.0
+    rss_failure_mult: float     = 0.5
 
 
 @dataclass

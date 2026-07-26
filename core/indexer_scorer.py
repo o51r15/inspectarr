@@ -2,11 +2,12 @@
 core/indexer_scorer.py — Prowlarr indexer health scoring and auto-reorder
 
 Health score (0–100%):
-  response_time_score = clamp(100 × (1 − avg_ms / WORST_MS), 0, 100)
-  failure_rate_score  = (successful / total) × 100
-  malicious_score     = clamp(100 − malicious_hits × penalty, 0, 100)
+  rt_score  = 100 × (1 − log(1+avg_ms) / log(1+WORST_MS))   [logarithmic curve]
+  fr_score  = (1 − weighted_failure_rate) × 100               [auth 3×, grab 2×, query 1×, RSS 0.5×]
+  m_score   = clamp(100 − (malicious_hits/grabs) × 100 × penalty, 0, 100)
+  gr_score  = grab_success_rate × 100                         [distinct grab sub-score]
 
-  Health = rt_score × w_rt + fr_score × w_fr + m_score × w_m − backoff_penalty
+  Health = rt×w_rt + fr×w_fr + m×w_m + gr×w_gr − backoff − trend
   Final value clamped to [0, 100].
 
 Reorder model (torrent indexers only):
@@ -15,6 +16,7 @@ Reorder model (torrent indexers only):
   keep their current priority value and are skipped — free indexers fill the
   remaining numbers around them.
 """
+import math
 import logging
 from .prowlarr    import ProwlarrClient
 from .state       import StateManager
@@ -32,25 +34,33 @@ log = logging.getLogger("inspectarr")
 
 def compute_health_score(
     avg_response_ms: float,
-    success_rate: float,        # 0.0 – 1.0
-    malicious_hits: int,
+    weighted_failure_rate: float,  # 0.0 – 1.0 (weighted across failure types)
+    malicious_rate: float,         # malicious_hits / total_grabs (0.0 – 1.0)
+    grab_success_rate: float,      # 0.0 – 1.0
     in_backoff: bool,
     cfg: ProwlarrConfig,
     trend: float | None = None,
 ) -> float:
     s = cfg.scoring
-    rt_score = max(0.0, 100.0 * (1.0 - avg_response_ms / WORST_RESPONSE_MS))
-    fr_score = success_rate * 100.0
-    m_score  = max(0.0, 100.0 - malicious_hits * s.malicious_penalty_per_hit)
+    # Logarithmic response time curve — gentle on fast, harsh on slow
+    if avg_response_ms <= 0:
+        rt_score = 100.0
+    else:
+        rt_score = max(0.0, 100.0 * (1.0 - math.log1p(avg_response_ms) / math.log1p(WORST_RESPONSE_MS)))
+    # Weighted failure rate (auth > grab > query > RSS)
+    fr_score = (1.0 - weighted_failure_rate) * 100.0
+    # Malicious rate instead of raw count
+    m_score = max(0.0, 100.0 - malicious_rate * 100.0 * s.malicious_penalty_per_hit)
+    # Grab success as distinct sub-score
+    gr_score = grab_success_rate * 100.0
     raw = (
         rt_score * s.response_time_weight
         + fr_score * s.failure_rate_weight
         + m_score  * s.malicious_weight
+        + gr_score * s.grab_success_weight
     )
     if in_backoff:
         raw -= s.backoff_penalty
-    # Historical trend adjustment: improving indexers get a small boost,
-    # declining ones get a penalty. trend is already clamped to ±10.
     if trend is not None:
         raw += trend
     return round(max(0.0, min(100.0, raw)), 1)
@@ -203,7 +213,8 @@ class IndexerScorer:
                 "name":                     s["name"],
                 "deterministic_health_score": s["health_score"],
                 "avg_response_ms":          s["avg_response_ms"],
-                "success_rate_pct":         s["success_rate"],
+                "weighted_success_rate_pct": s["success_rate"],
+                "grab_success_pct":         s.get("grab_success", 0),
                 "total_queries":            ps.get("numberOfQueries", 0),
                 "failed_queries":           ps.get("numberOfFailedQueries", 0),
                 "total_grabs":              ps.get("numberOfGrabs", 0),
@@ -213,9 +224,11 @@ class IndexerScorer:
                 "total_auth_queries":       ps.get("numberOfAuthQueries", 0),
                 "failed_auth_queries":      ps.get("numberOfFailedAuthQueries", 0),
                 "malicious_hits":           s["malicious_hits"],
+                "malicious_rate_pct":       s.get("malicious_rate", 0),
                 "in_backoff":               s["in_backoff"],
                 "total_records":            s["total_records"],
                 "priority":                 s["priority"],
+                "trend":                    s.get("trend"),
             })
 
         ai_results = ollama_score_indexers(
@@ -250,33 +263,52 @@ class IndexerScorer:
         db_stats = stats_by_id.get(iid, {})
         ps       = prowlarr_stats.get(iid, {})
 
-        # Per-indexer response time and query counts from /api/v1/indexerstats.
-        # This replaces the per-indexer history fetch, which did not filter by
-        # indexer correctly and returned a global average for every indexer.
         avg_ms = float(ps.get("averageResponseTime", 0))
+        s = self.cfg.scoring
 
-        total_queries = (
-            ps.get("numberOfQueries",     0) +
-            ps.get("numberOfGrabs",       0) +
-            ps.get("numberOfRssQueries",  0) +
-            ps.get("numberOfAuthQueries", 0)
+        # Raw counts per failure type
+        n_query      = ps.get("numberOfQueries", 0)
+        n_grab       = ps.get("numberOfGrabs", 0)
+        n_rss        = ps.get("numberOfRssQueries", 0)
+        n_auth       = ps.get("numberOfAuthQueries", 0)
+        nf_query     = ps.get("numberOfFailedQueries", 0)
+        nf_grab      = ps.get("numberOfFailedGrabs", 0)
+        nf_rss       = ps.get("numberOfFailedRssQueries", 0)
+        nf_auth      = ps.get("numberOfFailedAuthQueries", 0)
+
+        total_queries = n_query + n_grab + n_rss + n_auth
+
+        # Weighted failure rate: each type multiplied by its severity weight
+        weighted_failed = (
+            nf_query * s.query_failure_mult
+            + nf_grab * s.grab_failure_mult
+            + nf_rss  * s.rss_failure_mult
+            + nf_auth * s.auth_failure_mult
         )
-        total_failed = (
-            ps.get("numberOfFailedQueries",     0) +
-            ps.get("numberOfFailedGrabs",       0) +
-            ps.get("numberOfFailedRssQueries",  0) +
-            ps.get("numberOfFailedAuthQueries", 0)
+        weighted_total = (
+            n_query * s.query_failure_mult
+            + n_grab * s.grab_failure_mult
+            + n_rss  * s.rss_failure_mult
+            + n_auth * s.auth_failure_mult
         )
+        weighted_failure_rate = (weighted_failed / weighted_total) if weighted_total > 0 else 0.0
 
-        has_enough   = total_queries >= self.cfg.min_grabs_before_scoring
-        success_rate = (1.0 - total_failed / total_queries) if total_queries > 0 else 1.0
-
+        # Malicious rate: hits per grab (not raw count)
         malicious_hits = db_stats.get("malicious_hits", 0)
-        in_backoff     = iid in backoff_map
+        malicious_rate = (malicious_hits / n_grab) if n_grab > 0 else 0.0
+
+        # Grab success rate as distinct signal
+        grab_success_rate = ((n_grab - nf_grab) / n_grab) if n_grab > 0 else 1.0
+
+        has_enough = total_queries >= self.cfg.min_grabs_before_scoring
+        in_backoff = iid in backoff_map
 
         trend = self.state.get_score_trend(iid) if has_enough else None
         health = (
-            compute_health_score(avg_ms, success_rate, malicious_hits, in_backoff, self.cfg, trend)
+            compute_health_score(
+                avg_ms, weighted_failure_rate, malicious_rate,
+                grab_success_rate, in_backoff, self.cfg, trend,
+            )
             if has_enough else None
         )
 
@@ -285,9 +317,11 @@ class IndexerScorer:
             "name":            idx["name"],
             "priority":        idx.get("priority", 0),
             "avg_response_ms": round(avg_ms, 1),
-            "success_rate":    round(success_rate * 100, 1),
+            "success_rate":    round((1.0 - weighted_failure_rate) * 100, 1),
+            "grab_success":    round(grab_success_rate * 100, 1),
             "total_records":   total_queries,
             "malicious_hits":  malicious_hits,
+            "malicious_rate":  round(malicious_rate * 100, 1),
             "health_score":    health,
             "trend":           trend,
             "in_backoff":      in_backoff,
@@ -296,5 +330,5 @@ class IndexerScorer:
             "has_enough_data": has_enough,
             "ai_scored":       False,
             "ai_reasoning":    "",
-            "_raw":            idx,   # full Prowlarr object needed for PUT
+            "_raw":            idx,
         }
