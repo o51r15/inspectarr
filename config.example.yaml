@@ -116,6 +116,15 @@ notifications:
       - startup                     # inspectarr started successfully
       - dry_run                     # A match was found but dry_run prevented action
     priority: 0
+  # Notification digest — batch notifications instead of sending individually
+  digest:
+    enabled: false
+    use_ollama: false               # Use Ollama to generate digest summaries
+  # Periodic log summary — generates a summary of recent activity
+  summary:
+    enabled: false
+    schedule: daily                 # "daily" or "weekly"
+    use_ollama: true                # Use Ollama to generate natural-language summaries
 
 # ---------------------------------------------------------------------------
 # Dry run
@@ -126,10 +135,17 @@ notifications:
 dry_run: false
 
 # ---------------------------------------------------------------------------
-# Poll interval (seconds) — used by the web UI scheduler daemon
-# The CLI single-shot mode ignores this value.
+# Scanning — controls how and when inspectarr checks for new torrents
+# Replaces the legacy poll_interval_seconds key.
 # ---------------------------------------------------------------------------
-poll_interval_seconds: 300
+scanning:
+  polling:
+    enabled: true
+    interval_seconds: 300           # Seconds between scheduled scans
+  webhooks:
+    enabled: false                  # Accept incoming webhooks from *arr apps
+    secret: ""                      # Shared secret for HMAC validation (optional)
+    scan_delay_seconds: 60          # Delay after webhook before scanning (debounce)
 
 # ---------------------------------------------------------------------------
 # Prowlarr indexer health scoring (optional)
@@ -159,6 +175,16 @@ prowlarr:
     url: ""                      # e.g. http://192.168.1.125:11434
     model: ""                    # e.g. gemma3:latest — must be set explicitly
     timeout: 120                 # seconds — hard cutoff per scoring run
+    cache_ttl_hours: 24          # How long to cache LLM scoring results
+  # Automated indexer management
+  # When enabled, indexers that drop below disable_threshold for consecutive_runs
+  # scoring cycles are automatically disabled in Prowlarr, then re-enabled after
+  # cooldown_hours.
+  auto_manage:
+    enabled: false
+    disable_threshold: 30.0      # Health score below which an indexer is disabled
+    consecutive_runs: 3          # Must fail this many cycles before auto-disable
+    cooldown_hours: 24           # Hours before a disabled indexer is re-enabled
 
 # ---------------------------------------------------------------------------
 # Web UI
