@@ -263,11 +263,6 @@
                      value="{{ cfg.get('prowlarr',{}).get('base_priority', 10) }}">
               <span class="hint">Best-scoring torrent indexer gets this priority; others count up. Keep above your NZB indexers' priority numbers.</span>
             </div>
-            <div class="form-group">
-              <label>Reorder interval (hours)</label>
-              <input type="number" name="prowlarr_reorder_interval" id="prowlarr_reorder_interval" min="1"
-                     value="{{ cfg.get('prowlarr',{}).get('reorder_interval_hours', 24) }}">
-            </div>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -487,6 +482,18 @@
             <div class="form-group">
               <label>Interval (seconds)</label>
               <input type="number" name="retry_interval_seconds" value="{{ cfg.get('retry',{}).get('interval_seconds', 600) }}" min="60">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Indexer Scoring Schedule</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Reorder interval (hours)</label>
+              <input type="number" name="prowlarr_reorder_interval" id="prowlarr_reorder_interval" min="1"
+                     value="{{ cfg.get('prowlarr',{}).get('reorder_interval_hours', 24) }}">
+              <span class="hint">How often to automatically rescore and reorder Prowlarr indexers</span>
             </div>
           </div>
         </div>
