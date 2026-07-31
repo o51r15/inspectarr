@@ -18,14 +18,18 @@
 
 ## What it does
 
-Inspectarr polls your qBittorrent categories, finds downloads that match bad-file
+Inspectarr watches your qBittorrent categories, finds downloads that match bad-file
 rules (`.exe` in a TV category, undersized files, suspicious filenames), blocklists
 them in Sonarr / Radarr / Lidarr, deletes the torrent, and notifies you via Pushover.
+Scans can be triggered by a polling schedule, incoming webhooks from your *arr apps,
+or both at the same time.
 
 It also scores your Prowlarr torrent indexers by health — response time, failure
 rate, malicious content, and grab success — then automatically reorders them so
-your best indexers are searched first. Optionally uses a local
-[Ollama](https://ollama.com) LLM for AI-powered scoring.
+your best indexers are searched first. Indexers that consistently score below a
+configurable threshold are automatically disabled and re-enabled after a cooldown.
+Optionally uses a local [Ollama](https://ollama.com) LLM for AI-powered scoring
+with content-hash caching to minimize redundant calls.
 
 ---
 
@@ -33,14 +37,17 @@ your best indexers are searched first. Optionally uses a local
 
 - **Bad torrent detection** — configurable rules per qBittorrent category: bad extensions, filename patterns, minimum file size
 - **Automatic remediation** — blocklist in the *arr, delete from qBit, retry on failure
+- **Webhook + polling** — receive push events from Sonarr/Radarr/Lidarr or poll on a schedule, or both
 - **Prowlarr indexer health scoring** — weighted failure rates, logarithmic response time curve, malicious content tracking, grab success rate, historical trend analysis
-- **AI-powered scoring** — optional Ollama integration with in-UI model selector
+- **AI-powered scoring** — optional Ollama integration with in-UI model selector and content-hash LLM caching
 - **Grab attribution** — tracks which indexer served each torrent, increments malicious-hit counters automatically
 - **Auto-reorder** — demotes bad indexers, promotes good ones, syncs to all connected apps
-- **Pushover notifications** — with optional Ollama-narrated daily digests
-- **Full web UI** — dashboard, scheduler, torrents, indexer health, stats, settings, backups, system status
+- **Auto-manage indexers** — automatically disable indexers that consistently score below a health threshold, re-enable after a configurable cooldown
+- **Pushover notifications** — with optional Ollama-narrated digests and periodic log summaries (daily/weekly)
+- **Full web UI** — dashboard, scheduler, torrents, indexer health, stats, settings, backups, system status, update checker
 - **Mobile responsive** — works on phone and tablet
-- **Docker-native** — single volume mount, GHCR images, dev container CI
+- **Docker-native** — single volume mount, GHCR images, non-root container, dev container CI
+- **CLI daemon mode** — `--daemon` flag for headless operation with graceful SIGINT/SIGTERM shutdown
 
 ---
 
@@ -136,7 +143,9 @@ Each torrent indexer gets a **0–100% health score** from six signals:
 | Backoff penalty | Flat −20 if indexer is in Prowlarr backoff | — |
 | Trend | Linear regression over last 30 snapshots, ±10 | — |
 
-When [Ollama](https://ollama.com) is configured, the LLM receives all per-indexer data and returns its own score with reasoning. Select your model from **Settings → Indexers → AI Model**. Falls back to deterministic scoring silently on any failure.
+When [Ollama](https://ollama.com) is configured, the LLM receives all per-indexer data and returns its own score with reasoning. Results are cached by content hash with a configurable TTL (`cache_ttl_hours`), cutting Ollama calls 60–80% on stable homelabs. Select your model from **Settings → Indexers → AI Model**. Falls back to deterministic scoring silently on any failure.
+
+Indexers that consistently score below a configurable threshold are automatically disabled in Prowlarr and re-enabled after a cooldown period. Manual override is available from the Indexers page.
 
 All weights, multipliers, and thresholds are configurable. See the [wiki](https://github.com/o51r15/inspectarr/wiki/Prowlarr-Indexer-Scoring) for the full breakdown.
 
