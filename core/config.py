@@ -158,7 +158,6 @@ class ProwlarrConfig:
     api_key: str = ""
     base_priority: int = 10
     reorder_interval_hours: int = 24
-    history_window_days: int = 90
     min_grabs_before_scoring: int = 10
     scoring: ProwlarrScoringConfig = field(default_factory=ProwlarrScoringConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
@@ -295,14 +294,18 @@ def _parse_config(raw: dict) -> AppConfig:
         api_key=p_raw.get("api_key", ""),
         base_priority=p_raw.get("base_priority", 10),
         reorder_interval_hours=p_raw.get("reorder_interval_hours", 24),
-        history_window_days=p_raw.get("history_window_days", 90),
         min_grabs_before_scoring=p_raw.get("min_grabs_before_scoring", 10),
         scoring=ProwlarrScoringConfig(
-            response_time_weight=s_raw.get("response_time_weight", 0.35),
-            failure_rate_weight=s_raw.get("failure_rate_weight", 0.40),
-            malicious_weight=s_raw.get("malicious_weight", 0.25),
+            response_time_weight=s_raw.get("response_time_weight", 0.25),
+            failure_rate_weight=s_raw.get("failure_rate_weight", 0.30),
+            malicious_weight=s_raw.get("malicious_weight", 0.20),
+            grab_success_weight=s_raw.get("grab_success_weight", 0.25),
             backoff_penalty=s_raw.get("backoff_penalty", 20.0),
             malicious_penalty_per_hit=s_raw.get("malicious_penalty_per_hit", 10.0),
+            auth_failure_mult=float(s_raw.get("auth_failure_mult", 3.0)),
+            grab_failure_mult=float(s_raw.get("grab_failure_mult", 2.0)),
+            query_failure_mult=float(s_raw.get("query_failure_mult", 1.0)),
+            rss_failure_mult=float(s_raw.get("rss_failure_mult", 0.5)),
         ),
         ollama=OllamaConfig(
             url=o_raw.get("url", "").rstrip("/"),

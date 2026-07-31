@@ -224,10 +224,50 @@ class Scheduler:
             except Exception:
                 pass  # persistence failure must never affect scan operation
 
-        # After each scan cycle, check whether a Prowlarr reorder is due.
+        # After each scan cycle, run auto-manage (every scan) and check reorder (interval-gated).
+        self._maybe_auto_manage()
         self._maybe_reorder()
         # Check if a periodic log summary is due.
         self._maybe_summary()
+
+    def _maybe_auto_manage(self):
+        """
+        Run auto-manage after every scan cycle (not gated by reorder interval).
+        Uses deterministic scoring only (skip_ai=True) for speed.
+        Best-effort: any failure is logged and never affects the scan loop.
+        """
+        try:
+            from core.config import load_config
+            config = load_config(self.config_path)
+            if not config.prowlarr.enabled or not config.prowlarr.auto_manage.enabled:
+                return
+
+            if self._state is None:
+                self._state = self._init_state()
+            if self._state is None:
+                return
+
+            from core.prowlarr import ProwlarrClient
+            from core.indexer_scorer import IndexerScorer
+            prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
+            scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
+            scored   = scorer.score_all(skip_ai=True)   # fast deterministic pass
+            am_result = scorer.auto_manage(scored)
+            if am_result.get("disabled") or am_result.get("re_enabled"):
+                self._state.write_log({
+                    "level": "INFO", "event": "prowlarr_auto_manage",
+                    "disabled": am_result["disabled"],
+                    "re_enabled": am_result["re_enabled"],
+                })
+        except Exception as exc:
+            if self._state:
+                try:
+                    self._state.write_log({
+                        "level": "ERROR", "event": "prowlarr_auto_manage_failed",
+                        "reason": str(exc),
+                    })
+                except Exception:
+                    pass
 
     def _maybe_reorder(self):
         """
@@ -276,14 +316,6 @@ class Scheduler:
             scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
             scored   = scorer.score_all(skip_ai=False)   # rescore (with AI if configured) before auto-reorder
             changed  = scorer.reorder()
-            # Auto-manage: disable/re-enable indexers based on health
-            am_result = scorer.auto_manage(scored)
-            if am_result.get("disabled") or am_result.get("re_enabled"):
-                self._state.write_log({
-                    "level": "INFO", "event": "prowlarr_auto_manage",
-                    "disabled": am_result["disabled"],
-                    "re_enabled": am_result["re_enabled"],
-                })
             self.last_reorder = now
             self._state.set_app_state("last_prowlarr_reorder", now.isoformat())
             self._state.write_log({

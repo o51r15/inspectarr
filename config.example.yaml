@@ -159,14 +159,19 @@ prowlarr:
   api_key: ~
   base_priority: 10            # Best-scoring torrent indexer gets this priority; others count up from here
   reorder_interval_hours: 24   # How often to auto-reorder (runs via web scheduler)
-  history_window_days: 90      # Rolling window for response time + failure rate
   min_grabs_before_scoring: 10 # Minimum history records before scoring an indexer
   scoring:
-    response_time_weight: 0.35
-    failure_rate_weight: 0.40
-    malicious_weight: 0.25
+    response_time_weight: 0.25   # Weight for response time sub-score
+    failure_rate_weight: 0.30    # Weight for weighted failure rate sub-score
+    malicious_weight: 0.20       # Weight for malicious content rate sub-score
+    grab_success_weight: 0.25    # Weight for grab success rate sub-score
     backoff_penalty: 20          # Points deducted if currently in Prowlarr backoff
     malicious_penalty_per_hit: 10  # Points deducted per confirmed malicious torrent
+    # Failure type severity multipliers (higher = more weight in failure rate)
+    auth_failure_mult: 3.0       # Auth failures are most severe
+    grab_failure_mult: 2.0       # Grab failures
+    query_failure_mult: 1.0      # Query failures (baseline)
+    rss_failure_mult: 0.5        # RSS failures are least severe
   # Optional: AI-powered scoring via Ollama
   # When configured, Ollama analyzes all available indexer data and produces
   # the final health score. When not configured (or if Ollama is unreachable),
