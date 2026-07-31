@@ -13,6 +13,7 @@ def stats():
     error = None
     indexer_rows = []
     prowlarr_enabled = False
+    scored_data = {}
 
     try:
         config = load_config(current_app.config["CONFIG_PATH"])
@@ -23,45 +24,76 @@ def stats():
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
             try:
-                rows = conn.execute(
-                    "SELECT * FROM indexer_stats WHERE total_grabs > 0"
-                ).fetchall()
+                rows = conn.execute("SELECT * FROM indexer_stats").fetchall()
             except sqlite3.OperationalError:
-                # total_grabs column not yet migrated — show empty page
                 rows = []
 
         db_stats = {r["indexer_id"]: dict(r) for r in rows}
 
-        # Try to enrich with live Prowlarr priority
-        prowlarr_map = {}
+        # Get live scored data if Prowlarr is available
         if prowlarr_enabled:
             try:
                 from core.prowlarr import ProwlarrClient
-                prowlarr = ProwlarrClient(
-                    config.prowlarr.url,
-                    config.prowlarr.api_key,
-                )
-                for idx in prowlarr.get_torrent_indexers():
-                    prowlarr_map[idx["id"]] = idx
+                from core.indexer_scorer import IndexerScorer
+                from ui.routes.config import _get_state
+                prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
+                state = _get_state(config)
+                scorer = IndexerScorer(prowlarr, state, config.prowlarr)
+                results = scorer.score_all(skip_ai=True)
+                scored_data = {r["id"]: r for r in results}
             except Exception:
-                pass  # Prowlarr unreachable — show stats without priority
+                pass
 
-        for iid, s in db_stats.items():
-            total     = s.get("total_grabs", 0)
-            malicious = s.get("malicious_hits", 0)
-            pct       = round(malicious / total * 100, 1) if total > 0 else 0.0
-            prowlarr_info = prowlarr_map.get(iid, {})
+        # Build enriched rows — include all known indexers (scored or DB)
+        seen_ids = set()
+        for iid, s in scored_data.items():
+            seen_ids.add(iid)
+            db = db_stats.get(iid, {})
+            total_grabs = db.get("total_grabs", 0)
+            malicious = db.get("malicious_hits", 0)
+            pct = round(malicious / total_grabs * 100, 1) if total_grabs > 0 else 0.0
             indexer_rows.append({
-                "id":            iid,
-                "name":          s["indexer_name"],
-                "priority":      prowlarr_info.get("priority", "—"),
-                "total_grabs":   total,
+                "id": iid,
+                "name": s["name"],
+                "priority": s.get("priority", "—"),
+                "total_grabs": total_grabs,
                 "malicious_hits": malicious,
                 "malicious_pct": pct,
+                "avg_response_ms": s.get("avg_response_ms", 0),
+                "success_rate": s.get("success_rate", 0),
+                "grab_success": s.get("grab_success", 0),
+                "health_score": s.get("health_score"),
+                "total_records": s.get("total_records", 0),
+                "in_backoff": s.get("in_backoff", False),
+                "enabled": s.get("enabled", True),
+                "trend": s.get("trend"),
             })
 
-        # Sort: most malicious first, then most grabs
-        indexer_rows.sort(key=lambda x: (-x["malicious_hits"], -x["total_grabs"]))
+        # Add any DB-only indexers not in scored_data
+        for iid, db in db_stats.items():
+            if iid in seen_ids:
+                continue
+            total = db.get("total_grabs", 0)
+            malicious = db.get("malicious_hits", 0)
+            pct = round(malicious / total * 100, 1) if total > 0 else 0.0
+            indexer_rows.append({
+                "id": iid,
+                "name": db["indexer_name"],
+                "priority": "—",
+                "total_grabs": total,
+                "malicious_hits": malicious,
+                "malicious_pct": pct,
+                "avg_response_ms": 0,
+                "success_rate": 0,
+                "grab_success": 0,
+                "health_score": db.get("health_score"),
+                "total_records": 0,
+                "in_backoff": False,
+                "enabled": True,
+                "trend": None,
+            })
+
+        indexer_rows.sort(key=lambda x: (-(x["health_score"] or 0), -x["malicious_hits"]))
 
     except Exception as exc:
         error = str(exc)

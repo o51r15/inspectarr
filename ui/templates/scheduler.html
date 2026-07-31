@@ -90,6 +90,36 @@
 
 </div>
 
+{% if scoring_info %}
+<!-- Prowlarr Scoring Schedule -->
+<div class="card" style="margin-bottom:16px">
+  <div class="card-title">Prowlarr Scoring &amp; Reorder</div>
+  <table style="width:100%;font-size:13px">
+    <tr>
+      <td class="text-muted" style="width:130px;padding:4px 0">Interval</td>
+      <td>Every {{ scoring_info.interval_hours }}h</td>
+    </tr>
+    <tr>
+      <td class="text-muted" style="padding:4px 0">Last run</td>
+      <td class="mono">{{ scoring_info.last_reorder or '—' }}</td>
+    </tr>
+    <tr>
+      <td class="text-muted" style="padding:4px 0">Next run</td>
+      <td class="mono">{{ scoring_info.next_reorder or 'Pending first cycle' }}</td>
+    </tr>
+    <tr>
+      <td class="text-muted" style="padding:4px 0">Auto-manage</td>
+      <td>{{ 'Enabled' if scoring_info.auto_manage else 'Disabled' }}</td>
+    </tr>
+  </table>
+  <div class="hint mt-8">
+    Scores are recalculated and indexers reordered every {{ scoring_info.interval_hours }} hours
+    as part of the scan cycle. Configure the interval under
+    <a href="/config?mode=prowlarr">Config &rarr; Prowlarr</a>.
+  </div>
+</div>
+{% endif %}
+
 <!-- Run history -->
 {% if status.run_history %}
 <div class="card">

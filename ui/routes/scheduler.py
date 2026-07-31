@@ -10,10 +10,40 @@ def scheduler_view():
     try:
         from core.config import load_config
         config   = load_config(current_app.config["CONFIG_PATH"])
-        interval = config.poll_interval_seconds
+        interval = config.scanning.polling.interval_seconds
     except Exception:
         interval = 300
-    return render_template("scheduler.html", status=status, interval=interval)
+
+    # Prowlarr scoring schedule info
+    scoring_info = None
+    try:
+        from core.config import load_config as _lc
+        cfg = _lc(current_app.config["CONFIG_PATH"])
+        if cfg.prowlarr.enabled:
+            from ui.routes.config import _get_state
+            from datetime import datetime, timezone, timedelta
+            state = _get_state(cfg)
+            last_iso = state.get_app_state("last_prowlarr_reorder")
+            last_reorder = None
+            next_reorder = None
+            if last_iso:
+                try:
+                    last_reorder = last_iso[:19].replace("T", " ")
+                    last_dt = datetime.fromisoformat(last_iso)
+                    next_dt = last_dt + timedelta(hours=cfg.prowlarr.reorder_interval_hours)
+                    next_reorder = next_dt.isoformat()[:19].replace("T", " ")
+                except ValueError:
+                    pass
+            scoring_info = {
+                "interval_hours": cfg.prowlarr.reorder_interval_hours,
+                "last_reorder": last_reorder,
+                "next_reorder": next_reorder,
+                "auto_manage": cfg.prowlarr.auto_manage.enabled,
+            }
+    except Exception:
+        pass
+
+    return render_template("scheduler.html", status=status, interval=interval, scoring_info=scoring_info)
 
 
 @scheduler_bp.route("/scheduler/toggle", methods=["POST"])

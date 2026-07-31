@@ -3,10 +3,12 @@
 {% block page_title %}Indexer Health{% endblock %}
 
 {% block topbar_actions %}
-  <button class="btn btn-ghost btn-sm" onclick="rescoreIndexers()"
-          title="Recalculate health scores and refresh the table (no changes made in Prowlarr)">Rescore</button>
-  <button class="btn btn-primary btn-sm" onclick="reorderAndSync()"
-          title="Reorder indexers in Prowlarr by health score, then sync updated order to Sonarr, Radarr, and Whisparr">Reorder &amp; Sync</button>
+  <button class="btn btn-ghost btn-sm" onclick="rescoreAndReorder()"
+          title="Recalculate health scores and reorder indexers in Prowlarr by score">Rescore &amp; Reorder</button>
+  <button class="btn btn-ghost btn-sm" onclick="syncToApps()"
+          title="Push current Prowlarr indexer order to all connected apps (Sonarr, Radarr, Whisparr)">Sync</button>
+  <button id="apply-btn" class="btn btn-primary btn-sm" onclick="applyManualOrder()" disabled
+          title="Apply manual priority changes made in the table below">Apply</button>
   <span id="indexer-status" class="hint"></span>
 {% endblock %}
 
@@ -29,8 +31,9 @@
       <button type="button" class="btn btn-ghost btn-sm" onclick="rescoreIndexers()">&#8635; Refresh</button>
     </div>
     <p class="hint" style="margin-bottom:0.75rem">
-      <strong>Rescore</strong> recalculates health scores and refreshes this table without changing anything in Prowlarr.
-      <strong>Reorder Now</strong> applies the scores &mdash; the healthiest indexer gets the base priority and the rest follow.
+      <strong>Rescore &amp; Reorder</strong> recalculates health scores and reorders indexers in Prowlarr by score.
+      <strong>Sync</strong> pushes the current order to connected apps (Sonarr, Radarr, Whisparr).
+      <strong>Apply</strong> saves any manual priority changes you make in the table.
       Check <em>Ignore</em> to lock an indexer at its current priority.
     </p>
     <div id="indexer-msg" class="hint" style="padding:0.5rem 0"></div>
@@ -51,6 +54,18 @@
       </thead>
       <tbody id="indexer-tbody"></tbody>
     </table>
+  </div>
+
+  <!-- Scoring Schedule -->
+  <div class="form-section" style="margin-top:24px">
+    <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+      <span>Scoring Schedule</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-ghost btn-sm" onclick="triggerScoring()" title="Run score, reorder, and sync now">Run Now</button>
+        <span id="scoring-schedule-status" class="hint"></span>
+      </div>
+    </div>
+    <div id="scoring-info" class="hint" style="padding:0.5rem 0">Loading schedule info...</div>
   </div>
 
   <!-- Health Score History Chart -->
@@ -75,16 +90,18 @@
     '#818cf8', '#2dd4bf', '#fb923c', '#e879f9', '#38bdf8',
   ];
   let healthChart = null;
+  let pendingPriorityChanges = {};
 
   if (prowlarrEnabled) {
     loadIndexers();
     loadHealthChart();
+    loadScoringStatus();
   }
 
   function loadIndexers() {
     const msg   = document.getElementById('indexer-msg');
     const table = document.getElementById('indexer-table');
-    msg.textContent = 'Loading indexer data from Prowlarr\u2026';
+    msg.textContent = 'Loading indexer data from Prowlarr…';
     table.style.display = 'none';
     fetch('/config/prowlarr/indexers')
       .then(r => r.json())
@@ -110,7 +127,7 @@
           status.style.color = 'var(--success, #22c55e)';
           setTimeout(() => { status.textContent = ''; }, 3000);
         } else {
-          status.textContent = 'AI scoring unavailable — showing deterministic scores';
+          status.textContent = 'AI scoring unavailable';
           status.style.color = 'var(--warning, #f59e0b)';
           setTimeout(() => { status.textContent = ''; }, 5000);
         }
@@ -124,50 +141,91 @@
 
   function rescoreIndexers() {
     const el = document.getElementById('indexer-status');
-    el.textContent = 'Rescoring\u2026';
+    el.textContent = 'Refreshing…';
     el.style.color = '';
-    const msg   = document.getElementById('indexer-msg');
-    const table = document.getElementById('indexer-table');
     fetch('/config/prowlarr/indexers')
       .then(r => r.json())
       .then(d => {
-        if (!d.ok) { msg.textContent = 'Error: ' + d.message; return; }
+        if (!d.ok) { document.getElementById('indexer-msg').textContent = 'Error: ' + d.message; return; }
         renderTable(d.indexers);
-        table.style.display = 'table';
-        if (d.ai_available) {
-          loadAiScores();
-        } else {
-          el.textContent = 'Scores refreshed';
-          el.style.color = 'var(--success, #22c55e)';
-          setTimeout(() => { el.textContent = ''; }, 3000);
-        }
+        document.getElementById('indexer-table').style.display = 'table';
+        if (d.ai_available) { loadAiScores(); }
+        else { el.textContent = 'Refreshed'; el.style.color = 'var(--success, #22c55e)'; setTimeout(() => { el.textContent = ''; }, 3000); }
       })
-      .catch(e => { el.textContent = 'Rescore failed: ' + e; el.style.color = 'var(--error, #ef4444)'; });
+      .catch(e => { el.textContent = 'Failed: ' + e; el.style.color = 'var(--error, #ef4444)'; });
   }
 
-  function reorderAndSync() {
+  function rescoreAndReorder() {
     const el = document.getElementById('indexer-status');
-    el.textContent = 'Reordering and syncing\u2026';
+    el.textContent = 'Rescoring & reordering…';
     el.style.color = '';
-    fetch('/indexers/sync', {method: 'POST'})
+    fetch('/indexers/rescore-reorder', {method: 'POST'})
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          el.textContent = d.msg;
+          el.style.color = 'var(--success, #22c55e)';
+          loadIndexers();
+          showToast(d.msg, 'success');
+          setTimeout(() => { el.textContent = ''; }, 5000);
+        } else {
+          el.textContent = 'Error: ' + d.msg;
+          el.style.color = 'var(--error, #ef4444)';
+          showToast('Failed: ' + d.msg, 'error');
+        }
+      })
+      .catch(e => { el.textContent = 'Request failed: ' + e; el.style.color = 'var(--error, #ef4444)'; showToast('Request failed', 'error'); });
+  }
+
+  function syncToApps() {
+    const el = document.getElementById('indexer-status');
+    el.textContent = 'Syncing to apps…';
+    el.style.color = '';
+    fetch('/indexers/sync-only', {method: 'POST'})
       .then(r => r.json())
       .then(d => {
         if (d.ok) {
           el.textContent = d.msg;
           el.style.color = d.synced ? 'var(--success, #22c55e)' : 'var(--warning, #f59e0b)';
-          loadIndexers();
           showToast(d.msg, d.synced ? 'success' : 'warning');
+          setTimeout(() => { el.textContent = ''; }, 5000);
         } else {
           el.textContent = 'Error: ' + d.msg;
           el.style.color = 'var(--error, #ef4444)';
           showToast('Sync failed: ' + d.msg, 'error');
         }
       })
-      .catch(e => {
-        el.textContent = 'Request failed: ' + e;
-        el.style.color = 'var(--error, #ef4444)';
-        showToast('Request failed', 'error');
-      });
+      .catch(e => { el.textContent = 'Request failed: ' + e; el.style.color = 'var(--error, #ef4444)'; showToast('Request failed', 'error'); });
+  }
+
+  function applyManualOrder() {
+    const changes = Object.entries(pendingPriorityChanges);
+    if (changes.length === 0) return;
+    const el = document.getElementById('indexer-status');
+    el.textContent = 'Applying priority changes…';
+    el.style.color = '';
+    fetch('/indexers/apply-priorities', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({changes: pendingPriorityChanges}),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          pendingPriorityChanges = {};
+          document.getElementById('apply-btn').disabled = true;
+          el.textContent = d.msg;
+          el.style.color = 'var(--success, #22c55e)';
+          loadIndexers();
+          showToast(d.msg, 'success');
+          setTimeout(() => { el.textContent = ''; }, 5000);
+        } else {
+          el.textContent = 'Error: ' + d.msg;
+          el.style.color = 'var(--error, #ef4444)';
+          showToast('Apply failed: ' + d.msg, 'error');
+        }
+      })
+      .catch(e => { el.textContent = 'Request failed: ' + e; el.style.color = 'var(--error, #ef4444)'; showToast('Request failed', 'error'); });
   }
 
   function renderTable(indexers) {
@@ -183,17 +241,18 @@
         : idx.ignored
         ? '<span style="opacity:0.6">Pinned</span>'
         : '';
-      // SEC-2: idx.name comes from Prowlarr — escape it (esc from app.js) and
-      // attach the change handler via addEventListener instead of building an
-      // inline onchange string from the name.
       const tr = document.createElement('tr');
       tr.style.borderBottom = '1px solid var(--border)';
       tr.style.opacity = idx.ignored ? '0.75' : '1';
       tr.innerHTML = `
-        <td style="padding:6px 8px">${esc(idx.priority)}</td>
+        <td style="padding:6px 8px">
+          <input type="number" class="priority-input" value="${esc(idx.priority)}"
+                 style="width:60px;background:var(--surface-alt,#181c22);border:1px solid var(--border);color:var(--text);padding:2px 6px;border-radius:4px;text-align:center"
+                 min="1" max="999">
+        </td>
         <td style="padding:6px 8px">${esc(idx.name)}</td>
-        <td style="padding:6px 8px">${idx.avg_response_ms > 0 ? esc(idx.avg_response_ms) + ' ms' : '\u2014'}</td>
-        <td style="padding:6px 8px">${idx.total_records > 0 ? esc(idx.success_rate) + '%' : '\u2014'}</td>
+        <td style="padding:6px 8px">${idx.avg_response_ms > 0 ? esc(idx.avg_response_ms) + ' ms' : '—'}</td>
+        <td style="padding:6px 8px">${idx.total_records > 0 ? esc(idx.success_rate) + '%' : '—'}</td>
         <td style="padding:6px 8px">${idx.malicious_hits > 0 ? '<span style="color:#ef4444">' + esc(idx.malicious_hits) + '</span>' : '0'}</td>
         <td style="padding:6px 8px;${scoreColor}">${score}</td>
         <td style="padding:6px 8px">${statusBadge}</td>
@@ -206,6 +265,16 @@
              title="${idx.enabled === false ? 'Enable this indexer in Prowlarr' : 'Disable this indexer in Prowlarr'}"
              style="font-size:0.75rem;padding:2px 8px;${idx.enabled === false ? 'color:#ef4444' : ''}">${idx.enabled === false ? 'Enable' : 'Disable'}</button></td>
       `;
+      const prioInput = tr.querySelector('.priority-input');
+      prioInput.addEventListener('change', function() {
+        const newPrio = parseInt(this.value, 10);
+        if (isNaN(newPrio) || newPrio === idx.priority) {
+          delete pendingPriorityChanges[idx.id];
+        } else {
+          pendingPriorityChanges[idx.id] = newPrio;
+        }
+        document.getElementById('apply-btn').disabled = Object.keys(pendingPriorityChanges).length === 0;
+      });
       tr.querySelector('.ignore-toggle').addEventListener('change',
         e => setIgnored(idx.id, idx.name, e.target.checked));
       tr.querySelector('.reset-btn').addEventListener('click',
@@ -240,69 +309,10 @@
     })
       .then(r => r.json())
       .then(d => {
-        if (d.ok) {
-          showToast('Stats reset for ' + indexerName, 'success');
-          loadIndexers();
-        } else {
-          showToast('Reset failed: ' + d.msg, 'error');
-        }
+        if (d.ok) { showToast('Stats reset for ' + indexerName, 'success'); loadIndexers(); }
+        else { showToast('Reset failed: ' + d.msg, 'error'); }
       })
       .catch(e => showToast('Request failed: ' + e, 'error'));
-  }
-
-  function loadHealthChart() {
-    const msg = document.getElementById('chart-msg');
-    const canvas = document.getElementById('health-chart');
-    msg.textContent = 'Loading score history…';
-    fetch('/indexers/history')
-      .then(r => r.json())
-      .then(d => {
-        if (!d.ok) { msg.textContent = d.msg || 'No history data'; return; }
-        const ds = d.datasets;
-        const names = Object.keys(ds);
-        if (names.length === 0) { msg.textContent = 'No score history yet — scores are recorded on each scoring cycle.'; return; }
-        msg.textContent = '';
-        canvas.style.display = 'block';
-        const datasets = names.map((name, i) => ({
-          label: name,
-          data: ds[name],
-          borderColor: CHART_COLORS[i % CHART_COLORS.length],
-          backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '18',
-          borderWidth: 2,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-          tension: 0.3,
-          fill: false,
-        }));
-        if (healthChart) healthChart.destroy();
-        healthChart = new Chart(canvas, {
-          type: 'line',
-          data: { datasets },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'nearest', intersect: false },
-            scales: {
-              x: {
-                type: 'time',
-                time: { tooltipFormat: 'MMM d, HH:mm', unit: 'hour' },
-                grid: { color: 'rgba(255,255,255,0.04)' },
-                ticks: { color: '#8a9099', font: { size: 10 } },
-              },
-              y: {
-                min: 0, max: 100,
-                grid: { color: 'rgba(255,255,255,0.04)' },
-                ticks: { color: '#8a9099', font: { size: 10 }, callback: v => v + '%' },
-              },
-            },
-            plugins: {
-              legend: { labels: { color: '#e2e8f0', font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' } },
-              tooltip: { backgroundColor: '#111418', titleColor: '#e2e8f0', bodyColor: '#8a9099', borderColor: 'rgba(255,255,255,0.07)', borderWidth: 1 },
-            },
-          },
-        });
-      })
-      .catch(e => { msg.textContent = 'Failed to load chart: ' + e; });
   }
 
   function toggleIndexerEnabled(indexerId, indexerName, enable) {
@@ -315,14 +325,94 @@
     })
       .then(r => r.json())
       .then(d => {
-        if (d.ok) {
-          showToast(`Indexer ${action}d: ${indexerName}`, 'success');
-          loadIndexers();
-        } else {
-          showToast('Failed: ' + d.message, 'error');
-        }
+        if (d.ok) { showToast(`Indexer ${action}d: ${indexerName}`, 'success'); loadIndexers(); }
+        else { showToast('Failed: ' + d.message, 'error'); }
       })
       .catch(e => showToast('Request failed: ' + e, 'error'));
+  }
+
+  function loadScoringStatus() {
+    fetch('/indexers/scoring-status')
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) { document.getElementById('scoring-info').textContent = d.msg || 'Unavailable'; return; }
+        const info = document.getElementById('scoring-info');
+        const last = d.last_reorder ? new Date(d.last_reorder).toLocaleString() : 'Never';
+        const next = d.next_reorder ? new Date(d.next_reorder).toLocaleString() : 'Pending';
+        const sched = d.scheduler_running ? 'Running' : 'Stopped';
+        info.innerHTML = `Scheduler: <strong>${sched}</strong> &nbsp;|&nbsp; `
+          + `Interval: <strong>${d.interval_hours}h</strong> &nbsp;|&nbsp; `
+          + `Last: <strong>${last}</strong> &nbsp;|&nbsp; `
+          + `Next: <strong>${next}</strong>`;
+      })
+      .catch(e => { document.getElementById('scoring-info').textContent = 'Failed: ' + e; });
+  }
+
+  function triggerScoring() {
+    const el = document.getElementById('scoring-schedule-status');
+    el.textContent = 'Running...';
+    el.style.color = 'var(--warning, #f59e0b)';
+    fetch('/indexers/trigger-scoring', {method: 'POST'})
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          el.textContent = d.msg;
+          el.style.color = 'var(--success, #22c55e)';
+          loadIndexers();
+          loadScoringStatus();
+          loadHealthChart();
+          showToast(d.msg, 'success');
+          setTimeout(() => { el.textContent = ''; }, 5000);
+        } else {
+          el.textContent = 'Error: ' + d.msg;
+          el.style.color = 'var(--error, #ef4444)';
+          showToast('Scoring failed: ' + d.msg, 'error');
+        }
+      })
+      .catch(e => { el.textContent = 'Failed: ' + e; el.style.color = 'var(--error, #ef4444)'; });
+  }
+
+  function loadHealthChart() {
+    const msg = document.getElementById('chart-msg');
+    const canvas = document.getElementById('health-chart');
+    msg.textContent = 'Loading score history…';
+    fetch('/indexers/history')
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) { msg.textContent = d.msg || 'No history data'; return; }
+        const ds = d.datasets;
+        const names = Object.keys(ds);
+        if (names.length === 0) { msg.textContent = 'No score history yet.'; return; }
+        msg.textContent = '';
+        canvas.style.display = 'block';
+        const datasets = names.map((name, i) => ({
+          label: name,
+          data: ds[name],
+          borderColor: CHART_COLORS[i % CHART_COLORS.length],
+          backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + '18',
+          borderWidth: 2, pointRadius: 3, pointHoverRadius: 5, tension: 0.3, fill: false,
+        }));
+        if (healthChart) healthChart.destroy();
+        healthChart = new Chart(canvas, {
+          type: 'line',
+          data: { datasets },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'nearest', intersect: false },
+            scales: {
+              x: { type: 'time', time: { tooltipFormat: 'MMM d, HH:mm', unit: 'hour' },
+                   grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#8a9099', font: { size: 10 } } },
+              y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.04)' },
+                   ticks: { color: '#8a9099', font: { size: 10 }, callback: v => v + '%' } },
+            },
+            plugins: {
+              legend: { labels: { color: '#e2e8f0', font: { size: 11 }, usePointStyle: true, pointStyle: 'circle' } },
+              tooltip: { backgroundColor: '#111418', titleColor: '#e2e8f0', bodyColor: '#8a9099', borderColor: 'rgba(255,255,255,0.07)', borderWidth: 1 },
+            },
+          },
+        });
+      })
+      .catch(e => { msg.textContent = 'Failed to load chart: ' + e; });
   }
 </script>
 {% endblock %}
