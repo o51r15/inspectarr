@@ -1,6 +1,7 @@
 import json
 import os
-from flask import Blueprint, render_template, current_app, request, jsonify, redirect, url_for
+import time
+from flask import Blueprint, render_template, current_app, request, jsonify, redirect, url_for, Response
 
 logs_bp = Blueprint("logs", __name__)
 
@@ -82,6 +83,56 @@ def logs_clear():
         with open(log_path, "w"):   # BUG-07: use context manager, not bare open()
             pass
     return redirect(url_for("logs.logs_view"))
+
+
+@logs_bp.route("/logs/stream")
+def logs_stream():
+    """SSE endpoint — streams new log entries in real time."""
+    config_path = current_app.config["CONFIG_PATH"]
+    log_path = _get_log_path(config_path)
+    level_filter = request.args.get("level", "ALL")
+
+    def generate():
+        # Start at end of file
+        if not os.path.exists(log_path):
+            pos = 0
+        else:
+            with open(log_path, "r", encoding="utf-8") as f:
+                f.seek(0, 2)
+                pos = f.tell()
+
+        while True:
+            try:
+                if not os.path.exists(log_path):
+                    time.sleep(1)
+                    yield ": heartbeat\n\n"
+                    continue
+                with open(log_path, "r", encoding="utf-8") as f:
+                    f.seek(pos)
+                    new_lines = f.readlines()
+                    pos = f.tell()
+                for line in new_lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if level_filter != "ALL" and entry.get("level") != level_filter:
+                            continue
+                        yield f"data: {json.dumps(entry)}\n\n"
+                    except json.JSONDecodeError:
+                        pass
+                if not new_lines:
+                    time.sleep(1)
+                    yield ": heartbeat\n\n"
+            except GeneratorExit:
+                return
+            except Exception:
+                time.sleep(2)
+                yield ": heartbeat\n\n"
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 def _get_log_path(config_path: str) -> str:

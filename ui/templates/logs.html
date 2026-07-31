@@ -3,8 +3,8 @@
 {% block page_title %}Events{% endblock %}
 
 {% block topbar_actions %}
-  <button class="btn btn-ghost btn-sm" id="refresh-btn" onclick="toggleLogRefresh(this)">
-    Auto-refresh: Off
+  <button class="btn btn-ghost btn-sm" id="stream-btn" onclick="toggleLiveStream(this)">
+    Live: Off
   </button>
   <form method="post" action="/logs/clear"
         onsubmit="return confirm('Clear the entire log file? This cannot be undone.')">
@@ -104,4 +104,76 @@
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let evtSource = null;
+  let paused = false;
+
+  function toggleLiveStream(btn) {
+    if (evtSource) {
+      evtSource.close();
+      evtSource = null;
+      btn.textContent = 'Live: Off';
+      btn.classList.remove('btn-success');
+      btn.classList.add('btn-ghost');
+      return;
+    }
+    const level = document.getElementById('level-filter').value;
+    evtSource = new EventSource('/logs/stream?level=' + encodeURIComponent(level));
+    btn.textContent = 'Live: On';
+    btn.classList.remove('btn-ghost');
+    btn.classList.add('btn-success');
+
+    evtSource.onmessage = function(e) {
+      if (paused) return;
+      try {
+        const entry = JSON.parse(e.data);
+        const tbody = document.getElementById('log-tbody');
+        const tr = document.createElement('tr');
+        tr.style.background = 'rgba(168,85,247,0.04)';
+        setTimeout(() => { tr.style.background = ''; }, 2000);
+
+        const ts = (entry.timestamp || '').substring(0, 19).replace('T', ' ') || '—';
+        const level = entry.level || 'INFO';
+        const badgeClass = level === 'ACTION' ? 'badge-action' :
+                           level === 'ERROR' ? 'badge-error' :
+                           level === 'DRY_RUN' ? 'badge-dry-run' :
+                           level === 'DEBUG' ? 'badge-debug' : 'badge-info';
+        const badgeText = level === 'DRY_RUN' ? 'DRY RUN' : level;
+
+        let detail = '';
+        if (entry.torrent_name) detail = esc(entry.torrent_name);
+        else if (entry.reason) detail = '<span class="text-error">' + esc(entry.reason) + '</span>';
+        else if (entry.category) detail = '<span class="text-muted">category: ' + esc(entry.category) + '</span>';
+
+        let badFiles = '';
+        if (entry.bad_files) {
+          badFiles = entry.bad_files.map(f =>
+            '<code style="font-size:11px;background:var(--surface);padding:1px 5px;border-radius:3px;margin-right:4px">' + esc(f) + '</code>'
+          ).join('');
+        }
+
+        tr.innerHTML = '<td class="mono text-muted">' + esc(ts) + '</td>' +
+          '<td><span class="badge ' + badgeClass + '">' + badgeText + '</span></td>' +
+          '<td class="mono" style="font-size:12px">' + esc(entry.event || '') + '</td>' +
+          '<td>' + detail + '</td>' +
+          '<td>' + badFiles + '</td>';
+
+        tbody.insertBefore(tr, tbody.firstChild);
+        // Keep table from growing unbounded
+        while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
+      } catch (err) {}
+    };
+
+    evtSource.onerror = function() {
+      btn.textContent = 'Live: Reconnecting…';
+    };
+  }
+
+  // Pause on hover to allow reading
+  document.getElementById('log-tbody').addEventListener('mouseenter', () => { paused = true; });
+  document.getElementById('log-tbody').addEventListener('mouseleave', () => { paused = false; });
+</script>
 {% endblock %}

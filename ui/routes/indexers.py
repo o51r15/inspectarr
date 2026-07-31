@@ -55,6 +55,37 @@ def indexers_sync():
         return jsonify({"ok": False, "msg": str(exc)}), 500
 
 
+@indexers_bp.route("/indexers/history", methods=["GET"])
+def indexers_history():
+    """Return score history for the health analytics chart."""
+    config_path = current_app.config["CONFIG_PATH"]
+    try:
+        from core.config import load_config
+        from .config import _get_state
+
+        cfg = load_config(config_path)
+        if not cfg.prowlarr.enabled:
+            return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
+
+        state = _get_state(cfg)
+        rows = state.get_score_history_all()
+
+        # Group by indexer for Chart.js datasets
+        datasets = {}
+        for r in rows:
+            name = r["indexer_name"]
+            if name not in datasets:
+                datasets[name] = []
+            datasets[name].append({
+                "x": r["scored_at"],
+                "y": r["health_score"],
+            })
+
+        return jsonify({"ok": True, "datasets": datasets})
+    except Exception as exc:
+        return jsonify({"ok": False, "msg": str(exc)}), 500
+
+
 @indexers_bp.route("/indexers/reset", methods=["POST"])
 def indexers_reset():
     """Reset grab count, malicious hits, and cached scores for one indexer."""

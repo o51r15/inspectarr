@@ -556,6 +556,17 @@ class StateManager:
         # Clamp to ±10 so trend never dominates the score
         return round(max(-10.0, min(10.0, slope)), 2)
 
+    def get_score_history_all(self, limit: int = 30) -> list[dict]:
+        """Return the last `limit` score snapshots per indexer, for charting."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT sh.indexer_id, ist.indexer_name, sh.health_score, sh.scored_at
+                   FROM score_history sh
+                   JOIN indexer_stats ist ON ist.indexer_id = sh.indexer_id
+                   ORDER BY sh.scored_at ASC""",
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def increment_total_grabs(self, indexer_id: int, indexer_name: str) -> int:
         """Increment total_grabs for this indexer. Returns the new count."""
         with self._lock, self._conn() as conn:
