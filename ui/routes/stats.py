@@ -1,11 +1,23 @@
 """
 ui/routes/stats.py — Indexer grab and malicious hit statistics
 """
-import sqlite3
 from flask import Blueprint, render_template, current_app
 from core.config import load_config
 
 stats_bp = Blueprint("stats", __name__)
+
+
+def _get_state(cfg):
+    """Reuse shared StateManager (IMP-2 pattern)."""
+    state = current_app.config.get("STATE")
+    if state is not None:
+        return state
+    from core.state import StateManager
+    return StateManager(
+        db_path=cfg.state.db_file,
+        log_path=cfg.logging.log_file,
+        retention_days=cfg.logging.retention_days,
+    )
 
 
 @stats_bp.route("/stats")
@@ -17,15 +29,14 @@ def stats():
 
     try:
         config = load_config(current_app.config["CONFIG_PATH"])
-        db_path = config.state.db_file
         prowlarr_enabled = config.prowlarr.enabled
+        state = _get_state(config)
 
-        # Read indexer_stats from SQLite directly (read-only view)
-        with sqlite3.connect(db_path) as conn:
-            conn.row_factory = sqlite3.Row
+        # Read indexer_stats via shared StateManager connection
+        with state._lock:
             try:
-                rows = conn.execute("SELECT * FROM indexer_stats").fetchall()
-            except sqlite3.OperationalError:
+                rows = state._db.execute("SELECT * FROM indexer_stats").fetchall()
+            except Exception:
                 rows = []
 
         db_stats = {r["indexer_id"]: dict(r) for r in rows}
@@ -35,9 +46,7 @@ def stats():
             try:
                 from core.prowlarr import ProwlarrClient
                 from core.indexer_scorer import IndexerScorer
-                from ui.routes.config import _get_state
                 prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
-                state = _get_state(config)
                 scorer = IndexerScorer(prowlarr, state, config.prowlarr)
                 results = scorer.score_all(skip_ai=True)
                 scored_data = {r["id"]: r for r in results}

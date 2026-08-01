@@ -7,17 +7,53 @@ logs_bp = Blueprint("logs", __name__)
 
 PAGE_SIZE = 100
 
+# Maximum bytes to read from end of log file per page request.
+# 4 KB per entry × 200 entries buffer ≈ 800 KB — generous for any page.
+_TAIL_BYTES = 800_000
+
 
 def _read_log_page(log_path: str, page: int, level_filter: str) -> tuple[list, int]:
     """
     Read log entries from the JSON Lines file.
     Returns (entries_for_page, total_matching_count), newest first.
+
+    Optimization: for page 1 with no filter we tail from the end of the file
+    instead of reading/parsing the entire thing.
     """
     if not os.path.exists(log_path):
         return [], 0
 
+    file_size = os.path.getsize(log_path)
+
+    # Fast path: page 1 — tail from end of file
+    if page == 1 and file_size > _TAIL_BYTES:
+        entries = []
+        read_start = max(0, file_size - _TAIL_BYTES)
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            f.seek(read_start)
+            if read_start > 0:
+                f.readline()  # discard partial first line
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if level_filter and level_filter != "ALL":
+                        if entry.get("level") != level_filter:
+                            continue
+                    entries.append(entry)
+                except json.JSONDecodeError:
+                    pass
+        entries.reverse()
+        # We don't know the true total without a full scan; estimate from
+        # the ratio of bytes read vs file size.
+        approx_total = int(len(entries) * (file_size / max(1, _TAIL_BYTES)))
+        return entries[:PAGE_SIZE], max(approx_total, len(entries))
+
+    # Full scan: small files or deeper pages
     entries = []
-    with open(log_path, "r", encoding="utf-8") as f:
+    with open(log_path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -43,8 +79,6 @@ def _read_log_page(log_path: str, page: int, level_filter: str) -> tuple[list, i
 def logs_view():
     config_path  = current_app.config["CONFIG_PATH"]
     log_path     = _get_log_path(config_path)
-    # BUG-14: bare int() returned HTTP 500 on ?page=abc, and page<1 produced
-    # negative slice indices.
     try:
         page = int(request.args.get("page", 1))
     except (TypeError, ValueError):
@@ -80,7 +114,7 @@ def logs_clear():
     config_path = current_app.config["CONFIG_PATH"]
     log_path    = _get_log_path(config_path)
     if os.path.exists(log_path):
-        with open(log_path, "w"):   # BUG-07: use context manager, not bare open()
+        with open(log_path, "w"):
             pass
     return redirect(url_for("logs.logs_view"))
 

@@ -185,7 +185,8 @@ class Scheduler:
         stats = None
         try:
             config  = load_config(self.config_path)
-            scanner = Scanner(config)
+            # IMP-3: pass shared StateManager to avoid new SQLite connection per cycle
+            scanner = Scanner(config, state=self._state)
             if is_first:
                 scanner.startup()      # full startup + one notification
             else:

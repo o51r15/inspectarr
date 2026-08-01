@@ -49,10 +49,12 @@ def _normalize_indexer_name(name: str) -> str:
 
 
 class Scanner:
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, state: StateManager = None):
         self.config  = config
         self.log     = _get_logger(config.logging.level)
-        self.state   = StateManager(
+        # IMP-3: accept a shared StateManager to avoid opening a new SQLite
+        # connection per scan cycle. Falls back to creating its own if none provided.
+        self.state   = state or StateManager(
             db_path=config.state.db_file,
             log_path=config.logging.log_file,
             retention_days=config.logging.retention_days,
