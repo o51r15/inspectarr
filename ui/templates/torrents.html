@@ -131,7 +131,7 @@
           {% endif %}
           <button class="btn btn-sm btn-danger"
                   title="Delete torrent and all files from qBittorrent (does not blocklist in Sonarr/Radarr/Lidarr)"
-                  onclick="deleteTorrent('{{ t.hash }}', '{{ t.name | replace("'", "\\'") }}', this)">✕</button>
+                  onclick="deleteTorrent('{{ t.hash }}', {{ t.name | tojson }}, this)">✕</button>
         </div>
       </td>
     </tr>

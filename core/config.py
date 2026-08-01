@@ -159,6 +159,7 @@ class ProwlarrConfig:
     base_priority: int = 10
     reorder_interval_hours: int = 24
     min_grabs_before_scoring: int = 10
+    history_window_days: int = 90
     scoring: ProwlarrScoringConfig = field(default_factory=ProwlarrScoringConfig)
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     auto_manage: AutoManageConfig = field(default_factory=AutoManageConfig)
@@ -295,6 +296,7 @@ def _parse_config(raw: dict) -> AppConfig:
         base_priority=p_raw.get("base_priority", 10),
         reorder_interval_hours=p_raw.get("reorder_interval_hours", 24),
         min_grabs_before_scoring=p_raw.get("min_grabs_before_scoring", 10),
+        history_window_days=p_raw.get("history_window_days", 90),
         scoring=ProwlarrScoringConfig(
             response_time_weight=s_raw.get("response_time_weight", 0.25),
             failure_rate_weight=s_raw.get("failure_rate_weight", 0.30),

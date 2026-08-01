@@ -127,6 +127,12 @@
     btn.classList.add('btn-success');
 
     evtSource.onmessage = function(e) {
+      // Reset button text after successful reconnect
+      if (btn.textContent !== 'Live: On') {
+        btn.textContent = 'Live: On';
+        btn.classList.remove('btn-ghost');
+        btn.classList.add('btn-success');
+      }
       if (paused) return;
       try {
         const entry = JSON.parse(e.data);

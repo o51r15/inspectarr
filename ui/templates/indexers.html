@@ -266,6 +266,10 @@
              style="font-size:0.75rem;padding:2px 8px;${idx.enabled === false ? 'color:#ef4444' : ''}">${idx.enabled === false ? 'Enable' : 'Disable'}</button></td>
       `;
       const prioInput = tr.querySelector('.priority-input');
+      // BUG-12: restore any pending manual edit so a refresh doesn't silently lose it
+      if (pendingPriorityChanges[idx.id] !== undefined) {
+        prioInput.value = pendingPriorityChanges[idx.id];
+      }
       prioInput.addEventListener('change', function() {
         const newPrio = parseInt(this.value, 10);
         if (isNaN(newPrio) || newPrio === idx.priority) {
@@ -283,6 +287,8 @@
         () => toggleIndexerEnabled(idx.id, idx.name, idx.enabled === false));
       tbody.appendChild(tr);
     });
+    // Restore Apply button state if there are still pending edits after re-render
+    document.getElementById('apply-btn').disabled = Object.keys(pendingPriorityChanges).length === 0;
   }
 
   function setIgnored(indexerId, indexerName, ignored) {

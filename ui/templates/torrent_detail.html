@@ -77,8 +77,8 @@
 
     {{ prop("Save Path",     properties.get("save_path", "")) }}
     {{ prop("Ratio",         "%.2f"|format(torrent.ratio)) }}
-    {{ prop("Seeds",         "%d connected / %d total" % (torrent.num_seeds, torrent.num_complete)) }}
-    {{ prop("Peers",         "%d connected / %d total" % (torrent.num_leechs, torrent.num_incomplete)) }}
+    {{ prop("Seeds",         "%d connected / %d total" % (torrent.num_seeds|default(0), torrent.num_complete|default(0))) }}
+    {{ prop("Peers",         "%d connected / %d total" % (torrent.num_leechs|default(0), torrent.num_incomplete|default(0))) }}
     {{ prop("↓ Speed",       (torrent.dlspeed | filesizeformat) + "/s" if torrent.dlspeed > 0 else "—") }}
     {{ prop("↑ Speed",       (torrent.upspeed | filesizeformat) + "/s" if torrent.upspeed > 0 else "—") }}
     {{ prop("Avg ↓ Speed",   (properties.get("dl_speed_avg", 0) | filesizeformat) + "/s" if properties.get("dl_speed_avg", 0) > 0 else "—") }}
