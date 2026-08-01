@@ -94,10 +94,6 @@ a:hover { text-decoration: underline; }
   opacity: 0.8;
 }
 
-/* Remove old logo styles */
-.sidebar-logo { display: none; }
-.sidebar-logo-img { display: none; }
-
 .nav { padding: 10px 0; flex: 1; overflow-y: auto; }
 
 .nav a {
@@ -321,7 +317,7 @@ a:hover { text-decoration: underline; }
 
 .form-row   { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin-bottom: 12px; }
 .form-row-3 { grid-template-columns: repeat(3,1fr); }
-.form-full  { grid-column: 1 / -1; }
+
 
 .form-group { display: flex; flex-direction: column; gap: 5px; }
 label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
@@ -474,7 +470,7 @@ tbody td { padding: 9px 12px; vertical-align: top; }
 .text-success { color: var(--success); }
 .text-error   { color: var(--error); }
 .text-warning { color: var(--warning); }
-.text-accent  { color: var(--accent); }
+
 .mt-8  { margin-top: 8px; }
 .mt-16 { margin-top: 16px; }
 .mb-16 { margin-bottom: 16px; }
