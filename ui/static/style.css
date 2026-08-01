@@ -22,6 +22,12 @@
   --font-display: 'Syne', 'Segoe UI', sans-serif;
 }
 
+/* Keyboard-only focus ring (no outline on mouse clicks) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
