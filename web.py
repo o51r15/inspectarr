@@ -57,9 +57,13 @@ def create_app(config_path: str) -> Flask:
     app.config["STATE"] = app.config["SCHEDULER"]._state
 
     @app.context_processor
-    def inject_auth_status():
+    def inject_globals():
+        from core import __version__
         auth = read_auth_block(config_path)
-        return {"auth_enabled": auth.get("enabled", False)}
+        return {
+            "auth_enabled": auth.get("enabled", False),
+            "app_version": __version__,
+        }
 
     @app.template_filter("datetimeformat")
     def datetimeformat(value):

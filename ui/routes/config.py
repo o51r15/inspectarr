@@ -417,10 +417,13 @@ def prowlarr_save():
             "reorder_interval_hours": _int(data.get("reorder_interval_hours"), 24),
             "history_window_days":    _int(data.get("history_window_days"), 90),
             "min_grabs_before_scoring": _int(data.get("min_grabs_before_scoring"), 10),
+            # BUG-11: merge onto existing scoring block instead of replacing it,
+            # so keys without UI fields (grab_success_weight, *_mult) are preserved.
             "scoring": {
-                "response_time_weight":      _float(data.get("response_time_weight"), 0.35),
-                "failure_rate_weight":       _float(data.get("failure_rate_weight"), 0.40),
-                "malicious_weight":          _float(data.get("malicious_weight"), 0.25),
+                **dict(block.get("scoring", {}) or {}),
+                "response_time_weight":      _float(data.get("response_time_weight"), 0.25),
+                "failure_rate_weight":       _float(data.get("failure_rate_weight"), 0.30),
+                "malicious_weight":          _float(data.get("malicious_weight"), 0.20),
                 "backoff_penalty":           _float(data.get("backoff_penalty"), 20.0),
                 "malicious_penalty_per_hit": _float(data.get("malicious_penalty_per_hit"), 10.0),
             },

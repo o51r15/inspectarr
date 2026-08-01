@@ -54,7 +54,7 @@ def _run_daemon(args):
     if args.dry_run:
         config.dry_run = True
 
-    interval = config.poll_interval_seconds
+    interval = config.scanning.polling.interval_seconds
     print(f"inspectarr daemon starting — scanning every {interval}s")
     print("Press Ctrl+C to stop")
 

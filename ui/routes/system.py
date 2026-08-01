@@ -197,7 +197,8 @@ def system_updates_check():
     """Fetch the latest release from GitHub and compare to the running version."""
     import requests
     import re
-    current = "v1.2.0"  # hardcoded; matches sidebar fallback
+    from core import __version__
+    current = f"v{__version__}"
     try:
         resp = requests.get(
             "https://api.github.com/repos/o51r15/inspectarr/releases/latest",
