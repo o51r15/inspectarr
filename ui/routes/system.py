@@ -208,6 +208,9 @@ def system_updates_check():
         if resp.status_code == 404:
             return jsonify({"ok": True, "current": current, "latest": current,
                             "up_to_date": True, "message": "No releases published yet"})
+        if resp.status_code == 403:
+            return jsonify({"ok": False, "current": current,
+                            "message": "GitHub API rate limit exceeded — try again later"})
         resp.raise_for_status()
         data = resp.json()
         latest = data.get("tag_name", current)

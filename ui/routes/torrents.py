@@ -96,8 +96,8 @@ def set_category():
     data = request.get_json(silent=True) or {}
     hash = data.get("hash", "").strip()
     category = data.get("category", "")   # empty string = uncategorize
-    if not hash:
-        return jsonify({"ok": False, "msg": "Missing hash"}), 400
+    if not hash or not _HASH_RE.match(hash):
+        return jsonify({"ok": False, "msg": "Invalid torrent hash"}), 400
     try:
         qbit = _qbit_from_config()
         ok = qbit.set_torrent_category(hash, category)
@@ -110,8 +110,8 @@ def set_category():
 def pause():
     data = request.get_json(silent=True) or {}
     hash = data.get("hash", "").strip()
-    if not hash:
-        return jsonify({"ok": False, "msg": "Missing hash"}), 400
+    if not hash or not _HASH_RE.match(hash):
+        return jsonify({"ok": False, "msg": "Invalid torrent hash"}), 400
     try:
         qbit = _qbit_from_config()
         ok = qbit.pause_torrent(hash)
@@ -124,8 +124,8 @@ def pause():
 def resume():
     data = request.get_json(silent=True) or {}
     hash = data.get("hash", "").strip()
-    if not hash:
-        return jsonify({"ok": False, "msg": "Missing hash"}), 400
+    if not hash or not _HASH_RE.match(hash):
+        return jsonify({"ok": False, "msg": "Invalid torrent hash"}), 400
     try:
         qbit = _qbit_from_config()
         ok = qbit.resume_torrent(hash)
@@ -138,8 +138,8 @@ def resume():
 def delete():
     data = request.get_json(silent=True) or {}
     hash = data.get("hash", "").strip()
-    if not hash:
-        return jsonify({"ok": False, "msg": "Missing hash"}), 400
+    if not hash or not _HASH_RE.match(hash):
+        return jsonify({"ok": False, "msg": "Invalid torrent hash"}), 400
     try:
         qbit = _qbit_from_config()
         ok = qbit.delete_torrent(hash, delete_files=True)
