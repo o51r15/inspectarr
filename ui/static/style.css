@@ -1,13 +1,13 @@
 :root {
-  --bg:           #090b0e;
-  --surface:      #0d1014;
-  --card:         #111418;
+  --bg:           #0c0d0f;
+  --surface:      #101215;
+  --card:         #14161a;
   --border:       rgba(255,255,255,0.07);
   --border-muted: rgba(255,255,255,0.04);
   --border-active: rgba(255,255,255,0.15);
-  --accent:       #a855f7;
-  --accent-dim:   rgba(168,85,247,0.12);
-  --accent-glow:  rgba(168,85,247,0.05);
+  --accent:       #2dd4bf;
+  --accent-dim:   rgba(45,212,191,0.12);
+  --accent-glow:  rgba(45,212,191,0.05);
   --success:      #3a8c5c;
   --warning:      #d4863a;
   --error:        #c0392b;
@@ -16,10 +16,10 @@
   --text:         #e2e8f0;
   --text-muted:   #8a9099;
   --text-dim:     #4a5260;
-  --radius:       3px;
+  --radius:       2px;
   --font:         'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
   --font-mono:    'IBM Plex Mono', 'Cascadia Code', monospace;
-  --font-display: 'Syne', 'Segoe UI', sans-serif;
+  --font-display: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
 }
 
 /* Keyboard-only focus ring (no outline on mouse clicks) */
@@ -119,7 +119,7 @@ a:hover { text-decoration: underline; }
 .nav a:hover { color: var(--text); background: rgba(255,255,255,0.03); text-decoration: none; }
 .nav a.active { color: var(--accent); background: var(--accent-glow); border-left-color: var(--accent); }
 
-.nav .icon { width: 16px; text-align: center; font-size: 12px; opacity: 0.7; }
+.nav-icon { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.7; }
 
 /* Expandable nav group (System) */
 .nav-group-toggle {
@@ -140,7 +140,7 @@ a:hover { text-decoration: underline; }
 }
 .nav-group-toggle:hover { color: var(--text); background: rgba(255,255,255,0.03); }
 .nav-group-toggle.active { color: var(--accent); }
-.nav-group-toggle .icon { width: 16px; text-align: center; font-size: 12px; opacity: 0.7; }
+.nav-group-toggle .nav-icon { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.7; }
 .nav-group-caret {
   margin-left: auto;
   font-size: 9px;
