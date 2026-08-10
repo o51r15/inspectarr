@@ -58,7 +58,7 @@ with content-hash caching to minimize redundant calls.
 ```yaml
 services:
   inspectarr:
-    image: ghcr.io/o51r15/inspectarr:latest
+    image: ghcr.io/o51r15/inspectarr:latest  # or :dev for bleeding edge
     container_name: inspectarr
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
@@ -102,7 +102,7 @@ python3 web.py
 
 ## Web UI
 
-Responsive dark theme. Works on desktop and mobile.
+Dark and light themes with toggle. Works on desktop and mobile.
 
 | Page | Purpose |
 |---|---|
@@ -112,7 +112,7 @@ Responsive dark theme. Works on desktop and mobile.
 | **Stats** | Grab attribution — total grabs, malicious hits, % malicious per indexer |
 | **Settings** | Connections, rules, indexers + AI model selector, notifications, general, advanced, backups |
 | **System** | Status, scheduled tasks, update checker |
-| **Events** | Paginated log viewer with level filter |
+| **Events** | Paginated log viewer with level filter and JSON export |
 
 Settings are saved to `config.yaml` and take effect on the next scan cycle — no restart needed.
 
