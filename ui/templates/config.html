@@ -636,7 +636,10 @@
   }
 
   // Initial pane from the URL hash (e.g. /config#rules), default connections
-  showPane((window.location.hash || '').replace('#', '') || 'connections');
+  // NOTE: deferred hooks (loadBackups, loadOllamaModels) are added later in the
+  // script via the showPane wrapper. Store initial pane and re-fire after wrapper.
+  var _initialPane = (window.location.hash || '').replace('#', '') || 'connections';
+  showPane(_initialPane);
 
   // Sidebar sub-item clicks: switch pane without a full reload (same page)
   document.querySelectorAll('#settings-group .nav-group-items a').forEach(a => {
@@ -1018,5 +1021,9 @@
     })
     .catch(() => { st.textContent = 'Request failed'; st.style.color = 'var(--error)'; });
   }
+
+  // Re-fire deferred hooks for the initial pane (wrapper + functions defined above)
+  if (_initialPane === 'backups') loadBackups();
+  if (_initialPane === 'indexers') loadOllamaModels();
 </script>
 {% endblock %}
