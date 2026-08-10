@@ -138,7 +138,7 @@ def ollama_score_indexers(
     parsed = _parse_response(raw_response)
     if not parsed:
         log.warning("Could not parse Ollama response as JSON array")
-        log.warning("Raw Ollama response (first 1000 chars): %s", raw_response[:1000])
+        log.warning("Raw Ollama response (first 2000 chars): %s", repr(raw_response[:2000]))
         return {}
 
     results = {}
