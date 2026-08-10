@@ -49,8 +49,8 @@ ADJUSTMENTS:
 You are also given each indexer's deterministic health score for reference.
 Your score REPLACES it — use your judgment across all the data provided.
 
-Return ONLY a JSON array, no markdown, no other text:
-[{"indexer_id": <int>, "health_score": <int 0-100>, "reasoning": "<one sentence>"}]
+Return ONLY valid JSON — a single object with a "scores" key containing an array:
+{"scores": [{"indexer_id": <int>, "health_score": <int 0-100>, "reasoning": "<one sentence>"}]}
 """
 
 
@@ -76,6 +76,9 @@ def _parse_response(raw: str) -> list[dict]:
         except json.JSONDecodeError:
             return []
 
+    # Handle {"scores": [...]} wrapper or bare [...]
+    if isinstance(parsed, dict):
+        parsed = parsed.get("scores", parsed.get("results", []))
     if not isinstance(parsed, list):
         return []
     return parsed
@@ -105,7 +108,12 @@ def ollama_score_indexers(
     try:
         resp = requests.post(
             f"{ollama_url.rstrip('/')}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+            },
             timeout=timeout,
         )
         if resp.status_code != 200:
