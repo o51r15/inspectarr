@@ -12,7 +12,7 @@ llm_logs_bp = Blueprint("llm_logs", __name__)
 @llm_logs_bp.route("/system/llm-logs")
 def llm_logs_page():
     """Render the LLM Logs page."""
-    state = current_app.config.get("state")
+    state = current_app.config.get("STATE")
     error = None
     runs = []
     if state:
@@ -26,7 +26,7 @@ def llm_logs_page():
 @llm_logs_bp.route("/api/llm-logs/history/<int:indexer_id>")
 def llm_history_api(indexer_id):
     """Return AI score history for one indexer (JSON)."""
-    state = current_app.config.get("state")
+    state = current_app.config.get("STATE")
     if not state:
         return jsonify({"error": "no state"}), 500
     try:
