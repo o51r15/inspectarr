@@ -34,9 +34,11 @@ class Scheduler:
             self.run_history = self._state.get_recent_runs(10)
             if self.run_history:
                 self.last_result = self.run_history[0]
-            # Recover last_detection directly — dedicated query finds the most
-            # recent flagged run regardless of how many clean scans followed it.
+            # Recover last_detection — try run_history first, fall back to
+            # processed_hashes (survives container recreations).
             self.last_detection = self._state.get_last_detection()
+            if not self.last_detection:
+                self.last_detection = self._state.get_last_flagged_torrent()
 
     # ------------------------------------------------------------------
     # Public controls
