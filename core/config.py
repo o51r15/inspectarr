@@ -17,6 +17,19 @@ class QBittorrentConfig:
 
 
 @dataclass
+class TransmissionConfig:
+    url: str                   # e.g. http://localhost:9091
+    username: str = ""
+    password: str = ""
+
+
+@dataclass
+class DelugeConfig:
+    url: str                   # e.g. http://localhost:8112
+    password: str = ""
+
+
+@dataclass
 class ArrConfig:
     enabled: bool
     url: str
@@ -175,8 +188,15 @@ class WebConfig:
 @dataclass
 class AppConfig:
     qbittorrent: QBittorrentConfig
-    arrs: ArrsConfig
-    rules: list[Rule]
+    torrent_client: str = "qbittorrent"   # "qbittorrent" | "transmission" | "deluge"
+    transmission: TransmissionConfig | None = None
+    deluge: DelugeConfig | None = None
+    arrs: ArrsConfig = field(default_factory=lambda: ArrsConfig(
+        sonarr=ArrConfig(False, "", ""),
+        radarr=ArrConfig(False, "", ""),
+        lidarr=ArrConfig(False, "", ""),
+    ))
+    rules: list[Rule] = field(default_factory=list)
     on_arr_failure: str          # "delete" | "abort"
     retry: RetryConfig
     logging: LoggingConfig
@@ -283,6 +303,28 @@ def _parse_config(raw: dict) -> AppConfig:
         ),
     )
 
+    # Torrent client type
+    torrent_client = raw.get("torrent_client", "qbittorrent").lower()
+
+    # Transmission config
+    tr_raw = raw.get("transmission", {})
+    transmission_cfg = None
+    if tr_raw:
+        transmission_cfg = TransmissionConfig(
+            url=tr_raw.get("url", "").rstrip("/"),
+            username=tr_raw.get("username", ""),
+            password=tr_raw.get("password", ""),
+        )
+
+    # Deluge config
+    dl_raw = raw.get("deluge", {})
+    deluge_cfg = None
+    if dl_raw:
+        deluge_cfg = DelugeConfig(
+            url=dl_raw.get("url", "").rstrip("/"),
+            password=dl_raw.get("password", ""),
+        )
+
     _validate(raw, rules, arrs_cfg)
 
     p_raw = raw.get("prowlarr", {})
@@ -342,6 +384,9 @@ def _parse_config(raw: dict) -> AppConfig:
 
     return AppConfig(
         qbittorrent=qbit_cfg,
+        torrent_client=torrent_client,
+        transmission=transmission_cfg,
+        deluge=deluge_cfg,
         arrs=arrs_cfg,
         rules=rules,
         on_arr_failure=raw.get("on_arr_failure", "delete"),
@@ -368,8 +413,16 @@ def _parse_config(raw: dict) -> AppConfig:
 def _validate(raw: dict, rules: list[Rule], arrs: ArrsConfig) -> None:
     errors: list[str] = []
 
-    if not raw.get("qbittorrent", {}).get("url"):
-        errors.append("qbittorrent.url is required")
+    tc = raw.get("torrent_client", "qbittorrent").lower()
+    if tc not in ("qbittorrent", "transmission", "deluge"):
+        errors.append(f"torrent_client must be 'qbittorrent', 'transmission', or 'deluge' (got '{tc}')")
+
+    if tc == "qbittorrent" and not raw.get("qbittorrent", {}).get("url"):
+        errors.append("qbittorrent.url is required when torrent_client is 'qbittorrent'")
+    if tc == "transmission" and not raw.get("transmission", {}).get("url"):
+        errors.append("transmission.url is required when torrent_client is 'transmission'")
+    if tc == "deluge" and not raw.get("deluge", {}).get("url"):
+        errors.append("deluge.url is required when torrent_client is 'deluge'")
 
     on_fail = raw.get("on_arr_failure", "delete")
     if on_fail not in ("delete", "abort"):

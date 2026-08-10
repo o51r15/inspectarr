@@ -63,10 +63,10 @@ def system_status():
 def _check_one(name: str, cfg) -> dict:
     """Run a single connection test. Returns {name, configured, ok}."""
     try:
-        if name == "qBittorrent":
-            from core.qbit import QBittorrentClient
-            c = QBittorrentClient(cfg.qbittorrent.url, cfg.qbittorrent.username, cfg.qbittorrent.password)
-            return {"name": name, "configured": True, "ok": c.test_connection()}
+        if name == "Torrent Client":
+            from core.torrent_client import build_torrent_client
+            c = build_torrent_client(cfg)
+            return {"name": f"{name} ({cfg.torrent_client})", "configured": True, "ok": c.test_connection()}
         if name == "Sonarr":
             if not cfg.arrs.sonarr.enabled:
                 return {"name": name, "configured": False, "ok": False}
@@ -118,7 +118,7 @@ def system_status_data():
     except Exception as exc:
         return jsonify({"ok": False, "message": str(exc), "connections": []})
 
-    names = ["qBittorrent", "Sonarr", "Radarr", "Lidarr", "Prowlarr", "Ollama"]
+    names = ["Torrent Client", "Sonarr", "Radarr", "Lidarr", "Prowlarr", "Ollama"]
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
         results = list(pool.map(lambda n: _check_one(n, cfg), names))
 

@@ -1,11 +1,13 @@
 import requests
 
+from .torrent_client import AbstractTorrentClient, TorrentClientError
 
-class QBittorrentError(Exception):
+
+class QBittorrentError(TorrentClientError):
     pass
 
 
-class QBittorrentClient:
+class QBittorrentClient(AbstractTorrentClient):
     """
     Thin wrapper around qBittorrent Web API v2.
     Handles session cookie auth with automatic re-auth on 403.

@@ -2,7 +2,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from .config import AppConfig, Rule
-from .qbit import QBittorrentClient
+from .torrent_client import build_torrent_client
 from .arrs.base import AbstractArrClient
 from .arrs.sonarr import SonarrClient
 from .arrs.radarr import RadarrClient
@@ -59,11 +59,7 @@ class Scanner:
             log_path=config.logging.log_file,
             retention_days=config.logging.retention_days,
         )
-        self.qbit     = QBittorrentClient(
-            config.qbittorrent.url,
-            config.qbittorrent.username,
-            config.qbittorrent.password,
-        )
+        self.qbit     = build_torrent_client(config)
         self.notifier = Notifier(config)
 
 

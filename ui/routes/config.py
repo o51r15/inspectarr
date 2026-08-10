@@ -148,6 +148,35 @@ def test_qbit():
         return jsonify({"ok": False, "message": str(e)})
 
 
+@config_bp.route("/config/test/transmission", methods=["POST"])
+def test_transmission():
+    from core.transmission import TransmissionClient
+    body     = request.get_json(silent=True) or {}
+    url      = body.get("url", "")
+    username = body.get("username", "")
+    password = body.get("password", "")
+    try:
+        client = TransmissionClient(url, username, password)
+        ok     = client.test_connection()
+        return jsonify({"ok": ok, "message": "Connected" if ok else "Failed"})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
+
+
+@config_bp.route("/config/test/deluge", methods=["POST"])
+def test_deluge():
+    from core.deluge import DelugeClient
+    body     = request.get_json(silent=True) or {}
+    url      = body.get("url", "")
+    password = body.get("password", "")
+    try:
+        client = DelugeClient(url, password)
+        ok     = client.test_connection()
+        return jsonify({"ok": ok, "message": "Connected" if ok else "Failed"})
+    except Exception as e:
+        return jsonify({"ok": False, "message": str(e)})
+
+
 @config_bp.route("/config/test/lidarr", methods=["POST"])
 def test_lidarr():
     from core.arrs.lidarr import LidarrClient
@@ -200,13 +229,9 @@ def qbit_categories():
     config_path = current_app.config["CONFIG_PATH"]
     try:
         from core.config import load_config
-        from core.qbit import QBittorrentClient
+        from core.torrent_client import build_torrent_client
         cfg    = load_config(config_path)
-        client = QBittorrentClient(
-            cfg.qbittorrent.url,
-            cfg.qbittorrent.username,
-            cfg.qbittorrent.password,
-        )
+        client = build_torrent_client(cfg)
         cat_map = client.get_categories()
         categories = sorted(name for name in cat_map.keys() if name)
         return jsonify({"ok": True, "categories": categories})
