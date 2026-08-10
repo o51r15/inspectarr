@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}LLM Logs — inspectarr{% endblock %}
+{% block page_title %}LLM Logs{% endblock %}
+
+{% block content %}
+
+{% if error %}
+  <div class="form-section">
+    <p class="text-error">{{ error }}</p>
+  </div>
+{% elif not runs %}
+  <div class="form-section">
+    <p class="hint">No AI scoring runs recorded yet. LLM scoring runs will appear here once Ollama is configured and indexer scoring has run.</p>
+  </div>
+{% else %}
+
+<!-- Latest Run Report Card -->
+{% set latest = runs[0] %}
+<div class="form-section">
+  <div class="form-section-title">Latest Scoring Run</div>
+  <p class="hint" style="margin-bottom:0.5rem">
+    <strong>{{ latest.scored_at[:19] | replace('T', ' ') }} UTC</strong>
+    &nbsp;·&nbsp; Model: <code>{{ latest.model_used }}</code>
+    {% if latest.cache_hit %}<span class="badge badge-dim">cache hit</span>{% endif %}
+  </p>
+  <table style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:8px">Indexer</th>
+        <th style="padding:8px">Deterministic</th>
+        <th style="padding:8px">AI Score</th>
+        <th style="padding:8px">Delta</th>
+        <th style="padding:8px">Reasoning</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for idx in latest.indexers %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-weight:500">{{ idx.indexer_name }}</td>
+        <td style="padding:8px">{{ '%.1f' | format(idx.deterministic_score) if idx.deterministic_score is not none else '—' }}</td>
+        <td style="padding:8px;font-weight:600">{{ '%.1f' | format(idx.ai_score) }}</td>
+        {% set delta = idx.ai_score - (idx.deterministic_score or idx.ai_score) %}
+        <td style="padding:8px;color:{{ 'var(--success)' if delta >= 0 else 'var(--danger)' }}">
+          {{ '%+.1f' | format(delta) }}
+        </td>
+        <td style="padding:8px">
+          <details>
+            <summary style="cursor:pointer;color:var(--text-dim)">Show reasoning</summary>
+            <pre style="white-space:pre-wrap;font-size:0.82rem;margin-top:0.4rem;max-height:12rem;overflow-y:auto;padding:0.5rem;background:var(--bg);border-radius:6px">{{ idx.ai_reasoning or '(none)' }}</pre>
+          </details>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Score Trend Chart (per indexer) -->
+<div class="form-section">
+  <div class="form-section-title">AI Score Trends</div>
+  <p class="hint" style="margin-bottom:0.75rem">
+    How AI scores have changed over time per indexer. Click an indexer to load its history.
+  </p>
+  <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem" id="indexer-chips">
+    {% set seen_ids = [] %}
+    {% for run in runs %}
+      {% for idx in run.indexers %}
+        {% if idx.indexer_id not in seen_ids %}
+          {% if seen_ids.append(idx.indexer_id) %}{% endif %}
+          <button class="btn btn-sm btn-outline indexer-chip"
+                  data-id="{{ idx.indexer_id }}"
+                  onclick="loadHistory({{ idx.indexer_id }}, this)">
+            {{ idx.indexer_name }}
+          </button>
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <div id="trend-chart-area" style="min-height:200px;position:relative">
+    <p class="hint" id="trend-placeholder">Select an indexer above to view its AI score trend.</p>
+    <canvas id="trend-canvas" style="display:none;max-height:300px"></canvas>
+  </div>
+</div>
+
+<!-- Run History -->
+<div class="form-section">
+  <div class="form-section-title">Scoring Run History</div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:8px">Timestamp</th>
+        <th style="padding:8px">Model</th>
+        <th style="padding:8px">Indexers</th>
+        <th style="padding:8px">Cache</th>
+        <th style="padding:8px">Avg AI Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in runs %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-family:'IBM Plex Mono',monospace;font-size:0.85rem">{{ run.scored_at[:19] | replace('T', ' ') }}</td>
+        <td style="padding:8px"><code>{{ run.model_used }}</code></td>
+        <td style="padding:8px">{{ run.indexers | length }}</td>
+        <td style="padding:8px">{{ '✓' if run.cache_hit else '—' }}</td>
+        {% set ns = namespace(total=0) %}
+        {% for idx in run.indexers %}{% set ns.total = ns.total + idx.ai_score %}{% endfor %}
+        <td style="padding:8px;font-weight:500">{{ '%.1f' | format(ns.total / run.indexers|length) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+let trendChart = null;
+
+async function loadHistory(indexerId, btn) {
+  document.querySelectorAll('.indexer-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const res = await fetch('/api/llm-logs/history/' + indexerId);
+  const data = await res.json();
+  if (data.error || !data.length) {
+    document.getElementById('trend-placeholder').textContent = 'No history for this indexer.';
+    document.getElementById('trend-placeholder').style.display = '';
+    document.getElementById('trend-canvas').style.display = 'none';
+    return;
+  }
+  document.getElementById('trend-placeholder').style.display = 'none';
+  const canvas = document.getElementById('trend-canvas');
+  canvas.style.display = '';
+
+  const labels = data.map(d => d.scored_at.slice(5, 16).replace('T', ' '));
+  const aiScores = data.map(d => d.ai_score);
+  const detScores = data.map(d => d.deterministic_score);
+
+  if (trendChart) trendChart.destroy();
+  const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+  const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  const textColor = isDark ? '#aaa' : '#666';
+
+  trendChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'AI Score',
+          data: aiScores,
+          borderColor: '#6366f1',
+          backgroundColor: 'rgba(99,102,241,0.1)',
+          tension: 0.3, fill: true, pointRadius: 3,
+        },
+        {
+          label: 'Deterministic',
+          data: detScores,
+          borderColor: '#94a3b8',
+          borderDash: [5, 3],
+          tension: 0.3, fill: false, pointRadius: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: { min: 0, max: 100, grid: { color: gridColor }, ticks: { color: textColor } },
+        x: { grid: { color: gridColor }, ticks: { color: textColor, maxRotation: 45 } },
+      },
+      plugins: { legend: { labels: { color: textColor } } },
+    },
+  });
+}
+</script>
+{% endblock %}

@@ -48,6 +48,7 @@
           <a href="/system/tasks" class="{{ 'active' if request.path.startswith('/system/tasks') else '' }}">Tasks</a>
           <a href="/system/updates" class="{{ 'active' if request.path.startswith('/system/updates') else '' }}">Updates</a>
           <a href="/system/events" class="{{ 'active' if request.path.startswith('/system/events') or request.path.startswith('/logs') else '' }}">Events</a>
+          <a href="/system/llm-logs" class="{{ 'active' if request.path.startswith('/system/llm-logs') else '' }}">LLM Logs</a>
         </div>
       </div>      <div class="nav-group {{ 'open' if request.path.startswith('/config') else '' }}" id="settings-group">
         <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/config') else '' }}" onclick="toggleNavGroup('settings-group')" aria-expanded="{{ 'true' if request.path.startswith('/config') else 'false' }}" aria-controls="settings-group-items">

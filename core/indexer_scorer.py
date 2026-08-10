@@ -319,12 +319,29 @@ class IndexerScorer:
         if isinstance(ai_results, dict):
             ai_results = {int(k): v for k, v in ai_results.items()}
 
+        log_entries = []
         for s in scored:
             ai = ai_results.get(s["id"])
             if ai is not None:
+                log_entries.append({
+                    "indexer_id": s["id"],
+                    "indexer_name": s["name"],
+                    "deterministic_score": s["health_score"],
+                    "ai_score": ai["health_score"],
+                    "ai_reasoning": ai.get("reasoning", ""),
+                })
                 s["health_score"] = ai["health_score"]
                 s["ai_scored"]    = True
                 s["ai_reasoning"] = ai.get("reasoning", "")
+
+        # Persist the scoring run for the LLM Logs page
+        if log_entries:
+            try:
+                self.state.record_llm_scoring_run(
+                    log_entries, ocfg.model, cache_hit=cached is not None,
+                )
+            except Exception as exc:
+                log.warning(f"Failed to record LLM scoring log: {exc}")
 
         return scored
 

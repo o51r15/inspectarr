@@ -152,6 +152,27 @@ class StateManager:
                     disabled_by_auto    INTEGER DEFAULT 0
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS llm_scoring_log (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scored_at           TEXT NOT NULL,
+                    indexer_id          INTEGER NOT NULL,
+                    indexer_name        TEXT NOT NULL,
+                    deterministic_score REAL,
+                    ai_score            REAL NOT NULL,
+                    ai_reasoning        TEXT NOT NULL DEFAULT '',
+                    model_used          TEXT NOT NULL DEFAULT '',
+                    cache_hit           INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_llm_log_scored
+                ON llm_scoring_log (scored_at DESC)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_llm_log_indexer
+                ON llm_scoring_log (indexer_id, scored_at DESC)
+            """)
             conn.commit()
         # Migrate indexer_stats to add total_grabs if not present
         try:
@@ -670,6 +691,99 @@ class StateManager:
         cutoff = (_now_dt() - timedelta(hours=ttl_hours)).isoformat()
         with self._lock, self._conn() as conn:
             conn.execute("DELETE FROM llm_cache WHERE scored_at < ?", (cutoff,))
+            conn.commit()
+
+    # ------------------------------------------------------------------
+    # LLM scoring log — per-run record of AI scoring results
+    # ------------------------------------------------------------------
+
+    def record_llm_scoring_run(
+        self,
+        results: list[dict],
+        model_used: str,
+        cache_hit: bool = False,
+    ):
+        """
+        Record one AI scoring run.  `results` is a list of dicts, each with:
+        indexer_id, indexer_name, deterministic_score, ai_score, ai_reasoning.
+        """
+        now = _now_iso()
+        with self._lock, self._conn() as conn:
+            for r in results:
+                conn.execute(
+                    """INSERT INTO llm_scoring_log
+                       (scored_at, indexer_id, indexer_name,
+                        deterministic_score, ai_score, ai_reasoning,
+                        model_used, cache_hit)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        now,
+                        r["indexer_id"],
+                        r["indexer_name"],
+                        r.get("deterministic_score"),
+                        r["ai_score"],
+                        r.get("ai_reasoning", ""),
+                        model_used,
+                        int(cache_hit),
+                    ),
+                )
+            conn.commit()
+
+    def get_llm_scoring_runs(self, limit: int = 50) -> list[dict]:
+        """
+        Return the most recent scoring runs grouped by scored_at timestamp.
+        Each entry: {scored_at, model_used, cache_hit, indexers: [{...}]}.
+        """
+        with self._lock, self._conn() as conn:
+            # Get distinct run timestamps
+            ts_rows = conn.execute(
+                """SELECT DISTINCT scored_at FROM llm_scoring_log
+                   ORDER BY scored_at DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            if not ts_rows:
+                return []
+            runs = []
+            for ts_row in ts_rows:
+                ts = ts_row["scored_at"]
+                rows = conn.execute(
+                    """SELECT indexer_id, indexer_name, deterministic_score,
+                              ai_score, ai_reasoning, model_used, cache_hit
+                       FROM llm_scoring_log WHERE scored_at = ?
+                       ORDER BY indexer_name""",
+                    (ts,),
+                ).fetchall()
+                if rows:
+                    runs.append({
+                        "scored_at": ts,
+                        "model_used": rows[0]["model_used"],
+                        "cache_hit": bool(rows[0]["cache_hit"]),
+                        "indexers": [dict(r) for r in rows],
+                    })
+        return runs
+
+    def get_llm_score_history_for_indexer(
+        self, indexer_id: int, limit: int = 30,
+    ) -> list[dict]:
+        """Return AI score history for one indexer, oldest first."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                """SELECT scored_at, deterministic_score, ai_score, ai_reasoning,
+                          model_used, cache_hit
+                   FROM llm_scoring_log
+                   WHERE indexer_id = ?
+                   ORDER BY scored_at DESC LIMIT ?""",
+                (indexer_id, limit),
+            ).fetchall()
+        return [dict(r) for r in reversed(rows)]
+
+    def prune_llm_scoring_log(self, keep_days: int = 30):
+        """Remove LLM scoring log entries older than keep_days."""
+        cutoff = (_now_dt() - timedelta(days=keep_days)).isoformat()
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "DELETE FROM llm_scoring_log WHERE scored_at < ?", (cutoff,),
+            )
             conn.commit()
 
     # ------------------------------------------------------------------
