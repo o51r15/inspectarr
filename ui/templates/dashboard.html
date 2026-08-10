@@ -45,7 +45,7 @@
     <div class="card">
       <div class="card-title">Flagged</div>
       <div class="stat-value text-warning" id="stat-flagged">
-        {{ status.last_result.flagged if status.last_result else '—' }}
+        {{ status.total_flagged }}
       </div>
       <div class="stat-label">bad files detected</div>
     </div>
@@ -53,7 +53,7 @@
     <div class="card">
       <div class="card-title">Actioned</div>
       <div class="stat-value text-success" id="stat-actioned">
-        {{ status.last_result.actioned if status.last_result else '—' }}
+        {{ status.total_actioned }}
       </div>
       <div class="stat-label">deleted &amp; blocklisted</div>
     </div>

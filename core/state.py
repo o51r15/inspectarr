@@ -366,6 +366,19 @@ class StateManager:
             results.append(entry)
         return results
 
+    def get_total_stats(self) -> dict:
+        """Return lifetime totals for flagged and actioned torrents."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute("""
+                SELECT COALESCE(SUM(flagged), 0)  AS total_flagged,
+                       COALESCE(SUM(actioned), 0) AS total_actioned
+                FROM run_history
+            """).fetchone()
+        return {
+            "total_flagged":  row["total_flagged"]  if row else 0,
+            "total_actioned": row["total_actioned"] if row else 0,
+        }
+
     def get_last_detection(self) -> dict | None:
         """
         Return the last_flagged dict from the most recent scan that had

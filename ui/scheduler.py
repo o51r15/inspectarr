@@ -94,6 +94,7 @@ class Scheduler:
             return self._scanning
 
     def get_status(self) -> dict:
+        totals = self._state.get_total_stats() if self._state else {}
         with self._lock:
             return {
                 "running":        self.running,
@@ -103,6 +104,8 @@ class Scheduler:
                 "last_result":    self.last_result,
                 "last_detection": self.last_detection,
                 "run_history":    list(self.run_history),
+                "total_flagged":  totals.get("total_flagged", 0),
+                "total_actioned": totals.get("total_actioned", 0),
             }
 
 

@@ -38,16 +38,19 @@ function startDashboardPolling() {
         // Last result stats
         if (data.last_result) {
           const r = data.last_result;          setInner("stat-checked",  r.torrents_checked ?? "—");
-          setInner("stat-flagged",  r.flagged ?? "—");
-          setInner("stat-actioned", r.actioned ?? "—");
           setInner("stat-last-run", r.scan_end ? formatDate(r.scan_end) : "—");
+        }
 
-          if (r.last_flagged) {
-            const lf = r.last_flagged;
-            setInner("last-flagged-name", lf.torrent_name || "—");
-            setInner("last-flagged-rule", lf.rule || "—");
-            setInner("last-flagged-time", lf.timestamp ? formatDate(lf.timestamp) : "—");
-          }
+        // Total historical stats
+        setInner("stat-flagged",  data.total_flagged ?? 0);
+        setInner("stat-actioned", data.total_actioned ?? 0);
+
+        // Last detection (persisted across clean scans)
+        if (data.last_detection) {
+          const lf = data.last_detection;
+          setInner("last-flagged-name", lf.torrent_name || "—");
+          setInner("last-flagged-rule", lf.rule || "—");
+          setInner("last-flagged-time", lf.timestamp ? formatDate(lf.timestamp) : "—");
         }
       })
       .catch(() => {});
