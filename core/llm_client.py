@@ -76,9 +76,17 @@ def _parse_response(raw: str) -> list[dict]:
         except json.JSONDecodeError:
             return []
 
-    # Handle {"scores": [...]} wrapper or bare [...]
+    # Handle {"scores": [...]} or {"indexers": [...]} or any wrapper object
     if isinstance(parsed, dict):
-        parsed = parsed.get("scores", parsed.get("results", []))
+        # Try common key names first, then fall back to first list value
+        for key in ("scores", "results", "indexers", "data"):
+            if key in parsed and isinstance(parsed[key], list):
+                return parsed[key]
+        # Fall back: find the first value that is a list
+        for v in parsed.values():
+            if isinstance(v, list):
+                return v
+        return []
     if not isinstance(parsed, list):
         return []
     return parsed
