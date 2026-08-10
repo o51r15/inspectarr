@@ -224,6 +224,8 @@ When configured, Ollama analyzes indexer data and produces an AI-powered health 
 
 AI scoring runs are logged to the database and visible on the [LLM Logs](LLM-Logs) page under System. The model can also be changed from the Settings → Indexers pane in the web UI.
 
+![Settings — AI Model selector and auto-manage](images/settings-model-selector.jpg)
+
 ### Auto-manage
 
 Automatically disables indexers that consistently score below a threshold and re-enables them after a cooldown. Auto-manage runs after every scan cycle independently of the reorder interval.

@@ -46,6 +46,8 @@ Not all failures are equal. Auth failures are weighted 6× more heavily than RSS
 
 Inspectarr records each indexer's health score over time. The trend value (positive = improving, negative = declining) is added directly to the raw score before clamping. This means an indexer on a downward trend gets penalized even if its current metrics look okay, and a recovering indexer gets a small boost.
 
+![Indexer Health page](images/indexers.jpg)
+
 ## AI scoring (Ollama)
 
 When an Ollama endpoint and model are configured under `prowlarr.ollama`, Inspectarr sends all indexer data in a single batch to the LLM, which returns its own health scores and reasoning. The AI scores replace the deterministic ones.

@@ -6,6 +6,8 @@ Inspectarr ships a web UI on port 8585 (configurable via `web.port`). All pages 
 
 The landing page. Shows a quick summary of recent scan activity, matched torrents, and current scheduler state.
 
+![Dashboard](images/dashboard.jpg)
+
 ### Torrents
 
 Lists all torrents currently tracked in qBittorrent categories that match your rules. Click a torrent to see file-level detail, including which files triggered a match and why.
@@ -19,9 +21,13 @@ Controls the scan scheduler. From here you can:
 - View webhook URLs (when `scanning.webhooks.enabled` is `true`) — copy these into your *arr apps under Connect → Webhook
 - Trigger a manual scan
 
+![Scheduler](images/scheduler.jpg)
+
 ### Indexers
 
 Prowlarr indexer health scoring dashboard. See [Prowlarr Indexer Scoring](Prowlarr-Indexer-Scoring) for full details. Only visible when `prowlarr.enabled` is `true`. Actions: Rescore, Reorder & Sync, Ignore toggle, Reset stats, Enable/Disable.
+
+![Indexer Health](images/indexers.jpg)
 
 ### Logs
 

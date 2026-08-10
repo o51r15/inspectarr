@@ -118,6 +118,16 @@ Dark and light themes with toggle. Works on desktop and mobile.
 Settings are saved to `config.yaml` and take effect on the next scan cycle — no restart needed.
 
 <p align="center">
+  <img src="assets/screenshots/dashboard.jpg" alt="Dashboard" width="900">
+  <br><em>Dashboard — scheduler status, scan stats, run history</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/indexers.jpg" alt="Indexer Health" width="900">
+  <br><em>Indexer Health — scores, response times, actions</em>
+</p>
+
+<p align="center">
   <img src="assets/screenshots/llm-logs-reasoning.jpg" alt="LLM Logs — AI scoring report card with reasoning" width="900">
   <br><em>LLM Logs — AI scoring report card with per-indexer reasoning</em>
 </p>
