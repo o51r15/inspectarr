@@ -43,7 +43,19 @@ def scheduler_view():
     except Exception:
         pass
 
-    return render_template("scheduler.html", status=status, interval=interval, scoring_info=scoring_info)
+    # Retry queue entries
+    retry_entries = []
+    try:
+        from core.config import load_config as _lc2
+        cfg2 = _lc2(current_app.config["CONFIG_PATH"])
+        from ui.routes.config import _get_state as _gs2
+        state2 = _gs2(cfg2)
+        retry_entries = state2.get_all_unresolved_retries()
+    except Exception:
+        pass
+
+    return render_template("scheduler.html", status=status, interval=interval,
+                           scoring_info=scoring_info, retry_entries=retry_entries)
 
 
 @scheduler_bp.route("/scheduler/toggle", methods=["POST"])

@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from flask import Blueprint, render_template, current_app, request, jsonify, redirect, url_for, Response
+from flask import Blueprint, render_template, current_app, request, jsonify, redirect, url_for, Response, send_file
 
 logs_bp = Blueprint("logs", __name__)
 
@@ -117,6 +117,21 @@ def logs_clear():
         with open(log_path, "w"):
             pass
     return redirect(url_for("logs.logs_view"))
+
+
+@logs_bp.route("/logs/download")
+def logs_download():
+    """Download the raw JSON Lines log file."""
+    config_path = current_app.config["CONFIG_PATH"]
+    log_path = _get_log_path(config_path)
+    if not os.path.exists(log_path):
+        return "No log file found", 404
+    return send_file(
+        log_path,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name="inspectarr.log.json",
+    )
 
 
 @logs_bp.route("/logs/stream")

@@ -120,6 +120,38 @@
 </div>
 {% endif %}
 
+<!-- Retry queue -->
+{% if retry_entries %}
+<div class="card" style="margin-bottom:16px">
+  <div class="card-title">Retry Queue ({{ retry_entries|length }} pending)</div>
+  <div class="table-wrap">
+    <table>
+      <caption class="sr-only">Torrents awaiting retry</caption>
+      <thead><tr>
+        <th>Torrent</th>
+        <th>Rule</th>
+        <th>Attempts</th>
+        <th>Last Attempt</th>
+        <th>Next Attempt</th>
+        <th>Reason</th>
+      </tr></thead>
+      <tbody>
+      {% for r in retry_entries %}
+      <tr>
+        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.torrent_name }}">{{ r.torrent_name }}</td>
+        <td>{{ r.rule_name }}</td>
+        <td class="mono">{{ r.attempt_count }}</td>
+        <td class="mono text-muted">{{ r.last_attempt[:19].replace('T',' ') if r.last_attempt else '—' }}</td>
+        <td class="mono text-muted">{{ r.next_attempt[:19].replace('T',' ') if r.next_attempt else '—' }}</td>
+        <td class="text-muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ r.failure_reason }}">{{ r.failure_reason }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <!-- Run history -->
 {% if status.run_history %}
 <div class="card">

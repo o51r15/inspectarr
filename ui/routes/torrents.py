@@ -29,6 +29,9 @@ def _qbit_from_config() -> QBittorrentClient:
 # Pages
 # ------------------------------------------------------------------
 
+PAGE_SIZE = 50
+
+
 @torrents_bp.route("/torrents")
 def torrents():
     error = None
@@ -38,17 +41,31 @@ def torrents():
         qbit = _qbit_from_config()
         torrent_list = qbit.get_all_torrents()
         cat_map = qbit.get_categories()
-        # Extract category names, skip the empty-string uncategorized key
         categories = sorted(
             name for name in cat_map.keys() if name
         )
     except Exception as exc:
         error = str(exc)
+
+    # Server-side pagination
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    total = len(torrent_list)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = min(page, total_pages)
+    start = (page - 1) * PAGE_SIZE
+    paged = torrent_list[start:start + PAGE_SIZE]
+
     return render_template(
         "torrents.html",
-        torrents=torrent_list,
+        torrents=paged,
         categories=categories,
         error=error,
+        page=page,
+        total_pages=total_pages,
+        total=total,
     )
 
 

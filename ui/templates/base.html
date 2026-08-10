@@ -14,7 +14,7 @@
 <div class="layout">
 
   <!-- Sidebar -->
-  <aside class="sidebar">
+  <aside class="sidebar" role="complementary" aria-label="Sidebar">
     <div class="sidebar-brand">
       <img src="/static/logo.svg" alt="inspectarr" class="sidebar-logo-mark">
       <div class="sidebar-brand-text">
@@ -22,7 +22,7 @@
         <span class="sidebar-brand-tag">&gt; watchdog</span>
       </div>
     </div>
-    <nav class="nav">
+    <nav class="nav" role="navigation" aria-label="Main navigation">
       <a href="/" class="{{ 'active' if request.path == '/' else '' }}">
         <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="1.5" width="5" height="5" rx="1"/><rect x="9.5" y="1.5" width="5" height="5" rx="1"/><rect x="1.5" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></svg> Dashboard
       </a>
@@ -39,22 +39,22 @@
         <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,12 6,6 10,9 14,3"/><polyline points="10,3 14,3 14,7"/></svg> Stats
       </a>
       <div class="nav-group {{ 'open' if request.path.startswith('/system') else '' }}" id="system-group">
-        <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/system') else '' }}" onclick="toggleNavGroup('system-group')">
+        <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/system') else '' }}" onclick="toggleNavGroup('system-group')" aria-expanded="{{ 'true' if request.path.startswith('/system') else 'false' }}" aria-controls="system-group-items">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="5" rx="1"/><rect x="2" y="9" width="12" height="5" rx="1"/><circle cx="5" cy="4.5" r="0.75" fill="currentColor" stroke="none"/><circle cx="5" cy="11.5" r="0.75" fill="currentColor" stroke="none"/></svg> System
           <span class="nav-group-caret">▸</span>
         </button>
-        <div class="nav-group-items">
+        <div class="nav-group-items" id="system-group-items">
           <a href="/system/status" class="{{ 'active' if request.path.startswith('/system/status') else '' }}">Status</a>
           <a href="/system/tasks" class="{{ 'active' if request.path.startswith('/system/tasks') else '' }}">Tasks</a>
           <a href="/system/updates" class="{{ 'active' if request.path.startswith('/system/updates') else '' }}">Updates</a>
           <a href="/system/events" class="{{ 'active' if request.path.startswith('/system/events') or request.path.startswith('/logs') else '' }}">Events</a>
         </div>
       </div>      <div class="nav-group {{ 'open' if request.path.startswith('/config') else '' }}" id="settings-group">
-        <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/config') else '' }}" onclick="toggleNavGroup('settings-group')">
+        <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/config') else '' }}" onclick="toggleNavGroup('settings-group')" aria-expanded="{{ 'true' if request.path.startswith('/config') else 'false' }}" aria-controls="settings-group-items">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/><circle cx="5" cy="4" r="1.5" fill="var(--card)" stroke="currentColor"/><circle cx="10" cy="8" r="1.5" fill="var(--card)" stroke="currentColor"/><circle cx="6" cy="12" r="1.5" fill="var(--card)" stroke="currentColor"/></svg> Settings
           <span class="nav-group-caret">▸</span>
         </button>
-        <div class="nav-group-items">
+        <div class="nav-group-items" id="settings-group-items">
           <a href="/config#connections"   data-pane="connections">Connections</a>
           <a href="/config#rules"         data-pane="rules">Rules</a>
           <a href="/config#indexers"      data-pane="indexers">Indexers</a>
@@ -79,16 +79,19 @@
   <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 
   <!-- Main -->
-  <div class="main">
+  <main class="main">
     <div class="topbar">
       <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Menu">☰</button>
       <h2>{% block page_title %}{% endblock %}</h2>
-      <div class="flex gap-8 items-center">{% block topbar_actions %}{% endblock %}</div>
+      <div class="flex gap-8 items-center">
+        {% block topbar_actions %}{% endblock %}
+        <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme" id="theme-btn" title="Toggle light/dark theme">🌙</button>
+      </div>
     </div>
     <div class="page">
       {% block content %}{% endblock %}
     </div>
-  </div>
+  </main>
 
 </div>
 <script src="/static/app.js"></script>
@@ -109,8 +112,30 @@
 
   // Expandable nav groups (System, etc.)
   function toggleNavGroup(id) {
-    document.getElementById(id).classList.toggle('open');
+    var group = document.getElementById(id);
+    group.classList.toggle('open');
+    var btn = group.querySelector('.nav-group-toggle');
+    if (btn) btn.setAttribute('aria-expanded', group.classList.contains('open'));
   }
+
+  // Theme toggle (dark/light)
+  function toggleTheme() {
+    var html = document.documentElement;
+    var current = html.getAttribute('data-theme') || 'dark';
+    var next = current === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('inspectarr-theme', next);
+    document.getElementById('theme-btn').textContent = next === 'dark' ? '🌙' : '☀️';
+  }
+  // Restore saved theme
+  (function() {
+    var saved = localStorage.getItem('inspectarr-theme');
+    if (saved) {
+      document.documentElement.setAttribute('data-theme', saved);
+      var btn = document.getElementById('theme-btn');
+      if (btn) btn.textContent = saved === 'dark' ? '🌙' : '☀️';
+    }
+  })();
 
   // Dynamic version — fetch latest GitHub release, cache per session
   (function() {
