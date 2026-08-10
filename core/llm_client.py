@@ -49,8 +49,12 @@ ADJUSTMENTS:
 You are also given each indexer's deterministic health score for reference.
 Your score REPLACES it — use your judgment across all the data provided.
 
-Return ONLY valid JSON — a single object with a "scores" key containing an array:
-{"scores": [{"indexer_id": <int>, "health_score": <int 0-100>, "reasoning": "<one sentence>"}]}
+Return ONLY valid JSON matching this EXACT schema — no extra fields:
+{"scores": [{"indexer_id": <int>, "health_score": <int 0-100>, "reasoning": "<one sentence explaining your score>"}]}
+
+CRITICAL: Each object MUST have exactly three keys: indexer_id, health_score, reasoning.
+Do NOT echo back the input data. Do NOT include weight, avg_response_time, or any other input fields.
+The "reasoning" field MUST be a non-empty string explaining why you gave that score.
 """
 
 
