@@ -111,10 +111,16 @@ Dark and light themes with toggle. Works on desktop and mobile.
 | **Indexers** | Health scores, rescore, reorder & sync, per-indexer ignore/reset |
 | **Stats** | Grab attribution — total grabs, malicious hits, % malicious per indexer |
 | **Settings** | Connections, rules, indexers + AI model selector, notifications, general, advanced, backups |
-| **System** | Status, scheduled tasks, update checker |
+| **System** | Status, scheduled tasks, update checker, LLM logs |
 | **Events** | Paginated log viewer with level filter and JSON export |
+| **LLM Logs** | AI scoring report card with per-indexer reasoning, score trend charts, run history |
 
 Settings are saved to `config.yaml` and take effect on the next scan cycle — no restart needed.
+
+<p align="center">
+  <img src="assets/screenshots/llm-logs-reasoning.jpg" alt="LLM Logs — AI scoring report card with reasoning" width="900">
+  <br><em>LLM Logs — AI scoring report card with per-indexer reasoning</em>
+</p>
 
 ---
 
@@ -148,6 +154,11 @@ When [Ollama](https://ollama.com) is configured, the LLM receives all per-indexe
 Indexers that consistently score below a configurable threshold are automatically disabled in Prowlarr and re-enabled after a cooldown period. Manual override is available from the Indexers page.
 
 All weights, multipliers, and thresholds are configurable. See the [wiki](https://github.com/o51r15/inspectarr/wiki/Prowlarr-Indexer-Scoring) for the full breakdown.
+
+<p align="center">
+  <img src="assets/screenshots/llm-logs-trend-chart.jpg" alt="AI Score trend chart" width="900">
+  <br><em>AI Score trends — track how LLM scores change over time per indexer</em>
+</p>
 
 ---
 
