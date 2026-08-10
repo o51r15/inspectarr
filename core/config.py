@@ -188,6 +188,11 @@ class WebConfig:
 @dataclass
 class AppConfig:
     qbittorrent: QBittorrentConfig
+    on_arr_failure: str          # "delete" | "abort"
+    retry: RetryConfig
+    logging: LoggingConfig
+    state: StateConfig
+    notifications: NotificationsConfig
     torrent_client: str = "qbittorrent"   # "qbittorrent" | "transmission" | "deluge"
     transmission: TransmissionConfig | None = None
     deluge: DelugeConfig | None = None
@@ -197,11 +202,6 @@ class AppConfig:
         lidarr=ArrConfig(False, "", ""),
     ))
     rules: list[Rule] = field(default_factory=list)
-    on_arr_failure: str          # "delete" | "abort"
-    retry: RetryConfig
-    logging: LoggingConfig
-    state: StateConfig
-    notifications: NotificationsConfig
     web: WebConfig = field(default_factory=WebConfig)
     prowlarr: ProwlarrConfig = field(default_factory=ProwlarrConfig)
     scanning: ScanningConfig = field(default_factory=ScanningConfig)
