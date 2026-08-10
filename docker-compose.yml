@@ -1,6 +1,7 @@
 services:
   inspectarr:
-    build: .
+    image: ghcr.io/o51r15/inspectarr:dev
+    # build: .  # uncomment for local builds
     container_name: inspectarr
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
