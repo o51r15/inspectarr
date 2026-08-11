@@ -28,7 +28,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check Docker Hub credentials
+        id: dockerhub
+        run: |
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.enabled == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
