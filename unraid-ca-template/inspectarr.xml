@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<Container version="2">
+    <Name>inspectarr</Name>
+    <Repository>ghcr.io/o51r15/inspectarr:latest</Repository>
+    <Registry>https://github.com/o51r15/inspectarr/pkgs/container/inspectarr</Registry>
+    <Branch>
+        <Tag>latest</Tag>
+        <TagDescription>Stable release</TagDescription>
+    </Branch>
+    <Branch>
+        <Tag>dev</Tag>
+        <TagDescription>Development build (latest commit to main)</TagDescription>
+    </Branch>
+    <Network>bridge</Network>
+    <Privileged>false</Privileged>
+    <Support>https://github.com/o51r15/inspectarr/discussions</Support>
+    <Project>https://github.com/o51r15/inspectarr</Project>
+    <ReadMe>https://github.com/o51r15/inspectarr/wiki</ReadMe>
+    <Overview>Torrent watchdog for Sonarr, Radarr and Lidarr. Detects bad downloads (executables, suspicious filenames, undersized files) via configurable rules, auto-blocklists them, deletes the torrent, and notifies you via Pushover. Also scores your Prowlarr indexers by health (response time, failure rate, malicious content, grab success) and automatically reorders or disables underperformers. Optional AI-powered scoring overlay using a local Ollama LLM. Full web UI with dashboard, scheduler, torrent browser, indexer health table, LLM logs, settings, and system status. Supports qBittorrent, Transmission, and Deluge.</Overview>
+    <Category>Downloaders: MediaApp:Other Tools:Utilities</Category>
+    <WebUI>http://[IP]:[PORT:8585]</WebUI>
+    <TemplateURL>https://raw.githubusercontent.com/selfhosters/unRAID-CA-templates/master/templates/inspectarr.xml</TemplateURL>
+    <Icon>https://raw.githubusercontent.com/o51r15/inspectarr/main/assets/icon.png</Icon>
+    <Requires>Requires qBittorrent (or Transmission/Deluge) with Web UI enabled, and at least one of Sonarr, Radarr, or Lidarr. Prowlarr is optional for indexer scoring. Ollama is optional for AI-powered scoring.</Requires>
+    <Config Name="WebUI Port" Target="8585" Default="8585" Mode="tcp" Description="Web interface port" Type="Port" Display="always" Required="true" Mask="false"/>
+    <Config Name="Data" Target="/app/data" Default="/mnt/user/appdata/inspectarr/data" Mode="rw" Description="Database, logs, and backups" Type="Path" Display="always" Required="true" Mask="false"/>
+    <Config Name="Config" Target="/app/config.yaml" Default="/mnt/user/appdata/inspectarr/config.yaml" Mode="rw" Description="Configuration file — copy config.example.yaml to get started" Type="Path" Display="always" Required="true" Mask="false"/>
+    <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+    <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>
