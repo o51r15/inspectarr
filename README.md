@@ -16,6 +16,12 @@
 
 ---
 
+## Why Inspectarr?
+
+Sonarr, Radarr, and Lidarr can blocklist individual releases — but only *after* an import fails, and only within their own app. They have no cross-app rules, no way to catch a `.exe` sitting in a TV category before import is even attempted, and no visibility into which indexers keep serving bad content. Inspectarr fills that gap: it scans your torrent client directly, enforces file-level rules across all three apps at once, attributes bad grabs back to the indexer that served them, and uses that data to score, reorder, and auto-manage your Prowlarr indexers — optionally with a local LLM for deeper analysis. One container, zero cloud dependencies.
+
+---
+
 ## What it does
 
 Inspectarr watches your qBittorrent categories, finds downloads that match bad-file
