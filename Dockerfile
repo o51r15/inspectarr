@@ -15,7 +15,9 @@ COPY . .
 VOLUME ["/app/data"]
 
 # M-09: restrict chown to /app/data only — source code stays root-owned
-RUN mkdir -p /app/data && chown -R inspectarr:inspectarr /app/data
+# Create placeholder config.yaml so bind-mount targets a file, not a directory
+RUN mkdir -p /app/data && chown -R inspectarr:inspectarr /app/data \
+    && touch /app/config.yaml && chown inspectarr:inspectarr /app/config.yaml
 
 USER inspectarr
 
