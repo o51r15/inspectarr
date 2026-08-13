@@ -142,6 +142,10 @@ def logs_stream():
     level_filter = request.args.get("level", "ALL")
 
     def generate():
+        # M-04: cap SSE connection lifetime to prevent DoS from idle connections
+        MAX_IDLE_SECONDS = 1800  # 30 min without activity → close
+        idle_seconds = 0
+
         # Start at end of file
         if not os.path.exists(log_path):
             pos = 0
@@ -150,10 +154,11 @@ def logs_stream():
                 f.seek(0, 2)
                 pos = f.tell()
 
-        while True:
+        while idle_seconds < MAX_IDLE_SECONDS:
             try:
                 if not os.path.exists(log_path):
                     time.sleep(1)
+                    idle_seconds += 1
                     yield ": heartbeat\n\n"
                     continue
                 with open(log_path, "r", encoding="utf-8") as f:
@@ -173,12 +178,18 @@ def logs_stream():
                         pass
                 if not new_lines:
                     time.sleep(1)
+                    idle_seconds += 1
                     yield ": heartbeat\n\n"
+                else:
+                    idle_seconds = 0  # reset on activity
             except GeneratorExit:
                 return
             except Exception:
                 time.sleep(2)
+                idle_seconds += 2
                 yield ": heartbeat\n\n"
+        # Connection timed out — client JS can reconnect automatically
+        yield "event: timeout\ndata: {}\n\n"
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

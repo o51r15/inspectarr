@@ -82,11 +82,14 @@ class Scheduler:
         """
         Fire an immediate one-shot scan (non-blocking).
         Returns False if a scan is already in flight (BUG-12).
+        L-06: set _scanning under lock BEFORE starting thread to close
+        the TOCTOU gap that allowed double-trigger.
         """
         with self._lock:
             if self._scanning:
                 return False
-        t = threading.Thread(target=lambda: self._execute_scan(is_first=False),
+            self._scanning = True
+        t = threading.Thread(target=lambda: self._execute_scan(is_first=False, already_claimed=True),
                              daemon=True, name="inspectarr-manual")
         t.start()
         return True
@@ -159,15 +162,13 @@ class Scheduler:
         except Exception:
             return True  # fail-open: poll by default
 
-    def _execute_scan(self, is_first: bool = False):
+    def _execute_scan(self, is_first: bool = False, already_claimed: bool = False):
         from core.config import load_config
         from core.scanner import Scanner
 
         with self._lock:
-            if self._scanning:
-                # BUG-12: another scan (scheduler loop vs manual trigger) is
-                # already in flight. Two concurrent Scanners mean two SQLite
-                # writers and doubled qbit/arr traffic — skip this cycle.
+            if self._scanning and not already_claimed:
+                # BUG-12: another scan is already in flight — skip.
                 return
             self._scanning = True
 

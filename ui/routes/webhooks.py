@@ -9,14 +9,17 @@ Auth via shared secret in the X-Webhook-Secret header only (H-02).
 Can run alongside polling or as the sole scan trigger.
 """
 import logging
-import threading
 import hmac
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, request, jsonify, current_app
 from ui.routes._utils import safe_error
 
 webhooks_bp = Blueprint("webhooks", __name__)
 log = logging.getLogger("inspectarr")
+
+# M-12: bounded thread pool prevents unbounded thread creation from webhook spam
+_webhook_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="webhook")
 
 
 def _check_secret(config_path: str) -> bool:
@@ -113,8 +116,11 @@ def _handle_webhook(source: str):
         with app.app_context():
             _delayed_scan(config_path, delay, {"source": source, "event": event_type})
 
-    t = threading.Thread(target=run_with_context, daemon=True, name=f"webhook-{source}")
-    t.start()
+    # M-12: submit to bounded pool instead of unbounded Thread creation
+    try:
+        _webhook_pool.submit(run_with_context)
+    except RuntimeError:
+        return jsonify({"ok": False, "message": "Webhook thread pool is shutting down"}), 503
 
     return jsonify({
         "ok": True,
