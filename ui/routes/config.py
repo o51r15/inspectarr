@@ -29,8 +29,30 @@ def _load_raw(config_path: str) -> dict:
 
 
 def _save_raw(config_path: str, data: dict):
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    """
+    L-17: Atomic config write — write to a temp file in the same directory,
+    fsync, then replace.  A crash mid-write can't corrupt the original.
+    """
+    import tempfile
+    content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    dir_name = os.path.dirname(os.path.abspath(config_path))
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, config_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    try:
+        os.chmod(config_path, 0o600)
+    except OSError:
+        pass  # Windows doesn't support Unix permissions
 
 
 def _get_state(cfg):
@@ -52,8 +74,8 @@ def _get_state(cfg):
 
 def _validate_paths(data: dict) -> str | None:
     """
-    SEC-5: reject log_file / db_file paths that escape the project directory.
-    Blocks path traversal via '..' components.
+    SEC-5 + M-11: reject log_file / db_file paths that escape the project
+    directory.  Blocks both '..' traversal and absolute paths.
     """
     import os
     for section, key in [("logging", "log_file"), ("state", "db_file")]:
@@ -63,6 +85,8 @@ def _validate_paths(data: dict) -> str | None:
         normalized = os.path.normpath(path)
         if ".." in normalized.split(os.sep) or ".." in normalized.split("/"):
             return f"{section}.{key} must not contain '..' path components"
+        if os.path.isabs(normalized):
+            return f"{section}.{key} must be a relative path"
     return None
 
 
@@ -675,6 +699,11 @@ def backups_create():
     # Resolve db_file relative to the config directory
     base = os.path.dirname(os.path.abspath(config_path))
     db_path = os.path.join(base, db_file) if not os.path.isabs(db_file) else db_file
+
+    # M-11: realpath guard — ensure db_path doesn't escape the project directory
+    allowed = os.path.realpath(base)
+    if not os.path.realpath(db_path).startswith(allowed + os.sep):
+        return jsonify({"ok": False, "message": "Database path escapes project directory"}), 400
 
     backup_path = _backup_dir()
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")

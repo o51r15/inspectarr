@@ -185,9 +185,21 @@ def logs_stream():
 
 
 def _get_log_path(config_path: str) -> str:
+    """
+    Resolve the log file path from config.
+    M-02: realpath guard — if the configured path escapes the project
+    directory, fall back to the default to prevent path traversal.
+    """
+    import os
+    default = "./data/inspectarr.log.json"
     try:
         from core.config import load_config
         config = load_config(config_path)
-        return config.logging.log_file
+        path = config.logging.log_file
+        base = os.path.realpath(os.path.dirname(os.path.abspath(config_path)))
+        real = os.path.realpath(path)
+        if not real.startswith(base + os.sep):
+            return default
+        return path
     except Exception:
-        return "./data/inspectarr.log.json"
+        return default
