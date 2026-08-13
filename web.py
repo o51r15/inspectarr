@@ -128,6 +128,17 @@ def main():
         scheduler_autostart = config.web.scheduler_autostart
     except Exception as e:
         print(f"WARNING: Could not read config ({e}), using defaults")
+        config = None
+
+    # L-21: warn if auth is disabled
+    if config and not config.web.auth.enabled:
+        print("WARNING: Authentication is disabled — anyone with network access can control Inspectarr")
+
+    # L-07: warn on default password
+    if config and config.web.auth.enabled:
+        pw = config.web.auth.password
+        if pw == "changeme" or (not pw.startswith(("pbkdf2:", "scrypt:")) and pw == "changeme"):
+            print("WARNING: Using default password 'changeme' — change it in Settings")
 
     app = create_app(config_path)
 

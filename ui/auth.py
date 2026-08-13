@@ -13,12 +13,28 @@ never locks the user out of the UI.
 
 Fails open on any config read error (homelab posture: prefer access over
 lockout).
+
+H-01: Passwords are now stored as werkzeug hashes (pbkdf2/scrypt).
+Legacy plaintext passwords are auto-migrated on first successful login.
 """
 import hmac
+import logging
+import os
+import tempfile
 from urllib.parse import urlparse
 
 import yaml
 from flask import request, Response
+from werkzeug.security import check_password_hash, generate_password_hash
+
+log = logging.getLogger("inspectarr")
+
+_HASH_PREFIXES = ("pbkdf2:", "scrypt:")
+
+
+def _is_hashed(value: str) -> bool:
+    """Return True if the value looks like a werkzeug password hash."""
+    return isinstance(value, str) and value.startswith(_HASH_PREFIXES)
 
 
 def _cross_origin_write() -> bool:
@@ -49,6 +65,43 @@ def read_auth_block(config_path: str) -> dict:
         return {}
 
 
+def _migrate_password(config_path: str, plaintext: str):
+    """
+    H-01: Auto-migrate a plaintext password to a werkzeug hash.
+    Uses atomic write (temp → fsync → replace) to avoid corruption.
+    Best-effort — failures are logged but never block authentication.
+    """
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+
+        web = raw.get("web", {})
+        auth = web.get("auth", {})
+        auth["password"] = generate_password_hash(plaintext)
+        web["auth"] = auth
+        raw["web"] = web
+
+        # Atomic write: write to temp file in same directory, fsync, then replace
+        dir_name = os.path.dirname(os.path.abspath(config_path))
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, config_path)
+            log.info("Password auto-migrated to hash")
+        except Exception:
+            # Clean up temp file on failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except Exception as exc:
+        log.warning(f"Password migration failed (non-fatal): {exc}")
+
+
 def check_auth(config_path: str):
     """
     Intended for use as a Flask before_request hook.
@@ -74,14 +127,32 @@ def check_auth(config_path: str):
     if not auth.get("enabled", False):
         return None
 
-    # SEC-3: compare_digest for constant-time comparison; str() because YAML
-    # can parse a numeric password as int.
     creds = request.authorization
-    if (
-        not creds
-        or not hmac.compare_digest(creds.username or "", str(auth.get("username", "")))
-        or not hmac.compare_digest(creds.password or "", str(auth.get("password", "")))
-    ):
+    if not creds:
+        return Response(
+            "Authentication required.",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Inspectarr"'},
+        )
+
+    # SEC-3: constant-time comparison for username
+    username_ok = hmac.compare_digest(
+        creds.username or "", str(auth.get("username", ""))
+    )
+
+    stored_pw = str(auth.get("password", ""))
+    provided_pw = creds.password or ""
+
+    if _is_hashed(stored_pw):
+        # H-01: verify against werkzeug hash
+        password_ok = check_password_hash(stored_pw, provided_pw)
+    else:
+        # Legacy plaintext — constant-time compare, then auto-migrate
+        password_ok = hmac.compare_digest(provided_pw, stored_pw)
+        if username_ok and password_ok:
+            _migrate_password(config_path, provided_pw)
+
+    if not username_ok or not password_ok:
         return Response(
             "Authentication required.",
             401,

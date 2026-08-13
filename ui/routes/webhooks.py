@@ -5,7 +5,7 @@ POST /webhook/sonarr and /webhook/radarr receive grab/download events
 from *arr apps. After a configurable delay (to let qBit connect to the
 swarm and start downloading), a single-torrent scan is triggered.
 
-Auth via shared secret in the X-Webhook-Secret header or ?secret= param.
+Auth via shared secret in the X-Webhook-Secret header only (H-02).
 Can run alongside polling or as the sole scan trigger.
 """
 import logging
@@ -25,10 +25,10 @@ def _check_secret(config_path: str) -> bool:
     secret = cfg.scanning.webhooks.secret
     if not secret:
         return True  # no secret configured = open (user's choice)
-    provided = (
-        request.headers.get("X-Webhook-Secret", "")
-        or request.args.get("secret", "")
-    )
+    provided = request.headers.get("X-Webhook-Secret", "")
+    if not provided:
+        log.warning("Webhook secret missing — rejected (use X-Webhook-Secret header)")
+        return False
     return hmac.compare_digest(secret, provided)
 
 

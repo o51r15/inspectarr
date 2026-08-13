@@ -2,6 +2,8 @@ from flask import Blueprint, render_template, current_app, request, redirect, ur
 import yaml
 import os
 
+from werkzeug.security import generate_password_hash
+
 config_bp = Blueprint("config", __name__)
 
 
@@ -239,6 +241,17 @@ def qbit_categories():
         return jsonify({"ok": False, "categories": [], "message": str(exc)})
 
 
+def _hash_if_new(raw_password: str, existing: dict) -> str:
+    """
+    H-01: Hash the password before saving to config.yaml.
+    If the submitted value is already a werkzeug hash (user didn't change the
+    password field), return it as-is to avoid double-hashing.
+    """
+    if raw_password.startswith(("pbkdf2:", "scrypt:")):
+        return raw_password  # already hashed — user didn't change it
+    return generate_password_hash(raw_password)
+
+
 def _form_to_config(form, existing: dict) -> dict:
     """Rebuild the config dict from submitted form data."""
     # Parse rules (dynamic fields: rule_name_0, rule_category_0, etc.)
@@ -355,7 +368,7 @@ def _form_to_config(form, existing: dict) -> dict:
             "auth": {
                 "enabled":  "auth_enabled" in form,
                 "username": form.get("auth_username", "admin"),
-                "password": form.get("auth_password", "changeme"),
+                "password": _hash_if_new(form.get("auth_password", "changeme"), existing),
             },
         },
         "prowlarr": prowlarr_block,
