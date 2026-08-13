@@ -5,6 +5,11 @@ services:
     container_name: inspectarr
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
+    # M-10: drop all Linux capabilities and prevent privilege escalation
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     ports:
       - "8585:8585"
     volumes:

@@ -1,0 +1,19 @@
+# L-16: prevent credentials and unnecessary files from being baked into the image
+.git
+.github
+.devcontainer
+.vscode
+__pycache__
+*.pyc
+data/
+*.db
+*.log.json
+config.yaml
+ROADMAP.md
+SECURITY_AUDIT.md
+SECURITY_IMPL_PLAN.md
+*.md
+!README.md
+!CHANGELOG.md
+!LICENSE
+!CONTRIBUTING.md
