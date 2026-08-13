@@ -3,6 +3,7 @@ import yaml
 import os
 
 from werkzeug.security import generate_password_hash
+from ui.routes._utils import safe_error
 
 config_bp = Blueprint("config", __name__)
 
@@ -105,7 +106,7 @@ def _validation_error(data: dict) -> str | None:
         _parse_config(data)
         return None
     except Exception as exc:
-        return str(exc)
+        return safe_error(exc)
 
 
 @config_bp.route("/config", methods=["GET"])
@@ -262,7 +263,7 @@ def qbit_categories():
         categories = sorted(name for name in cat_map.keys() if name)
         return jsonify({"ok": True, "categories": categories})
     except Exception as exc:
-        return jsonify({"ok": False, "categories": [], "message": str(exc)})
+        return jsonify({"ok": False, "categories": [], "message": safe_error(exc)})
 
 
 def _hash_if_new(raw_password: str, existing: dict) -> str:
@@ -432,7 +433,7 @@ def prowlarr_indexers():
         ai_available = bool(cfg.prowlarr.ollama.url and cfg.prowlarr.ollama.model)
         return jsonify({"ok": True, "indexers": results, "ai_available": ai_available})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/prowlarr/indexers/ai", methods=["GET"])
@@ -456,7 +457,7 @@ def prowlarr_indexers_ai():
             r.pop("_raw", None)
         return jsonify({"ok": True, "indexers": results})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/prowlarr/save", methods=["POST"])
@@ -494,7 +495,7 @@ def prowlarr_save():
         _save_raw(config_path, raw)
         return jsonify({"ok": True})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/prowlarr/set-ignored", methods=["POST"])
@@ -514,7 +515,7 @@ def prowlarr_set_ignored():
         )
         return jsonify({"ok": True})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/prowlarr/rescore", methods=["POST"])
@@ -534,7 +535,7 @@ def prowlarr_rescore():
         changed = scorer.reorder()
         return jsonify({"ok": True, "changed": changed})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/ollama/models", methods=["GET"])
@@ -554,7 +555,7 @@ def ollama_models():
         models = sorted(m.get("name", "") for m in data.get("models", []) if m.get("name"))
         return jsonify({"ok": True, "models": models, "current": current_model})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc), "models": [], "current": current_model})
+        return jsonify({"ok": False, "message": safe_error(exc), "models": [], "current": current_model})
 
 
 @config_bp.route("/config/ollama/model", methods=["POST"])
@@ -573,7 +574,7 @@ def ollama_set_model():
         _save_raw(config_path, raw)
         return jsonify({"ok": True, "message": f"Model set to {model}"})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/prowlarr/toggle-indexer", methods=["POST"])
@@ -603,7 +604,7 @@ def prowlarr_toggle_indexer():
             return jsonify({"ok": True, "message": f"Indexer {action}"})
         return jsonify({"ok": False, "message": "Failed to update indexer"})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/test/prowlarr", methods=["POST"])
@@ -617,7 +618,7 @@ def test_prowlarr():
         ok     = client.test_connection()
         return jsonify({"ok": ok, "message": "Connected" if ok else "Failed"})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/test/pushover", methods=["POST"])
@@ -647,7 +648,7 @@ def test_pushover():
         errors = ", ".join(data.get("errors", ["Unknown error"]))
         return jsonify({"ok": False, "message": errors})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 # ---------------------------------------------------------------------------
@@ -718,7 +719,7 @@ def backups_create():
         size = _human_size(os.path.getsize(zip_path))
         return jsonify({"ok": True, "message": f"Backup created: {zip_name} ({size})"})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})
 
 
 @config_bp.route("/config/backups/download/<filename>", methods=["GET"])
@@ -752,4 +753,4 @@ def backups_delete():
         os.remove(full)
         return jsonify({"ok": True, "message": f"Deleted {filename}"})
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)})
+        return jsonify({"ok": False, "message": safe_error(exc)})

@@ -13,6 +13,7 @@ import threading
 import hmac
 
 from flask import Blueprint, request, jsonify, current_app
+from ui.routes._utils import safe_error
 
 webhooks_bp = Blueprint("webhooks", __name__)
 log = logging.getLogger("inspectarr")
@@ -87,7 +88,7 @@ def _handle_webhook(source: str):
             return jsonify({"ok": False, "message": "Webhooks are not enabled"}), 403
         delay = cfg.scanning.webhooks.scan_delay_seconds
     except Exception as exc:
-        return jsonify({"ok": False, "message": str(exc)}), 500
+        return jsonify({"ok": False, "message": safe_error(exc)}), 500
 
     # Validate secret
     if not _check_secret(config_path):

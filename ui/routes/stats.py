@@ -3,6 +3,7 @@ ui/routes/stats.py — Indexer grab and malicious hit statistics
 """
 from flask import Blueprint, render_template, current_app
 from core.config import load_config
+from ui.routes._utils import safe_error
 
 stats_bp = Blueprint("stats", __name__)
 
@@ -105,7 +106,7 @@ def stats():
         indexer_rows.sort(key=lambda x: (-(x["health_score"] or 0), -x["malicious_hits"]))
 
     except Exception as exc:
-        error = str(exc)
+        error = safe_error(exc)
 
     return render_template(
         "stats.html",

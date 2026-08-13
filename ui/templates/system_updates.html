@@ -41,14 +41,14 @@ function checkUpdates() {
       document.getElementById('ver-latest').textContent = d.latest || d.current || '?';
       const badge = document.getElementById('update-badge');
       if (!d.ok) {
-        badge.innerHTML = '<span style="color:var(--error)">Failed to check: ' + (d.message||'unknown error') + '</span>';
+        badge.innerHTML = '<span style="color:var(--error)">Failed to check: ' + esc(d.message||'unknown error') + '</span>';
         return;
       }
       if (d.up_to_date) {
         badge.innerHTML = '<span style="color:var(--success)">✓ You are running the latest version</span>';
       } else {
-        badge.innerHTML = '<span style="color:var(--warning)">⬆ Update available: ' + d.latest + '</span>' +
-          (d.url ? ' — <a href="'+d.url+'" target="_blank" rel="noopener" style="color:var(--accent)">View release</a>' : '');
+        badge.innerHTML = '<span style="color:var(--warning)">⬆ Update available: ' + esc(d.latest) + '</span>' +
+          (d.url ? ' — <a href="'+esc(d.url)+'" target="_blank" rel="noopener" style="color:var(--accent)">View release</a>' : '');
       }
       if (d.release_notes) {
         document.getElementById('release-notes').style.display = 'block';

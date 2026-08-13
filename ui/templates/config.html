@@ -821,7 +821,7 @@
     hidden.value = cur.join(',');
     const span = document.createElement('span');
     span.className = 'ext-tag';
-    span.innerHTML = `${val} <button type="button">×</button>`;
+    span.innerHTML = `${esc(val)} <button type="button">×</button>`;
     span.querySelector('button').onclick = () => removeExt(idx, val);
     tags.appendChild(span);
     input.value = '';
@@ -849,7 +849,7 @@
     const span = document.createElement('span');
     span.className = 'ext-tag';
     span.setAttribute('data-pattern', val);
-    span.innerHTML = `${val} <button type="button">×</button>`;
+    span.innerHTML = `${esc(val)} <button type="button">×</button>`;
     span.querySelector('button').onclick = () => removePattern(idx, span.querySelector('button'));
     tags.appendChild(span);
     input.value = '';
@@ -928,12 +928,12 @@
           return;
         }
         tbody.innerHTML = d.backups.map(b => `<tr>
-          <td style="font-family:var(--font-mono);font-size:12px">${b.name}</td>
-          <td>${b.created}</td>
-          <td>${b.size}</td>
+          <td style="font-family:var(--font-mono);font-size:12px">${esc(b.name)}</td>
+          <td>${esc(b.created)}</td>
+          <td>${esc(b.size)}</td>
           <td style="text-align:right">
-            <a href="/config/backups/download/${b.name}" class="btn btn-ghost btn-sm" style="font-size:0.75rem;padding:2px 8px">Download</a>
-            <button class="btn btn-ghost btn-sm" style="font-size:0.75rem;padding:2px 8px;color:var(--error)" onclick="deleteBackup('${b.name}')">Delete</button>
+            <a href="/config/backups/download/${encodeURIComponent(b.name)}" class="btn btn-ghost btn-sm" style="font-size:0.75rem;padding:2px 8px">Download</a>
+            <button class="btn btn-ghost btn-sm" style="font-size:0.75rem;padding:2px 8px;color:var(--error)" onclick="deleteBackup('${esc(b.name)}')">Delete</button>
           </td>
         </tr>`).join('');
       });
@@ -995,7 +995,7 @@
           return;
         }
         sel.innerHTML = d.models.map(m =>
-          `<option value="${m}"${m === d.current ? ' selected' : ''}>${m}</option>`
+          `<option value="${esc(m)}"${m === d.current ? ' selected' : ''}>${esc(m)}</option>`
         ).join('');
         sel.disabled = false; btn.disabled = false;
       })

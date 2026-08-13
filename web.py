@@ -50,6 +50,14 @@ def create_app(config_path: str) -> Flask:
     app.config["CONFIG_PATH"] = config_path
     # SEC-8: cap request body size to 1 MB to prevent memory-spike attacks
     app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
+    # L-02: security response headers
+    @app.after_request
+    def set_security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
     app.config["SCHEDULER"]   = Scheduler(config_path)
     # IMP-2: share the scheduler's StateManager with all routes so requests
     # reuse one SQLite connection instead of opening one per request (BUG-09).
