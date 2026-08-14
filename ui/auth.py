@@ -81,7 +81,8 @@ def _migrate_password(config_path: str, plaintext: str):
         web["auth"] = auth
         raw["web"] = web
 
-        # Atomic write: temp in /app/data (writable + same device as config)
+        # Atomic write: temp in /app/data (writable), shutil.move for cross-mount
+        import shutil
         data_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), "data")
         if not os.path.isdir(data_dir) or not os.access(data_dir, os.W_OK):
             data_dir = os.path.dirname(os.path.abspath(config_path))
@@ -91,7 +92,7 @@ def _migrate_password(config_path: str, plaintext: str):
                 yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, config_path)
+            shutil.move(tmp_path, config_path)
             log.info("Password auto-migrated to hash")
         except Exception:
             # Clean up temp file on failure

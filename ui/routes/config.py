@@ -31,16 +31,15 @@ def _load_raw(config_path: str) -> dict:
 
 def _save_raw(config_path: str, data: dict):
     """
-    L-17: Atomic config write — write to a temp file in /app/data (writable),
-    fsync, then replace.  /app/data and config.yaml are on the same bind-mount
-    device, so os.replace is a true atomic same-filesystem rename.
-
-    We cannot use dirname(config_path) = /app/ because M-09 made it root-owned
-    to protect source code — inspectarr user cannot create files there.
+    L-17: Safe config write — write to a temp file in /app/data (writable),
+    fsync, then shutil.move into place.  We use /app/data because M-09 made
+    /app/ root-owned to protect source code, and shutil.move because Docker
+    bind-mounts are separate mount points (os.replace fails cross-mount).
     """
+    import shutil
     import tempfile
     content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    # /app/data is writable and on the same device as bind-mounted config.yaml
+    # /app/data is writable; shutil.move handles cross-mount (bind-mount) moves
     data_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), "data")
     if not os.path.isdir(data_dir) or not os.access(data_dir, os.W_OK):
         data_dir = os.path.dirname(os.path.abspath(config_path))
@@ -50,7 +49,7 @@ def _save_raw(config_path: str, data: dict):
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, config_path)
+        shutil.move(tmp_path, config_path)
     except Exception:
         try:
             os.unlink(tmp_path)
