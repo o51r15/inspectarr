@@ -4,13 +4,13 @@ Inspectarr ships a web UI on port 8585 (configurable via `web.port`). All pages 
 
 ### Dashboard
 
-The landing page. Shows a quick summary of recent scan activity, matched torrents, and current scheduler state.
+The landing page. Shows scheduler status, scan stats (Flagged and Actioned counts with retention period), last flagged torrent (with a Historical tab showing all past flagged torrents), and recent run history.
 
 ![Dashboard](images/dashboard.jpg)
 
 ### Torrents
 
-Lists all torrents currently tracked in qBittorrent categories that match your rules. Click a torrent to see file-level detail, including which files triggered a match and why.
+Lists all torrents currently tracked in your torrent client's categories that match your rules. Click a torrent to see file-level detail, including which files triggered a match and why. Works with qBittorrent, Transmission, and Deluge.
 
 ### Scheduler
 
@@ -39,7 +39,7 @@ Charts and statistics for scan history, match rates, and action counts over time
 
 ### Settings (Config)
 
-Edit `config.yaml` from the browser. Changes are written to disk and picked up on the next scan cycle (no restart needed, except for `web.port`). Tabs cover connections, rules, scanning, behavior, retry, notifications, and Prowlarr settings.
+Edit `config.yaml` from the browser. Changes are written to disk and picked up on the next scan cycle (no restart needed, except for `web.port`). The Connections pane includes a torrent client selector (qBittorrent, Transmission, or Deluge) with per-client URL, username, and password fields plus a Test Connection button. Only the active client's fields are shown. Other tabs cover rules, scanning, behavior, retry, notifications, and Prowlarr settings.
 
 ### System → Status
 

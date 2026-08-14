@@ -24,11 +24,12 @@ Sonarr, Radarr, and Lidarr can blocklist individual releases — but only *after
 
 ## What it does
 
-Inspectarr watches your qBittorrent categories, finds downloads that match bad-file
+Inspectarr watches your torrent client's categories, finds downloads that match bad-file
 rules (`.exe` in a TV category, undersized files, suspicious filenames), blocklists
 them in Sonarr / Radarr / Lidarr, deletes the torrent, and notifies you via Pushover.
-Scans can be triggered by a polling schedule, incoming webhooks from your *arr apps,
-or both at the same time.
+Supports **qBittorrent**, **Transmission**, and **Deluge** — select your client in Settings
+and Inspectarr handles the rest. Scans can be triggered by a polling schedule, incoming
+webhooks from your *arr apps, or both at the same time.
 
 It also scores your Prowlarr torrent indexers by health — response time, failure
 rate, malicious content, and grab success — then automatically reorders them so
@@ -41,7 +42,8 @@ with content-hash caching to minimize redundant calls.
 
 ## Features
 
-- **Bad torrent detection** — configurable rules per qBittorrent category: bad extensions, filename patterns, minimum file size
+- **Multi-client support** — qBittorrent, Transmission (JSON-RPC), and Deluge (Web UI JSON-RPC) with config-driven selection and per-client Settings UI
+- **Bad torrent detection** — configurable rules per category: bad extensions, filename patterns, minimum file size
 - **Automatic remediation** — blocklist in the *arr, delete from qBit, retry on failure
 - **Webhook + polling** — receive push events from Sonarr/Radarr/Lidarr or poll on a schedule, or both
 - **Prowlarr indexer health scoring** — weighted failure rates, logarithmic response time curve, malicious content tracking, grab success rate, historical trend analysis
@@ -180,7 +182,7 @@ All weights, multipliers, and thresholds are configurable. See the [wiki](https:
 
 ## Requirements
 
-- **qBittorrent** with Web UI enabled (v4.x or v5.x)
+- **One of:** qBittorrent (v4.x/v5.x, Web UI enabled), Transmission (with RPC enabled), or Deluge (with Web UI enabled)
 - **One or more of:** Sonarr v4, Radarr v3, Lidarr v2
 - **Prowlarr** *(optional)* — for indexer scoring and grab attribution
 - **Ollama** *(optional)* — for AI-powered health scoring

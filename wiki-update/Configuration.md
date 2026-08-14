@@ -4,12 +4,41 @@ All configuration lives in `config.yaml`. The repo ships a fully annotated `conf
 
 ## Connections
 
+### Torrent Client
+
+Inspectarr supports three torrent clients. Set `torrent_client` to choose which one to use, then configure the matching block. Only one client is active at a time. The Settings UI shows fields for the active client only.
+
 ```yaml
+torrent_client: qbittorrent   # qbittorrent | transmission | deluge
+
 qbittorrent:
   url: http://192.168.1.100:8080
   username: admin
   password: changeme
 
+transmission:
+  url: http://192.168.1.100:9091
+  username: ""
+  password: ""
+
+deluge:
+  url: http://192.168.1.100:8112
+  password: ""
+```
+
+| Setting | Purpose |
+|---|---|
+| `torrent_client` | Which torrent client to use: `qbittorrent` (default), `transmission`, or `deluge` |
+| `qbittorrent.url` | qBittorrent Web UI URL including port |
+| `qbittorrent.username` / `password` | qBittorrent Web UI credentials |
+| `transmission.url` | Transmission RPC URL (default port 9091) |
+| `transmission.username` / `password` | Transmission RPC credentials (optional — leave empty if no auth) |
+| `deluge.url` | Deluge Web UI URL (default port 8112) |
+| `deluge.password` | Deluge Web UI password (default: `deluge`) |
+
+### *arr Apps
+
+```yaml
 arrs:
   sonarr:
     enabled: true
@@ -27,8 +56,6 @@ arrs:
 
 | Setting | Purpose |
 |---|---|
-| `qbittorrent.url` | qBittorrent Web UI URL including port |
-| `qbittorrent.username` / `password` | qBittorrent Web UI credentials |
 | `arrs.<app>.enabled` | Whether this \*arr client is active |
 | `arrs.<app>.url` | The \*arr URL, **including any base path** (e.g. `/radarr`) |
 | `arrs.<app>.api_key` | Found in the \*arr under Settings → General |
