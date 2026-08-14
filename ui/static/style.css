@@ -735,3 +735,9 @@ tbody td { padding: 9px 12px; vertical-align: top; }
   .mobile-menu-btn { display: none; }
   .sidebar-overlay { display: none !important; }
 }
+
+/* Screen-reader only (accessibility) */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); border: 0;
+}

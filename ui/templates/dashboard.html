@@ -47,7 +47,7 @@
       <div class="stat-value text-warning" id="stat-flagged">
         {{ status.total_flagged }}
       </div>
-      <div class="stat-label">bad files detected</div>
+      <div class="stat-label">bad files detected (last {{ retention_days }} days)</div>
     </div>
 
     <div class="card">
@@ -55,7 +55,7 @@
       <div class="stat-value text-success" id="stat-actioned">
         {{ status.total_actioned }}
       </div>
-      <div class="stat-label">deleted &amp; blocklisted</div>
+      <div class="stat-label">deleted &amp; blocklisted (last {{ retention_days }} days)</div>
     </div>
   </div>
 
@@ -66,6 +66,7 @@
       {% if status.last_result %}
         {% set r = status.last_result %}
         <table style="width:100%">
+          <caption class="sr-only">Last scan details</caption>
           <tr><td class="text-muted" style="width:140px">Started</td>
               <td id="stat-last-run" class="mono">{{ r.scan_start[:19].replace('T',' ') if r.scan_start else '—' }}</td></tr>
           <tr><td class="text-muted">Duration</td>
@@ -80,17 +81,38 @@
     </div>
 
     <div class="card">
-      <div class="card-title">Last Flagged Torrent</div>
-      {% if status.last_detection %}
-        {% set lf = status.last_detection %}
-        <div style="font-weight:600;margin-bottom:8px" id="last-flagged-name">{{ lf.torrent_name }}</div>
-        <div class="text-muted" style="font-size:12px">
-          Rule: <span id="last-flagged-rule">{{ lf.rule }}</span><br>
-          Time: <span id="last-flagged-time">{{ lf.timestamp[:19].replace('T',' ') if lf.timestamp else '—' }}</span>
-        </div>
-      {% else %}
-        <p class="text-muted" style="font-size:13px">No bad torrents detected yet.</p>
-      {% endif %}
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span class="flagged-tab active" data-tab="last" onclick="switchFlaggedTab('last')">Last</span>
+        <span class="flagged-tab" data-tab="history" onclick="switchFlaggedTab('history')">Historical</span>
+      </div>
+      <div id="flagged-last">
+        {% if status.last_detection %}
+          {% set lf = status.last_detection %}
+          <div style="font-weight:600;margin-bottom:8px" id="last-flagged-name">{{ lf.torrent_name }}</div>
+          <div class="text-muted" style="font-size:12px">
+            Rule: <span id="last-flagged-rule">{{ lf.rule }}</span><br>
+            Time: <span id="last-flagged-time">{{ lf.timestamp[:19].replace('T',' ') if lf.timestamp else '—' }}</span>
+          </div>
+        {% else %}
+          <p class="text-muted" style="font-size:13px">No bad torrents detected yet.</p>
+        {% endif %}
+      </div>
+      <div id="flagged-history" style="display:none;max-height:160px;overflow-y:auto">
+        {% if flagged_history %}
+          <table style="width:100%;font-size:12px">
+            <caption class="sr-only">Flagged torrent history</caption>
+            {% for f in flagged_history %}
+            <tr>
+              <td style="padding:3px 0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ f.torrent_name }}">{{ f.torrent_name }}</td>
+              <td class="text-muted" style="padding:3px 6px;white-space:nowrap">{{ f.rule_name or '—' }}</td>
+              <td class="text-muted mono" style="padding:3px 0;white-space:nowrap">{{ f.actioned_at[:10] if f.actioned_at else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </table>
+        {% else %}
+          <p class="text-muted" style="font-size:13px">No flagged torrents in history.</p>
+        {% endif %}
+      </div>
     </div>
   </div>
 
@@ -100,6 +122,7 @@
     <div class="card-title">Recent Runs</div>
     <div class="table-wrap">
       <table>
+        <caption class="sr-only">Recent scan run history</caption>
         <thead><tr>
           <th>Started</th><th>Duration</th><th>Checked</th>
           <th>Flagged</th><th>Actioned</th><th>Status</th>
@@ -123,4 +146,19 @@
   {% endif %}
 
 </div>
+
+<style>
+  .flagged-tab{font-size:13px;font-weight:600;cursor:pointer;padding:2px 8px;border-radius:4px;color:var(--text-dim)}
+  .flagged-tab.active{background:var(--accent);color:#fff}
+  .flagged-tab:hover:not(.active){color:var(--text)}
+</style>
+<script>
+function switchFlaggedTab(tab) {
+  document.getElementById('flagged-last').style.display = tab === 'last' ? '' : 'none';
+  document.getElementById('flagged-history').style.display = tab === 'history' ? '' : 'none';
+  document.querySelectorAll('.flagged-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+}
+</script>
 {% endblock %}

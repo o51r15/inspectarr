@@ -159,6 +159,7 @@ prowlarr:
   api_key: ~
   base_priority: 10            # Best-scoring torrent indexer gets this priority; others count up from here
   reorder_interval_hours: 24   # How often to auto-reorder (runs via web scheduler)
+  history_window_days: 90      # Reserved for future use (not yet consumed by scorer)
   min_grabs_before_scoring: 10 # Minimum history records before scoring an indexer
   scoring:
     response_time_weight: 0.25   # Weight for response time sub-score
