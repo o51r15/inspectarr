@@ -81,26 +81,11 @@ def _migrate_password(config_path: str, plaintext: str):
         web["auth"] = auth
         raw["web"] = web
 
-        # Atomic write: temp in /app/data (writable), shutil.move for cross-mount
-        import shutil
-        data_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), "data")
-        if not os.path.isdir(data_dir) or not os.access(data_dir, os.W_OK):
-            data_dir = os.path.dirname(os.path.abspath(config_path))
-        fd, tmp_path = tempfile.mkstemp(dir=data_dir, suffix=".yaml.tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-                f.flush()
-                os.fsync(f.fileno())
-            shutil.move(tmp_path, config_path)
-            log.info("Password auto-migrated to hash")
-        except Exception:
-            # Clean up temp file on failure
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            f.flush()
+            os.fsync(f.fileno())
+        log.info("Password auto-migrated to hash")
     except Exception as exc:
         log.warning(f"Password migration failed (non-fatal): {exc}")
 

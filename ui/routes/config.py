@@ -30,37 +30,12 @@ def _load_raw(config_path: str) -> dict:
 
 
 def _save_raw(config_path: str, data: dict):
-    """
-    L-17: Safe config write — write to a temp file in /app/data (writable),
-    fsync, then shutil.move into place.  We use /app/data because M-09 made
-    /app/ root-owned to protect source code, and shutil.move because Docker
-    bind-mounts are separate mount points (os.replace fails cross-mount).
-    """
-    import shutil
-    import tempfile
+    """Write config directly to the file (preserves inode for Docker bind mounts)."""
     content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    # /app/data is writable; shutil.move handles cross-mount (bind-mount) moves
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), "data")
-    if not os.path.isdir(data_dir) or not os.access(data_dir, os.W_OK):
-        data_dir = os.path.dirname(os.path.abspath(config_path))
-    fd, tmp_path = tempfile.mkstemp(dir=data_dir, suffix=".yaml.tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        shutil.move(tmp_path, config_path)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-    try:
-        os.chmod(config_path, 0o600)
-    except OSError:
-        pass  # non-POSIX systems may not support chmod
-
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(content)
+        f.flush()
+        os.fsync(f.fileno())
 
 def _get_state(cfg):
     """
