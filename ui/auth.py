@@ -81,9 +81,11 @@ def _migrate_password(config_path: str, plaintext: str):
         web["auth"] = auth
         raw["web"] = web
 
-        # Atomic write: write to temp file in same directory, fsync, then replace
-        dir_name = os.path.dirname(os.path.abspath(config_path))
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
+        # Atomic write: temp in /app/data (writable + same device as config)
+        data_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), "data")
+        if not os.path.isdir(data_dir) or not os.access(data_dir, os.W_OK):
+            data_dir = os.path.dirname(os.path.abspath(config_path))
+        fd, tmp_path = tempfile.mkstemp(dir=data_dir, suffix=".yaml.tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)

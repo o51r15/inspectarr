@@ -31,13 +31,20 @@ def _load_raw(config_path: str) -> dict:
 
 def _save_raw(config_path: str, data: dict):
     """
-    L-17: Atomic config write — write to a temp file in the same directory,
-    fsync, then replace.  A crash mid-write can't corrupt the original.
+    L-17: Atomic config write — write to a temp file in /app/data (writable),
+    fsync, then replace.  /app/data and config.yaml are on the same bind-mount
+    device, so os.replace is a true atomic same-filesystem rename.
+
+    We cannot use dirname(config_path) = /app/ because M-09 made it root-owned
+    to protect source code — inspectarr user cannot create files there.
     """
     import tempfile
     content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    dir_name = os.path.dirname(os.path.abspath(config_path))
-    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
+    # /app/data is writable and on the same device as bind-mounted config.yaml
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(config_path)), "data")
+    if not os.path.isdir(data_dir) or not os.access(data_dir, os.W_OK):
+        data_dir = os.path.dirname(os.path.abspath(config_path))
+    fd, tmp_path = tempfile.mkstemp(dir=data_dir, suffix=".yaml.tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
@@ -53,7 +60,7 @@ def _save_raw(config_path: str, data: dict):
     try:
         os.chmod(config_path, 0o600)
     except OSError:
-        pass  # Windows doesn't support Unix permissions
+        pass  # non-POSIX systems may not support chmod
 
 
 def _get_state(cfg):
