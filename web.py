@@ -14,7 +14,9 @@ CLI runs (no UI) still use:
     python3 inspectarr.py
 """
 import argparse
+import atexit
 import os
+import secrets
 import sys
 from datetime import datetime
 
@@ -48,6 +50,8 @@ def create_app(config_path: str) -> Flask:
         static_folder=os.path.join(base_dir, "ui", "static"),
     )
     app.config["CONFIG_PATH"] = config_path
+    # L-01: set SECRET_KEY for session signing (env override or random per-restart)
+    app.secret_key = os.environ.get("FLASK_SECRET_KEY", secrets.token_hex(32))
     # SEC-8: cap request body size to 1 MB to prevent memory-spike attacks
     app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
     # L-02: security response headers
@@ -64,6 +68,9 @@ def create_app(config_path: str) -> Flask:
     # May be None if the config/DB was unavailable at startup — routes fall
     # back to a fresh instance in that case.
     app.config["STATE"] = app.config["SCHEDULER"]._state
+    # L-03: register explicit close so SQLite connection is cleaned up on exit
+    if app.config["STATE"]:
+        atexit.register(app.config["STATE"].close)
 
     @app.context_processor
     def inject_globals():

@@ -14,9 +14,12 @@ Reference: https://deluge.readthedocs.io/en/latest/reference/webapi.html
            https://deluge.readthedocs.io/en/latest/reference/api.html
 """
 
+import logging
 import requests
 
 from .torrent_client import AbstractTorrentClient, TorrentClientError
+
+log = logging.getLogger("inspectarr")
 
 
 class DelugeError(TorrentClientError):
@@ -187,7 +190,8 @@ class DelugeClient(AbstractTorrentClient):
             self._authenticated = False
             self._login()
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Deluge test_connection failed: %s", exc)
             return False
 
     def get_all_torrents(self, hash: str | None = None) -> list[dict]:
@@ -246,28 +250,32 @@ class DelugeClient(AbstractTorrentClient):
         try:
             self._rpc("label.set_torrent", [hash, category])
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Deluge set_category failed for %s: %s", hash[:12], exc)
             return False
 
     def pause_torrent(self, hash: str) -> bool:
         try:
             self._rpc("core.pause_torrent", [[hash]])
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Deluge pause failed for %s: %s", hash[:12], exc)
             return False
 
     def resume_torrent(self, hash: str) -> bool:
         try:
             self._rpc("core.resume_torrent", [[hash]])
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Deluge resume failed for %s: %s", hash[:12], exc)
             return False
 
     def delete_torrent(self, hash: str, delete_files: bool = True) -> bool:
         try:
             self._rpc("core.remove_torrent", [hash, delete_files])
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Deluge delete failed for %s: %s", hash[:12], exc)
             return False
 
     def get_torrent_files(self, hash: str) -> list[dict]:

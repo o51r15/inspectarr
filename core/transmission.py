@@ -13,9 +13,12 @@ We treat the first label as the category for Inspectarr's purposes.
 Reference: https://github.com/transmission/transmission/blob/main/docs/rpc-spec.md
 """
 
+import logging
 import requests
 
 from .torrent_client import AbstractTorrentClient, TorrentClientError
+
+log = logging.getLogger("inspectarr")
 
 
 class TransmissionError(TorrentClientError):
@@ -156,7 +159,8 @@ class TransmissionClient(AbstractTorrentClient):
         try:
             self._rpc("session_get", {"fields": ["version"]})
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Transmission test_connection failed: %s", exc)
             return False
 
     def get_all_torrents(self, hash: str | None = None) -> list[dict]:
@@ -194,21 +198,24 @@ class TransmissionClient(AbstractTorrentClient):
                 "labels": labels,
             })
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Transmission set_category failed for %s: %s", hash[:12], exc)
             return False
 
     def pause_torrent(self, hash: str) -> bool:
         try:
             self._rpc("torrent_stop", {"ids": [hash]})
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Transmission pause failed for %s: %s", hash[:12], exc)
             return False
 
     def resume_torrent(self, hash: str) -> bool:
         try:
             self._rpc("torrent_start", {"ids": [hash]})
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Transmission resume failed for %s: %s", hash[:12], exc)
             return False
 
     def delete_torrent(self, hash: str, delete_files: bool = True) -> bool:
@@ -218,7 +225,8 @@ class TransmissionClient(AbstractTorrentClient):
                 "delete_local_data": delete_files,
             })
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("Transmission delete failed for %s: %s", hash[:12], exc)
             return False
 
     def get_torrent_files(self, hash: str) -> list[dict]:

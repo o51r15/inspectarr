@@ -1,6 +1,9 @@
+import logging
 import requests
 
 from .torrent_client import AbstractTorrentClient, TorrentClientError
+
+log = logging.getLogger("inspectarr")
 
 
 class QBittorrentError(TorrentClientError):
@@ -86,7 +89,8 @@ class QBittorrentClient(AbstractTorrentClient):
                 data={"hashes": hash, "category": category},
             )
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("qBit set_category failed for %s: %s", hash[:12], exc)
             return False
 
     def pause_torrent(self, hash: str) -> bool:
@@ -101,7 +105,8 @@ class QBittorrentClient(AbstractTorrentClient):
             try:
                 self._req("POST", "/api/v2/torrents/pause", data={"hashes": hash})
                 return True
-            except Exception:
+            except Exception as exc:
+                log.warning("qBit pause failed for %s: %s", hash[:12], exc)
                 return False
 
     def resume_torrent(self, hash: str) -> bool:
@@ -116,7 +121,8 @@ class QBittorrentClient(AbstractTorrentClient):
             try:
                 self._req("POST", "/api/v2/torrents/resume", data={"hashes": hash})
                 return True
-            except Exception:
+            except Exception as exc:
+                log.warning("qBit resume failed for %s: %s", hash[:12], exc)
                 return False
 
     def get_torrent_properties(self, hash: str) -> dict:
@@ -159,7 +165,8 @@ class QBittorrentClient(AbstractTorrentClient):
                 data={"hashes": hash, "deleteFiles": str(delete_files).lower()},
             )
             return True
-        except requests.HTTPError:
+        except requests.HTTPError as exc:
+            log.warning("qBit delete failed for %s: %s", hash[:12], exc)
             return False
 
     def test_connection(self) -> bool:
@@ -167,5 +174,6 @@ class QBittorrentClient(AbstractTorrentClient):
         try:
             self._login()
             return True
-        except Exception:
+        except Exception as exc:
+            log.warning("qBit test_connection failed: %s", exc)
             return False

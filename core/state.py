@@ -36,11 +36,15 @@ class StateManager:
             log.warning(f"Could not set SQLite pragmas: {exc}")
         self._init_db()
 
-    def __del__(self):
+    def close(self):
+        """L-03: explicitly close the SQLite connection."""
         try:
             self._db.close()
         except Exception:
             pass
+
+    def __del__(self):
+        self.close()
 
     # ------------------------------------------------------------------
     # Setup

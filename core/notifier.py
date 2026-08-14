@@ -51,8 +51,8 @@ class Notifier:
             payload["expire"] = 3600
         try:
             requests.post(PUSHOVER_API, data=payload, timeout=10)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Pushover notification failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Event methods — buffer in digest mode, send immediately otherwise

@@ -106,6 +106,19 @@ class AbstractTorrentClient(ABC):
     def get_torrent_trackers(self, hash: str) -> list[dict]:
         """Return tracker list: [{url, status, ...}, ...]."""
 
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+
+    def close(self):
+        """L-20: close the underlying HTTP session to release sockets."""
+        session = getattr(self, "session", None)
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+
 
 def build_torrent_client(config: AppConfig) -> AbstractTorrentClient:
     """

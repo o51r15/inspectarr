@@ -109,8 +109,8 @@ class LogSummarizer:
                             entries.append(entry)
                     except json.JSONDecodeError:
                         continue
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Failed to read log entries for summary: %s", exc)
         return entries
 
     def _plain_summary(self, data: dict) -> str:
@@ -167,5 +167,5 @@ class LogSummarizer:
                 "message": message,
                 "priority": self.push.priority,
             }, timeout=10)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Pushover summary notification failed: %s", exc)

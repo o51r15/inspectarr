@@ -1,3 +1,4 @@
+import sys
 import threading
 import json
 from datetime import datetime, timezone, timedelta
@@ -228,8 +229,8 @@ class Scheduler:
         if self._state:
             try:
                 self._state.save_run(result)
-            except Exception:
-                pass  # persistence failure must never affect scan operation
+            except Exception as db_exc:
+                print(f"DB logging failed (save_run): {db_exc}", file=sys.stderr)
 
         # After each scan cycle, run auto-manage (every scan) and check reorder (interval-gated).
         self._maybe_auto_manage()
@@ -273,8 +274,8 @@ class Scheduler:
                         "level": "ERROR", "event": "prowlarr_auto_manage_failed",
                         "reason": str(exc),
                     })
-                except Exception:
-                    pass
+                except Exception as db_exc:
+                    print(f"DB logging failed (auto_manage): {db_exc}", file=sys.stderr)
 
     def _maybe_reorder(self):
         """
@@ -336,8 +337,8 @@ class Scheduler:
                         "level": "ERROR", "event": "prowlarr_auto_reorder_failed",
                         "reason": str(exc),
                     })
-                except Exception:
-                    pass
+                except Exception as db_exc:
+                    print(f"DB logging failed (auto_reorder): {db_exc}", file=sys.stderr)
 
     def _maybe_summary(self):
         """
@@ -381,8 +382,8 @@ class Scheduler:
                         "event": "log_summary_failed",
                         "reason": str(exc),
                     })
-                except Exception:
-                    pass
+                except Exception as db_exc:
+                    print(f"DB logging failed (log_summary): {db_exc}", file=sys.stderr)
 
     def _get_interval(self) -> int:
         try:
