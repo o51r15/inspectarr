@@ -35,6 +35,20 @@
       <!-- PANE: Connections -->
       <div class="settings-pane active" data-pane="connections">
         <div class="form-section">
+          <div class="form-section-title">Torrent Client</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Active Client</label>
+              <select name="torrent_client" id="torrent_client" onchange="toggleTorrentPanes()">
+                <option value="qbittorrent" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'qbittorrent' else '' }}>qBittorrent</option>
+                <option value="transmission" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'transmission' else '' }}>Transmission</option>
+                <option value="deluge" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'deluge' else '' }}>Deluge</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section torrent-pane" id="pane-qbittorrent">
           <div class="form-section-title">qBittorrent</div>
           <div class="form-row">
             <div class="form-group">
@@ -54,6 +68,50 @@
             <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
               <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('qbit')">Test Connection</button>
               <span id="test-qbit-result" class="hint"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section torrent-pane" id="pane-transmission">
+          <div class="form-section-title">Transmission</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>URL</label>
+              <input type="text" name="transmission_url" value="{{ cfg.get('transmission',{}).get('url','') }}" placeholder="http://192.168.1.100:9091">
+            </div>
+            <div class="form-group">
+              <label>Username</label>
+              <input type="text" name="transmission_username" value="{{ cfg.get('transmission',{}).get('username','') }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" name="transmission_password" value="{{ cfg.get('transmission',{}).get('password','') }}">
+            </div>
+            <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('transmission')">Test Connection</button>
+              <span id="test-transmission-result" class="hint"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section torrent-pane" id="pane-deluge">
+          <div class="form-section-title">Deluge</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>URL</label>
+              <input type="text" name="deluge_url" value="{{ cfg.get('deluge',{}).get('url','') }}" placeholder="http://192.168.1.100:8112">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" name="deluge_password" value="{{ cfg.get('deluge',{}).get('password','') }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="testConnection('deluge')">Test Connection</button>
+              <span id="test-deluge-result" class="hint"></span>
             </div>
           </div>
         </div>
@@ -865,10 +923,22 @@
     markDirty();
   }
 
+  // ---- Torrent client pane toggle ----
+  function toggleTorrentPanes() {
+    const active = document.getElementById('torrent_client').value;
+    document.querySelectorAll('.torrent-pane').forEach(p => {
+      p.style.display = p.id === 'pane-' + active ? '' : 'none';
+    });
+    markDirty();
+  }
+  toggleTorrentPanes();
+
   // ---- Test connections ----
   function testConnection(which) {
     const map = {
-      qbit:   {url:'qbit_url', extra:{username:'qbit_username', password:'qbit_password'}, endpoint:'/config/test/qbit'},
+      qbit:         {url:'qbit_url', extra:{username:'qbit_username', password:'qbit_password'}, endpoint:'/config/test/qbit'},
+      transmission: {url:'transmission_url', extra:{username:'transmission_username', password:'transmission_password'}, endpoint:'/config/test/transmission'},
+      deluge:       {url:'deluge_url', extra:{password:'deluge_password'}, endpoint:'/config/test/deluge'},
       sonarr: {url:'sonarr_url', key:'sonarr_api_key', endpoint:'/config/test/sonarr'},
       radarr: {url:'radarr_url', key:'radarr_api_key', endpoint:'/config/test/radarr'},
       lidarr: {url:'lidarr_url', key:'lidarr_api_key', endpoint:'/config/test/lidarr'},
@@ -879,8 +949,8 @@
     const body = { url: document.querySelector(`[name="${cfg.url}"]`).value };
     if (cfg.key)   body.api_key = document.querySelector(`[name="${cfg.key}"]`).value;
     if (cfg.extra) {
-      body.username = document.querySelector(`[name="${cfg.extra.username}"]`).value;
-      body.password = document.querySelector(`[name="${cfg.extra.password}"]`).value;
+      if (cfg.extra.username) body.username = document.querySelector(`[name="${cfg.extra.username}"]`).value;
+      if (cfg.extra.password) body.password = document.querySelector(`[name="${cfg.extra.password}"]`).value;
     }
     fetch(cfg.endpoint, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),

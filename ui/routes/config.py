@@ -320,10 +320,20 @@ def _form_to_config(form, existing: dict) -> dict:
         }
 
     return {
+        "torrent_client": form.get("torrent_client", "qbittorrent"),
         "qbittorrent": {
             "url":      form.get("qbit_url", ""),
             "username": form.get("qbit_username", ""),
             "password": form.get("qbit_password", ""),
+        },
+        "transmission": {
+            "url":      form.get("transmission_url", ""),
+            "username": form.get("transmission_username", ""),
+            "password": form.get("transmission_password", ""),
+        },
+        "deluge": {
+            "url":      form.get("deluge_url", ""),
+            "password": form.get("deluge_password", ""),
         },
         "arrs": {
             "sonarr": {
