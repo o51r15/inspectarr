@@ -39,7 +39,7 @@
           <div class="form-row">
             <div class="form-group">
               <label>Active Client</label>
-              <select name="torrent_client" id="torrent_client" onchange="toggleTorrentPanes()">
+              <select name="torrent_client" id="torrent_client" onchange="toggleTorrentPanes(true)">
                 <option value="qbittorrent" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'qbittorrent' else '' }}>qBittorrent</option>
                 <option value="transmission" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'transmission' else '' }}>Transmission</option>
                 <option value="deluge" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'deluge' else '' }}>Deluge</option>
@@ -924,14 +924,14 @@
   }
 
   // ---- Torrent client pane toggle ----
-  function toggleTorrentPanes() {
+  function toggleTorrentPanes(fromUser) {
     const active = document.getElementById('torrent_client').value;
     document.querySelectorAll('.torrent-pane').forEach(p => {
       p.style.display = p.id === 'pane-' + active ? '' : 'none';
     });
-    markDirty();
+    if (fromUser) markDirty();
   }
-  toggleTorrentPanes();
+  toggleTorrentPanes(false);
 
   // ---- Test connections ----
   function testConnection(which) {
