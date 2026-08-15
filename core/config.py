@@ -79,12 +79,10 @@ class StateConfig:
 
 
 @dataclass
-class PushoverConfig:
+class AppriseConfig:
     enabled: bool = False
-    app_token: str = ""
-    user_key: str = ""
+    urls: list[str] = field(default_factory=list)
     notify_on: list[str] = field(default_factory=lambda: ["action", "error"])
-    priority: int = 0
 
 
 @dataclass
@@ -102,7 +100,7 @@ class SummaryConfig:
 
 @dataclass
 class NotificationsConfig:
-    pushover: PushoverConfig
+    apprise: AppriseConfig = field(default_factory=AppriseConfig)
     digest: DigestConfig = field(default_factory=DigestConfig)
     summary: SummaryConfig = field(default_factory=SummaryConfig)
 
@@ -120,6 +118,8 @@ class OllamaConfig:
     model: str = ""
     timeout: int = 120
     cache_ttl_hours: int = 24
+    system_prompt: str = ""         # empty = use built-in default
+    update_check_hours: int = 24    # 0 = disable update checks
 
 
 @dataclass
@@ -281,16 +281,18 @@ def _parse_config(raw: dict) -> AppConfig:
 
     # Notifications
     notif_raw = raw.get("notifications", {})
-    push_raw = notif_raw.get("pushover", {})
+    app_raw = notif_raw.get("apprise", {})
     dig_raw = notif_raw.get("digest", {})
     sum_raw = notif_raw.get("summary", {})
+    # Normalize urls: accept string (single URL) or list
+    apprise_urls = app_raw.get("urls", [])
+    if isinstance(apprise_urls, str):
+        apprise_urls = [apprise_urls] if apprise_urls.strip() else []
     notif_cfg = NotificationsConfig(
-        pushover=PushoverConfig(
-            enabled=push_raw.get("enabled", False),
-            app_token=push_raw.get("app_token", ""),
-            user_key=push_raw.get("user_key", ""),
-            notify_on=push_raw.get("notify_on", ["action", "error"]),
-            priority=push_raw.get("priority", 0),
+        apprise=AppriseConfig(
+            enabled=app_raw.get("enabled", False),
+            urls=[u for u in apprise_urls if u and u.strip()],
+            notify_on=app_raw.get("notify_on", ["action", "error"]),
         ),
         digest=DigestConfig(
             enabled=dig_raw.get("enabled", False),
@@ -356,6 +358,8 @@ def _parse_config(raw: dict) -> AppConfig:
             model=o_raw.get("model", ""),
             timeout=o_raw.get("timeout", 120),
             cache_ttl_hours=o_raw.get("cache_ttl_hours", 24),
+            system_prompt=o_raw.get("system_prompt", ""),
+            update_check_hours=int(o_raw.get("update_check_hours", 24)),
         ),
         auto_manage=AutoManageConfig(
             enabled=am_raw.get("enabled", False),

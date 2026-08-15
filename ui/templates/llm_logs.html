@@ -4,6 +4,14 @@
 
 {% block content %}
 
+<div id="ollama-update-banner" class="form-section" style="display:none;border-left:3px solid var(--warning, #f59e0b)">
+  <p style="margin:0;display:flex;align-items:center;gap:8px">
+    <span class="badge badge-warning">Update available</span>
+    <span>A newer version of your Ollama model <code id="ollama-update-model"></code> is available.
+    Run <code>ollama pull &lt;model&gt;</code> on your Ollama host to update.</span>
+  </p>
+</div>
+
 {% if error %}
   <div class="form-section">
     <p class="text-error">{{ error }}</p>
@@ -24,7 +32,6 @@
     {% if latest.cache_hit %}<span class="badge badge-dim">cache hit</span>{% endif %}
   </p>
   <table style="width:100%;border-collapse:collapse">
-    <caption class="sr-only">LLM scoring report card</caption>
     <thead>
       <tr style="text-align:left;border-bottom:1px solid var(--border)">
         <th style="padding:8px">Indexer</th>
@@ -87,7 +94,6 @@
 <div class="form-section">
   <div class="form-section-title">Scoring Run History</div>
   <table style="width:100%;border-collapse:collapse">
-    <caption class="sr-only">LLM scoring run history</caption>
     <thead>
       <tr style="text-align:left;border-bottom:1px solid var(--border)">
         <th style="padding:8px">Timestamp</th>
@@ -117,6 +123,18 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+// Check for Ollama model updates
+fetch('/config/ollama/update-check')
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok && d.update_available) {
+      document.getElementById('ollama-update-model').textContent = d.model || '';
+      document.getElementById('ollama-update-banner').style.display = '';
+    }
+  })
+  .catch(() => {});
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 let trendChart = null;

@@ -1,10 +1,10 @@
 """
-core/summarizer.py — Daily/weekly log summary via Pushover + optional Ollama
+core/summarizer.py — Daily/weekly log summary via Apprise + optional Ollama
 
 Queries recent run_history and action log entries, builds a summary, and
-sends it as a single Pushover notification. If Ollama is configured and
-reachable, the summary is narrated by the LLM for a plain-English digest.
-Otherwise falls back to a structured plain-text summary.
+sends it via Apprise. If Ollama is configured and reachable, the summary
+is narrated by the LLM for a plain-English digest. Otherwise falls back
+to a structured plain-text summary.
 
 Called by the scheduler on a daily or weekly cadence (configurable).
 Never raises — all failures are logged and swallowed.
@@ -14,11 +14,10 @@ import logging
 import re
 from datetime import datetime, timezone, timedelta
 
+import apprise
 import requests
 
 log = logging.getLogger("inspectarr")
-
-PUSHOVER_API = "https://api.pushover.net/1/messages.json"
 
 
 class LogSummarizer:
@@ -26,18 +25,22 @@ class LogSummarizer:
 
     def __init__(self, config):
         self.cfg = config
-        self.push = config.notifications.pushover
+        self.apprise_cfg = config.notifications.apprise
         self.summary = config.notifications.summary
         self._ollama_url = config.prowlarr.ollama.url or ""
         self._ollama_model = config.prowlarr.ollama.model or ""
         self._ollama_timeout = config.prowlarr.ollama.timeout
+        # Build Apprise instance
+        self._apprise = apprise.Apprise()
+        for url in self.apprise_cfg.urls:
+            self._apprise.add(url)
 
     def generate_and_send(self, state) -> bool:
         """
-        Build a summary from recent data and send via Pushover.
+        Build a summary from recent data and send via Apprise.
         Returns True if sent, False if skipped or failed.
         """
-        if not self.summary.enabled or not self.push.enabled:
+        if not self.summary.enabled or not self.apprise_cfg.enabled:
             return False
 
         window_hours = 168 if self.summary.schedule == "weekly" else 24
@@ -136,7 +139,7 @@ class LogSummarizer:
         prompt = (
             f"You are writing a {label.lower()} summary notification for a torrent "
             f"watchdog called inspectarr. Summarize the following activity data into "
-            f"a brief, readable Pushover notification (max 500 chars). Use plain "
+            f"a brief, readable notification (max 500 chars). Use plain "
             f"language, no markdown. Highlight anything unusual.\n\n"
             f"Data:\n{json.dumps(data, indent=2, default=str)}"
         )
@@ -157,15 +160,9 @@ class LogSummarizer:
             return None
 
     def _send(self, title: str, message: str):
-        if not self.push.enabled:
+        if not self.apprise_cfg.enabled or not self.apprise_cfg.urls:
             return
         try:
-            requests.post(PUSHOVER_API, data={
-                "token": self.push.app_token,
-                "user":  self.push.user_key,
-                "title": title,
-                "message": message,
-                "priority": self.push.priority,
-            }, timeout=10)
+            self._apprise.notify(title=title, body=message)
         except Exception as exc:
-            log.warning("Pushover summary notification failed: %s", exc)
+            log.warning("Apprise summary notification failed: %s", exc)

@@ -101,21 +101,25 @@ state:
   db_file: ./data/inspectarr.db
 
 # ---------------------------------------------------------------------------
-# Notifications — Pushover
-# Remove any event types from notify_on that you don't want alerts for.
-# Priority: -2=silent, -1=quiet, 0=normal, 1=high, 2=emergency
+# Notifications — Apprise (supports 100+ services)
+# URLs follow Apprise format: https://github.com/caronc/apprise/wiki
+# Examples:
+#   - pover://user@token                      (Pushover)
+#   - tgram://bottoken/ChatID                  (Telegram)
+#   - discord://webhook_id/webhook_token       (Discord)
+#   - slack://tokenA/tokenB/tokenC/#channel    (Slack)
 # ---------------------------------------------------------------------------
 notifications:
-  pushover:
-    enabled: false                  # Set to true and fill credentials to activate
-    app_token: your_pushover_app_token
-    user_key:  your_pushover_user_key
+  apprise:
+    enabled: false                  # Set to true and add URLs to activate
+    urls:
+      # - pover://user@token
+      # - tgram://bottoken/ChatID
     notify_on:
       - action                      # A torrent was deleted and blocklisted
       - error                       # Any API failure or unhandled exception
       - startup                     # inspectarr started successfully
       - dry_run                     # A match was found but dry_run prevented action
-    priority: 0
   # Notification digest — batch notifications instead of sending individually
   digest:
     enabled: false
@@ -159,7 +163,6 @@ prowlarr:
   api_key: ~
   base_priority: 10            # Best-scoring torrent indexer gets this priority; others count up from here
   reorder_interval_hours: 24   # How often to auto-reorder (runs via web scheduler)
-  history_window_days: 90      # Reserved for future use (not yet consumed by scorer)
   min_grabs_before_scoring: 10 # Minimum history records before scoring an indexer
   scoring:
     response_time_weight: 0.25   # Weight for response time sub-score
@@ -182,6 +185,8 @@ prowlarr:
     model: ""                    # e.g. gemma3:latest — must be set explicitly
     timeout: 120                 # seconds — hard cutoff per scoring run
     cache_ttl_hours: 24          # How long to cache LLM scoring results
+    system_prompt: ""            # Custom system prompt (empty = built-in default)
+    update_check_hours: 24       # Check for model updates every N hours (0 = disable)
   # Automated indexer management
   # When enabled, indexers that drop below disable_threshold for consecutive_runs
   # scoring cycles are automatically disabled in Prowlarr, then re-enabled after

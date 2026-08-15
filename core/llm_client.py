@@ -101,6 +101,7 @@ def ollama_score_indexers(
     ollama_url: str,
     model: str,
     timeout: int = 120,
+    custom_prompt: str = "",
 ) -> dict[int, dict]:
     """
     Send all indexer data to Ollama in a single batch prompt.
@@ -111,8 +112,9 @@ def ollama_score_indexers(
     if not ollama_url or not model or not indexer_data:
         return {}
 
+    system_prompt = custom_prompt.strip() if custom_prompt and custom_prompt.strip() else SYSTEM_PROMPT
     prompt = (
-        SYSTEM_PROMPT
+        system_prompt
         + "\nIndexer data:\n"
         + json.dumps(indexer_data, indent=2)
     )

@@ -33,6 +33,7 @@ from ui.routes.stats import stats_bp
 from ui.routes.system import system_bp
 from ui.routes.webhooks import webhooks_bp
 from ui.routes.llm_logs import llm_logs_bp
+from ui.routes.api import api_bp
 
 
 def parse_args() -> argparse.Namespace:
@@ -119,6 +120,7 @@ height:100vh;margin:0;background:#0f1117;color:#e2e8f0}
     app.register_blueprint(system_bp)
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(llm_logs_bp)
+    app.register_blueprint(api_bp)
 
     return app
 

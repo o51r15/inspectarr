@@ -1,16 +1,16 @@
 import logging
-import requests
+import re
 from typing import Optional
 
-PUSHOVER_API = "https://api.pushover.net/1/messages.json"
+import apprise
+import requests
 
 log = logging.getLogger("inspectarr")
 
 
 class Notifier:
     """
-    Dispatches Pushover notifications.
-    Notification failures are swallowed — they never crash the main flow.
+    Dispatches notifications via Apprise (supports 100+ services).
 
     Digest mode (notifications.digest.enabled):
       Instead of sending per-event notifications, events are buffered in
@@ -21,12 +21,16 @@ class Notifier:
     """
 
     def __init__(self, config):
-        self.cfg = config.notifications.pushover
+        self.cfg = config.notifications.apprise
         self.digest_cfg = config.notifications.digest
         self._ollama_url = config.prowlarr.ollama.url if config.prowlarr.ollama.url else ""
         self._ollama_model = config.prowlarr.ollama.model if config.prowlarr.ollama.model else ""
         self._ollama_timeout = config.prowlarr.ollama.timeout
         self._buffer: list[dict] = []
+        # Build the Apprise instance once
+        self._apprise = apprise.Apprise()
+        for url in self.cfg.urls:
+            self._apprise.add(url)
 
     @property
     def _digest_mode(self) -> bool:
@@ -35,24 +39,13 @@ class Notifier:
     def _should(self, event_type: str) -> bool:
         return self.cfg.enabled and event_type in self.cfg.notify_on
 
-    def _send(self, title: str, message: str, priority: Optional[int] = None):
-        if not self.cfg.enabled:
+    def _send(self, title: str, message: str):
+        if not self.cfg.enabled or not self.cfg.urls:
             return
-        p = priority if priority is not None else self.cfg.priority
-        payload = {
-            "token": self.cfg.app_token,
-            "user":  self.cfg.user_key,
-            "title": title,
-            "message": message,
-            "priority": p,
-        }
-        if p == 2:
-            payload["retry"]  = 60
-            payload["expire"] = 3600
         try:
-            requests.post(PUSHOVER_API, data=payload, timeout=10)
+            self._apprise.notify(title=title, body=message)
         except Exception as exc:
-            log.warning("Pushover notification failed: %s", exc)
+            log.warning("Apprise notification failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Event methods — buffer in digest mode, send immediately otherwise
@@ -107,13 +100,12 @@ class Notifier:
         self._send(
             "inspectarr: Torrent removed",
             f"{torrent_name}\nFiles: {files}\n"
-            f"{app_name.capitalize()}: {arr_status}  |  qBit: {qbit_status}",
+            f"{app_name.capitalize()}: {arr_status}  |  Client: {qbit_status}",
         )
 
     def notify_error(self, context: str, reason: str):
         if not self._should("error"):
             return
-        p = max(self.cfg.priority, 0)
         if self._digest_mode:
             self._buffer.append({
                 "type": "error",
@@ -121,17 +113,15 @@ class Notifier:
                 "reason": reason,
             })
             return
-        self._send("inspectarr: Error", f"{context}\n{reason}", priority=p)
+        self._send("inspectarr: Error", f"{context}\n{reason}")
 
     def notify_retry_exhausted(self, torrent_name: str, hash: str, attempts: int):
         """Always immediate — retry exhaustion is critical."""
         if not self._should("error"):
             return
-        p = max(self.cfg.priority, 0)
         self._send(
             "inspectarr: Retry exhausted",
             f"{torrent_name}\nHash: {hash[:12]}...\nFailed after {attempts} attempts.",
-            priority=p,
         )
 
     # ------------------------------------------------------------------
@@ -196,7 +186,7 @@ class Notifier:
         import json
         prompt = (
             "You are a concise notification writer for a torrent watchdog called inspectarr. "
-            "Summarize the following scan events into a brief, readable Pushover notification "
+            "Summarize the following scan events into a brief, readable notification "
             "(max 500 chars). Use plain language, no markdown. Group by event type.\n\n"
             f"Events:\n{json.dumps(events, indent=2)}"
         )
@@ -210,8 +200,6 @@ class Notifier:
                 log.warning("Digest Ollama returned HTTP %d", resp.status_code)
                 return None
             text = resp.json().get("response", "").strip()
-            # Strip any <think> blocks from reasoning models
-            import re
             text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
             return text if text else None
         except Exception as exc:

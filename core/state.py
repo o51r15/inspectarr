@@ -395,16 +395,6 @@ class StateManager:
             "timestamp":    row["actioned_at"],
         }
 
-    def get_flagged_history(self, limit: int = 50) -> list[dict]:
-        """Return the most recent flagged torrents from processed_hashes."""
-        with self._lock, self._conn() as conn:
-            rows = conn.execute("""
-                SELECT torrent_name, rule_name, actioned_at, action
-                FROM processed_hashes
-                ORDER BY actioned_at DESC LIMIT ?
-            """, (limit,)).fetchall()
-        return [dict(r) for r in rows]
-
     def get_last_detection(self) -> dict | None:
         """
         Return the last_flagged dict from the most recent scan that had

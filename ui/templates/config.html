@@ -39,7 +39,7 @@
           <div class="form-row">
             <div class="form-group">
               <label>Active Client</label>
-              <select name="torrent_client" id="torrent_client" onchange="toggleTorrentPanes(true)">
+              <select name="torrent_client" id="torrent_client" onchange="toggleTorrentPanes()">
                 <option value="qbittorrent" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'qbittorrent' else '' }}>qBittorrent</option>
                 <option value="transmission" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'transmission' else '' }}>Transmission</option>
                 <option value="deluge" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'deluge' else '' }}>Deluge</option>
@@ -338,7 +338,18 @@
         </div>
 
         <div class="form-section">
-          <div class="form-section-title">AI Model (Ollama)</div>
+          <div class="form-section-title" style="display:flex;align-items:center;gap:8px">
+            AI Model (Ollama)
+            <span id="ollama-update-badge" class="badge badge-warning" style="display:none;cursor:pointer"
+                  onclick="document.getElementById('ollama-update-info').style.display='block'"
+                  title="A newer version of this model is available">Update available</span>
+          </div>
+          <div id="ollama-update-info" class="hint" style="display:none;margin-bottom:0.5rem;padding:8px;background:var(--bg-hover);border-radius:6px">
+            ⬆ A newer version of your Ollama model is available. Open your Ollama host and run
+            <code>ollama pull &lt;model&gt;</code> to update.
+            <button type="button" class="btn btn-ghost btn-sm" style="margin-left:8px"
+                    onclick="this.parentElement.style.display='none'">Dismiss</button>
+          </div>
           <p class="hint" style="margin-bottom:0.75rem">
             Select which Ollama model to use for AI-powered indexer scoring and analysis.
             Requires a valid Ollama URL configured above.
@@ -357,6 +368,97 @@
               <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn" onclick="applyOllamaModel()" disabled>Apply</button>
               <span id="ollama-model-status" class="hint"></span>
             </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Scoring Weights &amp; Multipliers</span>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="resetScoringDefaults()"
+                    title="Reset all weights and multipliers to defaults">Reset to Defaults</button>
+          </div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            The four scoring weights must sum to 1.0. Failure multipliers control how heavily each failure type counts.
+          </p>
+          {% set sc = cfg.get('prowlarr',{}).get('scoring',{}) %}
+          <div class="form-row form-row-4" style="margin-bottom:0.75rem">
+            <div class="form-group">
+              <label>Response Time</label>
+              <input type="number" name="scoring_response_time_weight" step="0.05" min="0" max="1"
+                     value="{{ sc.get('response_time_weight', 0.25) }}" data-default="0.25">
+            </div>
+            <div class="form-group">
+              <label>Failure Rate</label>
+              <input type="number" name="scoring_failure_rate_weight" step="0.05" min="0" max="1"
+                     value="{{ sc.get('failure_rate_weight', 0.30) }}" data-default="0.30">
+            </div>
+            <div class="form-group">
+              <label>Malicious</label>
+              <input type="number" name="scoring_malicious_weight" step="0.05" min="0" max="1"
+                     value="{{ sc.get('malicious_weight', 0.20) }}" data-default="0.20">
+            </div>
+            <div class="form-group">
+              <label>Grab Success</label>
+              <input type="number" name="scoring_grab_success_weight" step="0.05" min="0" max="1"
+                     value="{{ sc.get('grab_success_weight', 0.25) }}" data-default="0.25">
+            </div>
+          </div>
+          <div class="form-row form-row-4" style="margin-bottom:0.75rem">
+            <div class="form-group">
+              <label>Auth Failure ×</label>
+              <input type="number" name="scoring_auth_failure_mult" step="0.5" min="0"
+                     value="{{ sc.get('auth_failure_mult', 3.0) }}" data-default="3.0">
+            </div>
+            <div class="form-group">
+              <label>Grab Failure ×</label>
+              <input type="number" name="scoring_grab_failure_mult" step="0.5" min="0"
+                     value="{{ sc.get('grab_failure_mult', 2.0) }}" data-default="2.0">
+            </div>
+            <div class="form-group">
+              <label>Query Failure ×</label>
+              <input type="number" name="scoring_query_failure_mult" step="0.5" min="0"
+                     value="{{ sc.get('query_failure_mult', 1.0) }}" data-default="1.0">
+            </div>
+            <div class="form-group">
+              <label>RSS Failure ×</label>
+              <input type="number" name="scoring_rss_failure_mult" step="0.5" min="0"
+                     value="{{ sc.get('rss_failure_mult', 0.5) }}" data-default="0.5">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Backoff Penalty</label>
+              <input type="number" name="scoring_backoff_penalty" step="5" min="0"
+                     value="{{ sc.get('backoff_penalty', 20) }}" data-default="20">
+              <div class="hint">Points deducted if indexer is in Prowlarr backoff</div>
+            </div>
+            <div class="form-group">
+              <label>Malicious Penalty (per hit)</label>
+              <input type="number" name="scoring_malicious_penalty_per_hit" step="5" min="0"
+                     value="{{ sc.get('malicious_penalty_per_hit', 10) }}" data-default="10">
+              <div class="hint">Points deducted per confirmed malicious torrent</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>AI Scoring Prompt</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="resetSystemPrompt()"
+                      title="Reset to the built-in default prompt">Reset to Default</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="saveSystemPrompt()">Save Prompt</button>
+              <span id="system-prompt-status" class="hint"></span>
+            </div>
+          </div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            The system prompt sent to Ollama when scoring indexers. Edit to customize scoring behavior.
+            Leave empty or click "Reset to Default" to use the built-in prompt.
+          </p>
+          <div class="form-group">
+            <textarea id="ollama-system-prompt" rows="12"
+                      style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap"
+                      placeholder="Loading…"></textarea>
           </div>
         </div>
 
@@ -401,27 +503,26 @@
       <!-- PANE: Notifications -->
       <div class="settings-pane" data-pane="notifications">
         <div class="form-section">
-          <div class="form-section-title">Pushover Notifications</div>
-          {% set push = cfg.get('notifications',{}).get('pushover',{}) %}
-          <div class="toggle-row">
-            <input type="checkbox" name="pushover_enabled" id="pushover_enabled"
-                   {{ 'checked' if push.get('enabled') else '' }}>
-            <label for="pushover_enabled">Enabled</label>
+          <div class="form-section-title">Apprise Notifications</div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener">Apprise</a> supports 100+ notification services.
+            Add one URL per line — e.g. <code>pover://user@token</code>, <code>tgram://bottoken/ChatID</code>, <code>discord://webhook_id/webhook_token</code>.
+          </p>
+          {% set appr = cfg.get('notifications',{}).get('apprise',{}) %}
+          <div class="toggle-row" style="margin-bottom:0.75rem">
+            <input type="checkbox" name="apprise_enabled" id="apprise_enabled"
+                   {{ 'checked' if appr.get('enabled') else '' }}>
+            <label for="apprise_enabled">Enabled</label>
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>App Token</label>
-              <input type="password" name="pushover_app_token" value="{{ push.get('app_token','') }}">
-            </div>
-            <div class="form-group">
-              <label>User Key</label>
-              <input type="password" name="pushover_user_key" value="{{ push.get('user_key','') }}">
-            </div>
+          <div class="form-group">
+            <label>Notification URLs (one per line)</label>
+            <textarea name="apprise_urls" rows="4" style="font-family:var(--font-mono);font-size:12px"
+                      placeholder="pover://user@token&#10;tgram://bottoken/ChatID">{{ appr.get('urls',[])|join('\n') }}</textarea>
           </div>
           <div class="flex gap-8 items-center" style="margin-bottom:0.75rem;">
-            <button type="button" class="btn btn-ghost btn-sm" onclick="testPushover()"
-                    title="Send a test notification to verify your Pushover credentials">Test Notification</button>
-            <span id="test-pushover-result" class="hint"></span>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="testApprise()"
+                    title="Send a test notification to verify your URLs">Test Notification</button>
+            <span id="test-apprise-result" class="hint"></span>
           </div>
           <div class="form-group mb-16">
             <label>Notify On</label>
@@ -429,19 +530,48 @@
               {% for evt in ['action','error','startup','dry_run'] %}
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text)">
                 <input type="checkbox" name="notify_on" value="{{ evt }}"
-                       {{ 'checked' if evt in push.get('notify_on',[]) else '' }}>
+                       {{ 'checked' if evt in appr.get('notify_on',[]) else '' }}>
                 {{ evt }}
               </label>
               {% endfor %}
             </div>
           </div>
-          <div class="form-group" style="max-width:200px">
-            <label>Priority</label>
-            <select name="pushover_priority">
-              {% for val, label in [(-2,'Silent'),(-1,'Quiet'),(0,'Normal'),(1,'High'),(2,'Emergency')] %}
-              <option value="{{ val }}" {{ 'selected' if push.get('priority',0) == val else '' }}>{{ label }}</option>
-              {% endfor %}
-            </select>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Notification Digest</div>
+          {% set dig = cfg.get('notifications',{}).get('digest',{}) %}
+          <div class="toggle-row" style="margin-bottom:0.75rem">
+            <input type="checkbox" name="digest_enabled" id="digest_enabled"
+                   {{ 'checked' if dig.get('enabled') else '' }}>
+            <label for="digest_enabled">Batch notifications into a single digest per scan</label>
+          </div>
+          <div class="toggle-row">
+            <input type="checkbox" name="digest_use_ollama" id="digest_use_ollama"
+                   {{ 'checked' if dig.get('use_ollama') else '' }}>
+            <label for="digest_use_ollama">Use Ollama to generate digest summaries</label>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Periodic Summary</div>
+          {% set summ = cfg.get('notifications',{}).get('summary',{}) %}
+          <div class="toggle-row" style="margin-bottom:0.75rem">
+            <input type="checkbox" name="summary_enabled" id="summary_enabled"
+                   {{ 'checked' if summ.get('enabled') else '' }}>
+            <label for="summary_enabled">Generate periodic activity summaries</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="max-width:200px">
+              <label>Schedule</label>
+              <select name="summary_schedule">
+                <option value="daily" {{ 'selected' if summ.get('schedule','daily') == 'daily' else '' }}>Daily</option>
+                <option value="weekly" {{ 'selected' if summ.get('schedule') == 'weekly' else '' }}>Weekly</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <input type="checkbox" name="summary_use_ollama" id="summary_use_ollama"
+                   {{ 'checked' if summ.get('use_ollama', True) else '' }}>
+            <label for="summary_use_ollama">Use Ollama for natural-language summaries</label>
           </div>
         </div>
       </div>
@@ -924,14 +1054,14 @@
   }
 
   // ---- Torrent client pane toggle ----
-  function toggleTorrentPanes(fromUser) {
+  function toggleTorrentPanes() {
     const active = document.getElementById('torrent_client').value;
     document.querySelectorAll('.torrent-pane').forEach(p => {
       p.style.display = p.id === 'pane-' + active ? '' : 'none';
     });
-    if (fromUser) markDirty();
+    markDirty();
   }
-  toggleTorrentPanes(false);
+  toggleTorrentPanes();
 
   // ---- Test connections ----
   function testConnection(which) {
@@ -973,18 +1103,76 @@
     .then(d => { el.textContent = d.message; el.style.color = d.ok ? 'var(--success)' : 'var(--error)'; });
   }
 
-  function testPushover() {
-    const app_token = document.querySelector('[name="pushover_app_token"]').value;
-    const user_key  = document.querySelector('[name="pushover_user_key"]').value;
-    const el        = document.getElementById('test-pushover-result');
-    el.textContent  = 'Sending…'; el.style.color = '';
-    fetch('/config/test/pushover', {
+  function testApprise() {
+    const urlsRaw = document.querySelector('[name="apprise_urls"]').value;
+    const urls    = urlsRaw.split('\n').map(u => u.trim()).filter(Boolean);
+    const el      = document.getElementById('test-apprise-result');
+    el.textContent = 'Sending…'; el.style.color = '';
+    fetch('/config/test/apprise', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({app_token, user_key}),
+      body: JSON.stringify({urls}),
     })
     .then(r => r.json())
     .then(d => { el.textContent = d.message; el.style.color = d.ok ? 'var(--success)' : 'var(--error)'; })
     .catch(() => { el.textContent = 'Request failed'; el.style.color = 'var(--error)'; });
+  }
+
+  // ---- Scoring weights reset ----
+  function resetScoringDefaults() {
+    document.querySelectorAll('[name^="scoring_"]').forEach(el => {
+      if (el.dataset.default) el.value = el.dataset.default;
+    });
+    // Mark form dirty
+    const savebar = document.getElementById('savebar');
+    if (savebar) savebar.classList.add('dirty');
+  }
+
+  // ---- System prompt management ----
+  function loadSystemPrompt() {
+    fetch('/config/ollama/system-prompt')
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          document.getElementById('ollama-system-prompt').value = d.prompt;
+        }
+      });
+  }
+
+  function saveSystemPrompt() {
+    const prompt = document.getElementById('ollama-system-prompt').value;
+    const el = document.getElementById('system-prompt-status');
+    el.textContent = 'Saving…'; el.style.color = '';
+    fetch('/config/ollama/system-prompt', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({prompt}),
+    })
+    .then(r => r.json())
+    .then(d => {
+      el.textContent = d.message;
+      el.style.color = d.ok ? 'var(--success)' : 'var(--error)';
+    })
+    .catch(() => { el.textContent = 'Request failed'; el.style.color = 'var(--error)'; });
+  }
+
+  function resetSystemPrompt() {
+    fetch('/config/ollama/system-prompt')
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          document.getElementById('ollama-system-prompt').value = d.default_prompt;
+          // Save the reset (empty string = use default)
+          fetch('/config/ollama/system-prompt', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({prompt: ''}),
+          })
+          .then(r => r.json())
+          .then(d2 => {
+            const el = document.getElementById('system-prompt-status');
+            el.textContent = d2.message || 'Reset to default';
+            el.style.color = 'var(--success)';
+          });
+        }
+      });
   }
 
   // ---- Backup management ----
@@ -1042,7 +1230,7 @@
   showPane = function(pane) {
     origShowPane(pane);
     if (pane === 'backups') loadBackups();
-    if (pane === 'indexers') loadOllamaModels();
+    if (pane === 'indexers') { loadOllamaModels(); loadSystemPrompt(); }
   };
 
   // ---- Ollama model selection ----
@@ -1092,8 +1280,32 @@
     .catch(() => { st.textContent = 'Request failed'; st.style.color = 'var(--error)'; });
   }
 
+  // ---- Ollama update check ----
+  function checkOllamaUpdate() {
+    fetch('/config/ollama/update-check')
+      .then(r => r.json())
+      .then(d => {
+        const badge = document.getElementById('ollama-update-badge');
+        if (d.ok && d.update_available) {
+          badge.style.display = '';
+          // Also update the sidebar nav item
+          const navItem = document.querySelector('[data-nav="indexers"]');
+          if (navItem && !navItem.querySelector('.update-dot')) {
+            const dot = document.createElement('span');
+            dot.className = 'update-dot';
+            dot.title = 'Ollama model update available';
+            dot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warning, #f59e0b);margin-left:6px';
+            navItem.appendChild(dot);
+          }
+        }
+      })
+      .catch(() => {}); // silently ignore if Ollama is not configured
+  }
+
   // Re-fire deferred hooks for the initial pane (wrapper + functions defined above)
   if (_initialPane === 'backups') loadBackups();
-  if (_initialPane === 'indexers') loadOllamaModels();
+  if (_initialPane === 'indexers') { loadOllamaModels(); loadSystemPrompt(); }
+  // Always check for Ollama updates on Settings page load
+  checkOllamaUpdate();
 </script>
 {% endblock %}

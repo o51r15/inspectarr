@@ -30,12 +30,31 @@ def _load_raw(config_path: str) -> dict:
 
 
 def _save_raw(config_path: str, data: dict):
-    """Write config directly to the file (preserves inode for Docker bind mounts)."""
+    """
+    L-17: Atomic config write — write to a temp file in the same directory,
+    fsync, then replace.  A crash mid-write can't corrupt the original.
+    """
+    import tempfile
     content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    with open(config_path, "w", encoding="utf-8") as f:
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
+    dir_name = os.path.dirname(os.path.abspath(config_path))
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, config_path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    try:
+        os.chmod(config_path, 0o600)
+    except OSError:
+        pass  # Windows doesn't support Unix permissions
+
 
 def _get_state(cfg):
     """
@@ -308,8 +327,21 @@ def _form_to_config(form, existing: dict) -> dict:
             "history_window_days":      _int(form.get("prowlarr_history_window"), 90),
             "min_grabs_before_scoring": _int(form.get("prowlarr_min_grabs"), 10),
         })
-        # Preserve the scoring sub-block exactly as-is; never reset it here.
-        if "scoring" in (existing.get("prowlarr") or {}):
+        # Save scoring weights from form fields if present, otherwise preserve existing
+        if "scoring_response_time_weight" in form:
+            prowlarr_block["scoring"] = {
+                "response_time_weight":      _float(form.get("scoring_response_time_weight"), 0.25),
+                "failure_rate_weight":       _float(form.get("scoring_failure_rate_weight"), 0.30),
+                "malicious_weight":          _float(form.get("scoring_malicious_weight"), 0.20),
+                "grab_success_weight":       _float(form.get("scoring_grab_success_weight"), 0.25),
+                "backoff_penalty":           _float(form.get("scoring_backoff_penalty"), 20.0),
+                "malicious_penalty_per_hit": _float(form.get("scoring_malicious_penalty_per_hit"), 10.0),
+                "auth_failure_mult":         _float(form.get("scoring_auth_failure_mult"), 3.0),
+                "grab_failure_mult":         _float(form.get("scoring_grab_failure_mult"), 2.0),
+                "query_failure_mult":        _float(form.get("scoring_query_failure_mult"), 1.0),
+                "rss_failure_mult":          _float(form.get("scoring_rss_failure_mult"), 0.5),
+            }
+        elif "scoring" in (existing.get("prowlarr") or {}):
             prowlarr_block["scoring"] = existing["prowlarr"]["scoring"]
         # Auto-manage from form fields
         prowlarr_block["auto_manage"] = {
@@ -389,13 +421,20 @@ def _form_to_config(form, existing: dict) -> dict:
         },
         "prowlarr": prowlarr_block,
         "notifications": {
-            "pushover": {
-                "enabled":   "pushover_enabled" in form,
-                "app_token": form.get("pushover_app_token", ""),
-                "user_key":  form.get("pushover_user_key", ""),
+            "apprise": {
+                "enabled":   "apprise_enabled" in form,
+                "urls":      [u.strip() for u in form.get("apprise_urls", "").split("\n") if u.strip()],
                 "notify_on": notify_on,
-                "priority":  _int(form.get("pushover_priority"), 0),
-            }
+            },
+            "digest": {
+                "enabled": "digest_enabled" in form,
+                "use_ollama": "digest_use_ollama" in form,
+            },
+            "summary": {
+                "enabled": "summary_enabled" in form,
+                "schedule": form.get("summary_schedule", "daily"),
+                "use_ollama": "summary_use_ollama" in form,
+            },
         },
     }
 
@@ -471,15 +510,17 @@ def prowlarr_save():
             "reorder_interval_hours": _int(data.get("reorder_interval_hours"), 24),
             "history_window_days":    _int(data.get("history_window_days"), 90),
             "min_grabs_before_scoring": _int(data.get("min_grabs_before_scoring"), 10),
-            # BUG-11: merge onto existing scoring block instead of replacing it,
-            # so keys without UI fields (grab_success_weight, *_mult) are preserved.
             "scoring": {
-                **dict(block.get("scoring", {}) or {}),
                 "response_time_weight":      _float(data.get("response_time_weight"), 0.25),
                 "failure_rate_weight":       _float(data.get("failure_rate_weight"), 0.30),
                 "malicious_weight":          _float(data.get("malicious_weight"), 0.20),
+                "grab_success_weight":       _float(data.get("grab_success_weight"), 0.25),
                 "backoff_penalty":           _float(data.get("backoff_penalty"), 20.0),
                 "malicious_penalty_per_hit": _float(data.get("malicious_penalty_per_hit"), 10.0),
+                "auth_failure_mult":         _float(data.get("auth_failure_mult"), 3.0),
+                "grab_failure_mult":         _float(data.get("grab_failure_mult"), 2.0),
+                "query_failure_mult":        _float(data.get("query_failure_mult"), 1.0),
+                "rss_failure_mult":          _float(data.get("rss_failure_mult"), 0.5),
             },
         })
         raw["prowlarr"] = block
@@ -568,6 +609,89 @@ def ollama_set_model():
         return jsonify({"ok": False, "message": safe_error(exc)})
 
 
+@config_bp.route("/config/ollama/system-prompt", methods=["GET"])
+def ollama_get_system_prompt():
+    """Return the current (or default) Ollama system prompt."""
+    from core.llm_client import SYSTEM_PROMPT
+    config_path = current_app.config["CONFIG_PATH"]
+    raw = _load_raw(config_path)
+    custom = raw.get("prowlarr", {}).get("ollama", {}).get("system_prompt", "")
+    return jsonify({
+        "ok": True,
+        "prompt": custom if custom else SYSTEM_PROMPT,
+        "is_default": not bool(custom),
+        "default_prompt": SYSTEM_PROMPT,
+    })
+
+
+@config_bp.route("/config/ollama/system-prompt", methods=["POST"])
+def ollama_set_system_prompt():
+    """Save or reset the Ollama system prompt."""
+    config_path = current_app.config["CONFIG_PATH"]
+    data = request.get_json(silent=True) or {}
+    prompt = data.get("prompt", "").strip()
+    try:
+        raw = _load_raw(config_path)
+        prowlarr = raw.setdefault("prowlarr", {})
+        ollama = prowlarr.setdefault("ollama", {})
+        # Empty string = reset to default (built-in prompt used at runtime)
+        ollama["system_prompt"] = prompt
+        _save_raw(config_path, raw)
+        msg = "System prompt reset to default" if not prompt else "System prompt saved"
+        return jsonify({"ok": True, "message": msg})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": safe_error(exc)})
+
+
+@config_bp.route("/config/ollama/update-check", methods=["GET"])
+def ollama_update_check():
+    """Check if the current Ollama model has an update available."""
+    import requests as req
+    config_path = current_app.config["CONFIG_PATH"]
+    raw = _load_raw(config_path)
+    ollama_url = raw.get("prowlarr", {}).get("ollama", {}).get("url", "")
+    model = raw.get("prowlarr", {}).get("ollama", {}).get("model", "")
+    if not ollama_url or not model:
+        return jsonify({"ok": False, "message": "Ollama not configured"})
+    try:
+        # Get local model digest
+        local_resp = req.post(
+            f"{ollama_url.rstrip('/')}/api/show",
+            json={"name": model},
+            timeout=15,
+        )
+        if local_resp.status_code != 200:
+            return jsonify({"ok": False, "message": f"Could not query local model: HTTP {local_resp.status_code}"})
+        local_data = local_resp.json()
+        local_digest = local_data.get("digest", "")
+        # Try to check the registry for the latest digest
+        # Ollama's /api/pull with stream=false in dry-run is not available,
+        # so we use the manifest approach: pull with stream and read first status
+        try:
+            pull_resp = req.post(
+                f"{ollama_url.rstrip('/')}/api/pull",
+                json={"name": model, "stream": False},
+                timeout=30,
+            )
+            if pull_resp.status_code == 200:
+                pull_data = pull_resp.json()
+                # If status is "success" immediately, model is up to date
+                status = pull_data.get("status", "")
+                if "up to date" in status.lower() or status == "success":
+                    return jsonify({"ok": True, "update_available": False, "model": model})
+                else:
+                    return jsonify({"ok": True, "update_available": True, "model": model,
+                                    "message": f"Update available for {model}"})
+        except Exception:
+            pass
+        # If pull check fails, just return the local info
+        return jsonify({"ok": True, "update_available": False, "model": model,
+                        "message": "Could not check registry — local model info returned",
+                        "digest": local_digest[:12] if local_digest else ""})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": safe_error(exc)})
+
+
 @config_bp.route("/config/prowlarr/toggle-indexer", methods=["POST"])
 def prowlarr_toggle_indexer():
     """Manually enable or disable an indexer in Prowlarr."""
@@ -612,32 +736,27 @@ def test_prowlarr():
         return jsonify({"ok": False, "message": safe_error(exc)})
 
 
-@config_bp.route("/config/test/pushover", methods=["POST"])
-def test_pushover():
-    """Send a test Pushover notification to verify credentials."""
-    import requests as req
-    body      = request.get_json(silent=True) or {}   # SEC-5
-    app_token = body.get("app_token", "")
-    user_key  = body.get("user_key", "")
-    if not app_token or not user_key:
-        return jsonify({"ok": False, "message": "App token and user key are required"})
+@config_bp.route("/config/test/apprise", methods=["POST"])
+def test_apprise():
+    """Send a test notification via Apprise to verify URLs."""
+    import apprise
+    body = request.get_json(silent=True) or {}   # SEC-5
+    urls = body.get("urls", [])
+    if isinstance(urls, str):
+        urls = [u.strip() for u in urls.split("\n") if u.strip()]
+    if not urls:
+        return jsonify({"ok": False, "message": "No notification URLs provided"})
     try:
-        resp = req.post(
-            "https://api.pushover.net/1/messages.json",
-            data={
-                "token":   app_token,
-                "user":    user_key,
-                "title":   "inspectarr",
-                "message": "Test notification — Pushover is configured correctly.",
-                "priority": 0,
-            },
-            timeout=10,
+        ap = apprise.Apprise()
+        for url in urls:
+            ap.add(url)
+        ok = ap.notify(
+            title="inspectarr",
+            body="Test notification — Apprise is configured correctly.",
         )
-        data = resp.json()
-        if data.get("status") == 1:
+        if ok:
             return jsonify({"ok": True, "message": "Test notification sent"})
-        errors = ", ".join(data.get("errors", ["Unknown error"]))
-        return jsonify({"ok": False, "message": errors})
+        return jsonify({"ok": False, "message": "Apprise failed to send — check your URLs"})
     except Exception as exc:
         return jsonify({"ok": False, "message": safe_error(exc)})
 
