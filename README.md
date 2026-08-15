@@ -26,7 +26,7 @@ Sonarr, Radarr, and Lidarr can blocklist individual releases — but only *after
 
 Inspectarr watches your torrent client's categories, finds downloads that match bad-file
 rules (`.exe` in a TV category, undersized files, suspicious filenames), blocklists
-them in Sonarr / Radarr / Lidarr, deletes the torrent, and notifies you via Pushover.
+them in Sonarr / Radarr / Lidarr, deletes the torrent, and notifies you via [Apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Discord, email, and 100+ services).
 Supports **qBittorrent**, **Transmission**, and **Deluge** — select your client in Settings
 and Inspectarr handles the rest. Scans can be triggered by a polling schedule, incoming
 webhooks from your *arr apps, or both at the same time.
@@ -51,7 +51,7 @@ with content-hash caching to minimize redundant calls.
 - **Grab attribution** — tracks which indexer served each torrent, increments malicious-hit counters automatically
 - **Auto-reorder** — demotes bad indexers, promotes good ones, syncs to all connected apps
 - **Auto-manage indexers** — automatically disable indexers that consistently score below a health threshold, re-enable after a configurable cooldown
-- **Pushover notifications** — with optional Ollama-narrated digests and periodic log summaries (daily/weekly)
+- **Apprise notifications** — Pushover, Telegram, Discord, email, and [100+ services](https://github.com/caronc/apprise/wiki) with optional Ollama-narrated digests and periodic log summaries (daily/weekly)
 - **Full web UI** — dashboard, scheduler, torrents, indexer health, stats, settings, backups, system status, update checker
 - **Mobile responsive** — works on phone and tablet
 - **Docker-native** — single volume mount, GHCR images, non-root container, dev container CI

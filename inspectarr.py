@@ -4,7 +4,7 @@ inspectarr — torrent watchdog for *arr ecosystems
 
 Polls qBittorrent categories, evaluates downloads against configurable rules,
 blocklists bad releases in Sonarr (and future *arrs), deletes torrents + files,
-logs all actions to JSON Lines, and notifies via Pushover.
+logs all actions to JSON Lines, and notifies via Apprise (Pushover, Telegram, Discord, and 100+ services).
 
 Usage:
   python inspectarr.py                     # single scan run (default)
