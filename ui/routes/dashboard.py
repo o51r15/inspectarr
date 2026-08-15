@@ -7,14 +7,12 @@ dashboard_bp = Blueprint("dashboard", __name__)
 def index():
     scheduler = current_app.config["SCHEDULER"]
     status    = scheduler.get_status()
-    # Pass retention_days so the dashboard can show "in the last N days"
     try:
         from core.config import load_config
         cfg = load_config(current_app.config["CONFIG_PATH"])
         retention_days = cfg.logging.retention_days
     except Exception:
         retention_days = 30
-    # Get recent flagged torrents for the Historical tab
     state = current_app.config.get("STATE")
     flagged_history = []
     if state:
