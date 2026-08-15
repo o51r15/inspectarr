@@ -33,7 +33,7 @@ def api_status():
         return jsonify({
             "ok": True,
             "scheduler": {
-                "running": scheduler.is_running(),
+                "running": scheduler.running,
                 "interval_seconds": cfg.scanning.polling.interval_seconds,
                 "polling_enabled": cfg.scanning.polling.enabled,
                 "webhooks_enabled": cfg.scanning.webhooks.enabled,
@@ -59,7 +59,7 @@ def api_scan():
         if not scheduler:
             return jsonify({"ok": False, "message": "Scheduler not initialized"}), 503
 
-        scheduler.run_now()
+        scheduler.trigger()
         return jsonify({"ok": True, "message": "Scan triggered"})
     except Exception as exc:
         return jsonify({"ok": False, "message": safe_error(exc)}), 500
