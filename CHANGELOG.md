@@ -5,10 +5,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Unreleased]
-
----
-
 ## [v1.6.0] — 2026-08-16
 
 ### Added — UI Navigation Reorganization
