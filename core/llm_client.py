@@ -126,7 +126,6 @@ def ollama_score_indexers(
                 "model": model,
                 "prompt": prompt,
                 "stream": False,
-                "format": "json",
             },
             timeout=timeout,
         )
@@ -175,5 +174,7 @@ def ollama_score_indexers(
         log.info("Ollama scored %d indexer(s) successfully", len(results))
     else:
         log.warning("Ollama response parsed but contained no valid scores")
+        log.warning("Parsed items: %s", repr(parsed[:3]) if parsed else "[]")
+        log.warning("Raw Ollama response (first 2000 chars): %s", repr(raw_response[:2000]))
 
     return results
