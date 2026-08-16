@@ -40,7 +40,7 @@ def _build_stats_rows(config, state):
         try:
             from core.prowlarr import ProwlarrClient
             from core.indexer_scorer import IndexerScorer
-            prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_ken2
+            prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
             scorer = IndexerScorer(prowlarr, state, config.prowlarr)
             results = scorer.score_all(skip_ai=True)
             scored_data = {r["id"]: r for r in results}

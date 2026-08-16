@@ -64,7 +64,7 @@ def indexers_rescore_reorder():
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
         state    = _get_state(cfg)
         scorer   = IndexerScorer(prowlarr, state, cfg.prowlarr)
         scorer.score_all(skip_ai=False)
@@ -88,7 +88,7 @@ def indexers_sync_only():
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
         synced = prowlarr.sync_to_apps()
         return jsonify({
             "ok": True, "synced": synced,
@@ -112,7 +112,7 @@ def indexers_sync():
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
         state    = _get_state(cfg)
         scorer   = IndexerScorer(prowlarr, state, cfg.prowlarr)
         changed  = scorer.reorder()
@@ -144,7 +144,7 @@ def indexers_apply_priorities():
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
 
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
         all_indexers = prowlarr.get_torrent_indexers(include_disabled=True)
         idx_map = {i["id"]: i for i in all_indexers}
 
@@ -268,7 +268,7 @@ def indexers_trigger_scoring():
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr not enabled"}), 400
 
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
         state = _get_state(cfg)
         scorer = IndexerScorer(prowlarr, state, cfg.prowlarr)
         scored = scorer.score_all(skip_ai=False)
