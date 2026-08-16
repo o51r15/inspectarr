@@ -5,11 +5,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=o51r15
-Group=o51r15
-WorkingDirectory=/home/o51r15/scripts/inspectarr
-ExecStart=/home/o51r15/scripts/inspectarr/venv/bin/python web.py
-Environment=INSPECTARR_CONFIG=/home/o51r15/scripts/inspectarr/config.yaml
+User=inspectarr
+Group=inspectarr
+WorkingDirectory=/opt/inspectarr
+ExecStart=/opt/inspectarr/venv/bin/python web.py
+Environment=INSPECTARR_CONFIG=/opt/inspectarr/config.yaml
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
