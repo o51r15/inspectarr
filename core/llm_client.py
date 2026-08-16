@@ -113,19 +113,19 @@ def ollama_score_indexers(
         return {}
 
     system_prompt = custom_prompt.strip() if custom_prompt and custom_prompt.strip() else SYSTEM_PROMPT
-    prompt = (
-        system_prompt
-        + "\nIndexer data:\n"
-        + json.dumps(indexer_data, indent=2)
-    )
+    user_msg = "Score these indexers:\n" + json.dumps(indexer_data, indent=2)
 
     try:
         resp = requests.post(
-            f"{ollama_url.rstrip('/')}/api/generate",
+            f"{ollama_url.rstrip('/')}/api/chat",
             json={
                 "model": model,
-                "prompt": prompt,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_msg},
+                ],
                 "stream": False,
+                "format": "json",
             },
             timeout=timeout,
         )
@@ -143,7 +143,9 @@ def ollama_score_indexers(
         log.warning("Ollama scoring request failed: %s", exc)
         return {}
 
-    raw_response = data.get("response", "")
+    # /api/chat returns {"message": {"content": "..."}}, /api/generate returns {"response": "..."}
+    msg = data.get("message")
+    raw_response = msg.get("content", "") if isinstance(msg, dict) else data.get("response", "")
     if not raw_response:
         log.warning("Ollama returned empty response")
         return {}
