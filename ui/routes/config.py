@@ -31,29 +31,40 @@ def _load_raw(config_path: str) -> dict:
 
 def _save_raw(config_path: str, data: dict):
     """
-    L-17: Atomic config write — write to a temp file in the same directory,
-    fsync, then replace.  A crash mid-write can't corrupt the original.
+    L-17: Atomic config write — try temp-file-then-replace first (safest),
+    fall back to direct overwrite if the directory isn't writable (e.g.
+    Docker bind-mounted config.yaml where /app is read-only).
     """
     import tempfile
     content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
     dir_name = os.path.dirname(os.path.abspath(config_path))
-    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
+
+    # --- Attempt 1: atomic write via temp file in same dir ---
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, config_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except PermissionError:
+        # --- Attempt 2: direct overwrite (bind-mount safe) ---
+        with open(config_path, "w", encoding="utf-8") as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, config_path)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+
     try:
         os.chmod(config_path, 0o600)
     except OSError:
-        pass  # Windows doesn't support Unix permissions
+        pass  # Windows / container without chown support
 
 
 def _get_state(cfg):
