@@ -113,17 +113,18 @@ def ollama_score_indexers(
         return {}
 
     system_prompt = custom_prompt.strip() if custom_prompt and custom_prompt.strip() else SYSTEM_PROMPT
-    user_msg = "Score these indexers:\n" + json.dumps(indexer_data, indent=2)
+    prompt = (
+        system_prompt
+        + "\nIndexer data:\n"
+        + json.dumps(indexer_data, indent=2)
+    )
 
     try:
         resp = requests.post(
-            f"{ollama_url.rstrip('/')}/api/chat",
+            f"{ollama_url.rstrip('/')}/api/generate",
             json={
                 "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_msg},
-                ],
+                "prompt": prompt,
                 "stream": False,
                 "format": "json",
             },
@@ -143,9 +144,7 @@ def ollama_score_indexers(
         log.warning("Ollama scoring request failed: %s", exc)
         return {}
 
-    # /api/chat returns {"message": {"content": "..."}}, /api/generate returns {"response": "..."}
-    msg = data.get("message")
-    raw_response = msg.get("content", "") if isinstance(msg, dict) else data.get("response", "")
+    raw_response = data.get("response", "")
     if not raw_response:
         log.warning("Ollama returned empty response")
         return {}
@@ -176,7 +175,5 @@ def ollama_score_indexers(
         log.info("Ollama scored %d indexer(s) successfully", len(results))
     else:
         log.warning("Ollama response parsed but contained no valid scores")
-        log.warning("Parsed items: %s", repr(parsed[:3]) if parsed else "[]")
-        log.warning("Raw Ollama response (first 2000 chars): %s", repr(raw_response[:2000]))
 
     return results
