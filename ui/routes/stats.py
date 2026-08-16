@@ -96,7 +96,7 @@ def _build_stats_rows(config, state):
             "trend": None,
         })
 
-    indexer_rows.sort(ken=lambda x: (-(x["health_score"] or 0), -x["malicious_hits"]))
+    indexer_rows.sort(key=lambda x: (-(x["health_score"] or 0), -x["malicious_hits"]))
     return indexer_rows
 
 

@@ -7,27 +7,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-### Added
+---
+
+## [v1.6.0] — 2026-08-16
+
+### Added — UI Navigation Reorganization
+- **Tabbed Indexers hub** — the Indexers page now has three tabs: **Health** (the existing indexer health table), **Stats** (moved from standalone sidebar entry), and **AI Scoring** (moved from System → LLM Logs). All indexer-related views are consolidated in one place.
+- **Stats tab** — the former standalone Stats page is now embedded as the second tab under Indexers. The `/stats` route returns a 301 redirect to `/indexers/stats` for backward compatibility.
+- **AI Scoring tab** — the former LLM Logs page (System → LLM Logs) is now the third tab under Indexers. The `/system/llm-logs` route returns a 301 redirect to `/indexers/ai-scoring`. The `/api/llm-logs` API endpoint is preserved unchanged.
+- **Tab bar CSS** — new `.tab-bar` and `.tab-btn` styles with active/hover states matching the existing dark theme.
+
+### Changed — Sidebar Navigation
+- **Sidebar "Stats" entry removed** — consolidated into the Indexers hub tabs.
+- **Sidebar "LLM Logs" entry removed** from the System group — consolidated into the Indexers hub tabs.
+- **"Backups" moved to System group** — was previously under Settings, now lives under System alongside Tasks, Events, and Updates where it logically belongs.
+- **"Events" renamed to "Logs"** — the sidebar label now reads "Logs" (route unchanged at `/events`), aligning with common terminology.
+- **"Indexers" renamed to "Prowlarr"** under Settings — the Settings sub-nav item that links to Prowlarr connection config is now labeled "Prowlarr" to distinguish it from the top-level Indexers hub.
+
+### Added — Infrastructure & Hardening
 - **Transmission & Deluge Settings UI** — torrent client selector dropdown in Connections pane, with URL/username/password fields for Transmission and URL/password for Deluge, matching the existing qBittorrent layout. Includes test connection buttons wired to existing backend endpoints. Only the active client's fields are shown.
 - **Flagged Torrents History** — dashboard "Last Flagged Torrent" card now has Last/Historical tabs; Historical tab shows a scrollable list of all flagged torrents with rule name and date.
 - **Dashboard retention labels** — Flagged and Actioned stat cards now show "last N days" based on `retention_days` config value, since counts are pruned at that interval.
 - **Table captions** — all data tables across dashboard, torrents, indexers, logs, LLM logs, and stats pages now have screen-reader-only `<caption>` elements for accessibility.
 - **`.sr-only` CSS utility** — global screen-reader-only class in style.css for accessibility.
+- **Flask SECRET_KEY** from env var `FLASK_SECRET_KEY` or random per-restart.
+- **StateManager.close()** with atexit registration for clean SQLite shutdown.
+- **Notification failure logging** — Pushover and summary failures now logged at WARNING instead of silently swallowed.
+- **Torrent client failure logging** — all action methods (pause, resume, delete, set_category) across qBit, Transmission, Deluge now log warnings on failure.
+- **Scheduler DB fallback** — stderr output when DB logging fails in auto_manage, reorder, and summary tasks.
+- **HTTP session cleanup** — `close()` method on AbstractTorrentClient to release connection pools.
 
 ### Fixed
-- **Config save regression** — M-09 source-code protection (`/app` root-owned) prevented config saves because temp files couldn't be created in `/app/`. Reverted to full user ownership of `/app/` (matches Sonarr/Radarr convention).
-- **Bind-mount breakage** — `shutil.move` atomic writes replaced the config file inode, breaking Docker bind mounts. Replaced with direct write (open → write → fsync) which preserves the inode. This is how Sonarr/Radarr save config.
+- **Config save PermissionError in Docker** — `tempfile.mkstemp()` fails in `/app/` because the non-root container user can't write to the read-only app directory. The `_save_raw()` function now catches `PermissionError` and falls back to a direct overwrite of the bind-mounted `config.yaml`, which the container user *can* write to. Atomic temp-file-then-replace is still attempted first on systems where it works.
+- **False "unsaved changes" warning on config pages** — JavaScript-driven population of form fields (qBit category dropdowns, Ollama model selects, scoring weight defaults) fired `change` events during page initialization, immediately marking the form dirty. The dirty-state tracker now delays arming by 500ms so all dynamic population completes before user interactions are monitored.
+- **Bind-mount breakage** — `shutil.move` atomic writes replaced the config file inode, breaking Docker bind mounts. Replaced with direct write (open → write → fsync) which preserves the inode.
 - **Base image digest pin removed** — no *arr pins base image digests; makes updates harder for no meaningful security benefit. Healthcheck retained.
-- **Chart.js CDN 404** — Indexers page health score history chart failed to load (`ReferenceError: Chart is not defined`) because Chart.js 4.4.4 does not exist on cdnjs. Changed to 4.4.1 (matching LLM Logs page).
-- **Config dirty warning on page load** — torrent client pane toggle called `markDirty()` during initial visibility setup, causing a false "unsaved changes" warning after saving. Fixed by only marking dirty on user-initiated changes.
-
-### Added (PR-6 — commit 43a2383)
-- **Flask SECRET_KEY** from env var `FLASK_SECRET_KEY` or random per-restart (L-01)
-- **StateManager.close()** with atexit registration for clean SQLite shutdown (L-03)
-- **Notification failure logging** — Pushover and summary failures now logged at WARNING instead of silently swallowed (L-04)
-- **Torrent client failure logging** — all action methods (pause, resume, delete, set_category) across qBit, Transmission, Deluge now log warnings on failure (L-10)
-- **Scheduler DB fallback** — stderr output when DB logging fails in auto_manage, reorder, and summary tasks (L-13)
-- **HTTP session cleanup** — `close()` method on AbstractTorrentClient to release connection pools (L-20)
+- **Chart.js CDN 404** — Indexers page health score history chart failed to load because Chart.js 4.4.4 does not exist on cdnjs. Changed to 4.4.1.
+- **Config dirty warning on torrent pane toggle** — initial visibility setup called `markDirty()` during page load. Fixed by only marking dirty on user-initiated changes.
 
 ### Changed
 - **Security audit pruned to community standards** — evaluated all 35 findings against Sonarr, Radarr, Prowlarr, and LinuxServer.io practices. Dropped 13 items that exceeded community expectations with no significant security justification. See SECURITY_AUDIT.md for full disposition.
