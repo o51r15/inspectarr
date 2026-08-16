@@ -4,17 +4,51 @@ indexers_bp = Blueprint("indexers", __name__)
 
 
 @indexers_bp.route("/indexers", methods=["GET"])
-def indexers_view():
-    """Standalone Indexer Health page (Prowlarr scoring + reorder)."""
+@indexers_bp.route("/indexers/<tab>", methods=["GET"])
+def indexers_view(tab=None):
+    """Indexer hub page with tabs: Health, Stats, AI Scoring."""
     config_path = current_app.config["CONFIG_PATH"]
     enabled = False
+    stats_rows = []
+    stats_error = None
+    llm_runs = []
+    llm_error = None
+    active_tab = tab or request.args.get("tab", "health")
+
     try:
         from core.config import load_config
         cfg = load_config(config_path)
         enabled = cfg.prowlarr.enabled
+
+        if enabled:
+            # --- Stats data ---
+            try:
+                from .stats import _get_state as stats_get_state, _build_stats_rows
+                state = stats_get_state(cfg)
+                stats_rows = _build_stats_rows(cfg, state)
+            except Exception as exc:
+                stats_error = str(exc)
+
+            # --- LLM Logs data ---
+            try:
+                state = current_app.config.get("STATE")
+                if state:
+                    llm_runs = state.get_llm_scoring_runs(limit=50)
+            except Exception as exc:
+                llm_error = str(exc)
+
     except Exception:
         enabled = False
-    return render_template("indexers.html", prowlarr_enabled=enabled)
+
+    return render_template(
+        "indexers.html",
+        prowlarr_enabled=enabled,
+        active_tab=active_tab,
+        stats_rows=stats_rows,
+        stats_error=stats_error,
+        llm_runs=llm_runs,
+        llm_error=llm_error,
+    )
 
 
 @indexers_bp.route("/indexers/rescore-reorder", methods=["POST"])
@@ -30,7 +64,7 @@ def indexers_rescore_reorder():
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
         state    = _get_state(cfg)
         scorer   = IndexerScorer(prowlarr, state, cfg.prowlarr)
         scorer.score_all(skip_ai=False)
@@ -54,7 +88,7 @@ def indexers_sync_only():
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
         synced = prowlarr.sync_to_apps()
         return jsonify({
             "ok": True, "synced": synced,
@@ -78,7 +112,7 @@ def indexers_sync():
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
         state    = _get_state(cfg)
         scorer   = IndexerScorer(prowlarr, state, cfg.prowlarr)
         changed  = scorer.reorder()
@@ -110,7 +144,7 @@ def indexers_apply_priorities():
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
 
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
         all_indexers = prowlarr.get_torrent_indexers(include_disabled=True)
         idx_map = {i["id"]: i for i in all_indexers}
 
@@ -234,7 +268,7 @@ def indexers_trigger_scoring():
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "msg": "Prowlarr not enabled"}), 400
 
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
+        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_ken2
         state = _get_state(cfg)
         scorer = IndexerScorer(prowlarr, state, cfg.prowlarr)
         scored = scorer.score_all(skip_ai=False)

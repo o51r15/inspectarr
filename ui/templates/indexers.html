@@ -1,25 +1,39 @@
 {% extends "base.html" %}
 {% block title %}Indexers — inspectarr{% endblock %}
-{% block page_title %}Indexer Health{% endblock %}
+{% block page_title %}Indexers{% endblock %}
 
 {% block topbar_actions %}
-  <button class="btn btn-ghost btn-sm" onclick="rescoreAndReorder()"
-          title="Recalculate health scores and reorder indexers in Prowlarr by score">Rescore &amp; Reorder</button>
-  <button class="btn btn-ghost btn-sm" onclick="syncToApps()"
-          title="Push current Prowlarr indexer order to all connected apps (Sonarr, Radarr, Whisparr)">Sync</button>
-  <button id="apply-btn" class="btn btn-primary btn-sm" onclick="applyManualOrder()" disabled
-          title="Apply manual priority changes made in the table below">Apply</button>
-  <span id="indexer-status" class="hint"></span>
+  <div id="health-actions" style="{{ '' if active_tab == 'health' else 'display:none' }}">
+    <button class="btn btn-ghost btn-sm" onclick="rescoreAndReorder()"
+            title="Recalculate health scores and reorder indexers in Prowlarr by score">Rescore &amp; Reorder</button>
+    <button class="btn btn-ghost btn-sm" onclick="syncToApps()"
+            title="Push current Prowlarr indexer order to all connected apps (Sonarr, Radarr, Whisparr)">Sync</button>
+    <button id="apply-btn" class="btn btn-primary btn-sm" onclick="applyManualOrder()" disabled
+            title="Apply manual priority changes made in the table below">Apply</button>
+    <span id="indexer-status" class="hint"></span>
+  </div>
 {% endblock %}
 
 {% block content %}
+
+<!-- Tab Navigation -->
+<div class="tab-bar" style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:1.5rem">
+  <button class="tab-btn {{ 'active' if active_tab == 'health' else '' }}" data-tab="health" onclick="switchTab('health')">Health</button>
+  <button class="tab-btn {{ 'active' if active_tab == 'stats' else '' }}" data-tab="stats" onclick="switchTab('stats')">Stats</button>
+  <button class="tab-btn {{ 'active' if active_tab == 'ai-scoring' else '' }}" data-tab="ai-scoring" onclick="switchTab('ai-scoring')">AI Scoring</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- TAB: Health                                             -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="tab-pane {{ '' if active_tab == 'health' else 'hidden' }}" id="tab-health">
 
 {% if not prowlarr_enabled %}
   <div class="form-section">
     <div class="form-section-title">Prowlarr not enabled</div>
     <p class="hint">
       Prowlarr indexer scoring is currently disabled. Enable it and enter your
-      connection details under <a href="/config#indexers">Settings &rarr; Indexers</a> and the scoring interval under <a href="/config#general">Settings &rarr; General</a>,
+      connection details under <a href="/config#indexers">Settings &rarr; Prowlarr</a> and the scoring interval under <a href="/config#general">Settings &rarr; General</a>,
       then return here to view and reorder your indexers.
     </p>
   </div>
@@ -77,12 +91,269 @@
 
 {% endif %}
 
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- TAB: Stats                                              -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="tab-pane {{ '' if active_tab == 'stats' else 'hidden' }}" id="tab-stats">
+
+{% if stats_error %}
+<div class="alert alert-error"><strong>Error:</strong> {{ stats_error }}</div>
+{% endif %}
+
+{% if not prowlarr_enabled %}
+<div class="alert alert-error" style="margin-bottom:1rem;">
+  Prowlarr is not enabled. Enable it in Settings to start tracking grab attribution.
+</div>
+{% endif %}
+
+{% if stats_rows %}
+<div class="card" style="padding:0;overflow:hidden;">
+  <div style="overflow-x:auto;">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Indexer</th>
+        <th>Priority</th>
+        <th>Health</th>
+        <th>Avg Response</th>
+        <th>Success Rate</th>
+        <th>Grab Success</th>
+        <th>Total Queries</th>
+        <th>Total Grabs</th>
+        <th>Malicious</th>
+        <th>% Malicious</th>
+        <th>Trend</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in stats_rows %}
+    <tr>
+      <td style="font-weight:500;color:var(--text-primary);">{{ row.name }}</td>
+      <td style="color:var(--text-muted);">{{ row.priority }}</td>
+      <td>
+        {% if row.health_score is not none %}
+          {% if row.health_score >= 80 %}
+            <span style="color:#22c55e;font-weight:600;">{{ row.health_score }}%</span>
+          {% elif row.health_score >= 50 %}
+            <span style="color:#f59e0b;font-weight:600;">{{ row.health_score }}%</span>
+          {% else %}
+            <span style="color:#ef4444;font-weight:600;">{{ row.health_score }}%</span>
+          {% endif %}
+        {% else %}
+          <span style="color:var(--text-muted);">—</span>
+        {% endif %}
+      </td>
+      <td style="color:var(--text-muted);">{{ row.avg_response_ms }} ms</td>
+      <td style="color:var(--text-muted);">{{ row.success_rate }}%</td>
+      <td style="color:var(--text-muted);">{{ row.grab_success }}%</td>
+      <td style="color:var(--text-muted);">{{ row.total_records }}</td>
+      <td style="color:var(--text-muted);">{{ row.total_grabs }}</td>
+      <td>
+        {% if row.malicious_hits > 0 %}
+          <span style="color:#f87171;font-weight:600;">{{ row.malicious_hits }}</span>
+        {% else %}
+          <span style="color:var(--text-muted);">0</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if row.malicious_pct > 10 %}
+          <span class="badge badge-red">{{ row.malicious_pct }}%</span>
+        {% elif row.malicious_pct > 0 %}
+          <span class="badge badge-yellow">{{ row.malicious_pct }}%</span>
+        {% else %}
+          <span style="color:var(--text-muted);">0%</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if row.trend is not none %}
+          {% if row.trend > 0 %}
+            <span style="color:#22c55e;">+{{ row.trend }}</span>
+          {% elif row.trend < 0 %}
+            <span style="color:#ef4444;">{{ row.trend }}</span>
+          {% else %}
+            <span style="color:var(--text-muted);">0</span>
+          {% endif %}
+        {% else %}
+          <span style="color:var(--text-muted);">—</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if row.in_backoff %}
+          <span class="badge badge-red">Backoff</span>
+        {% elif not row.enabled %}
+          <span class="badge badge-yellow">Disabled</span>
+        {% else %}
+          <span style="color:var(--text-muted);">OK</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted);padding:0 0.25rem;">
+  Grabs are attributed on first scan. Malicious count increments when Inspectarr
+  flags and deletes a torrent from that indexer. Trend shows the score direction
+  over recent cycles (positive = improving, negative = declining).
+</div>
+
+{% elif not stats_error %}
+<div class="card" style="text-align:center;padding:3rem;color:var(--text-muted);">
+  No indexer data yet. Stats appear after the first scan with Prowlarr enabled.
+</div>
+{% endif %}
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<!-- TAB: AI Scoring                                         -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="tab-pane {{ '' if active_tab == 'ai-scoring' else 'hidden' }}" id="tab-ai-scoring">
+
+<div id="ollama-update-banner" class="form-section" style="display:none;border-left:3px solid var(--warning, #f59e0b)">
+  <p style="margin:0;display:flex;align-items:center;gap:8px">
+    <span class="badge badge-warning">Update available</span>
+    <span>A newer version of your Ollama model <code id="ollama-update-model"></code> is available.
+    Run <code>ollama pull &lt;model&gt;</code> on your Ollama host to update.</span>
+  </p>
+</div>
+
+{% if llm_error %}
+  <div class="form-section">
+    <p class="text-error">{{ llm_error }}</p>
+  </div>
+{% elif not llm_runs %}
+  <div class="form-section">
+    <p class="hint">No AI scoring runs recorded yet. LLM scoring runs will appear here once Ollama is configured and indexer scoring has run.</p>
+  </div>
+{% else %}
+
+<!-- Latest Run Report Card -->
+{% set latest = llm_runs[0] %}
+<div class="form-section">
+  <div class="form-section-title">Latest Scoring Run</div>
+  <p class="hint" style="margin-bottom:0.5rem">
+    <strong>{{ latest.scored_at[:19] | replace('T', ' ') }} UTC</strong>
+    &nbsp;·&nbsp; Model: <code>{{ latest.model_used }}</code>
+    {% if latest.cache_hit %}<span class="badge badge-dim">cache hit</span>{% endif %}
+  </p>
+  <table style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:8px">Indexer</th>
+        <th style="padding:8px">Deterministic</th>
+        <th style="padding:8px">AI Score</th>
+        <th style="padding:8px">Delta</th>
+        <th style="padding:8px">Reasoning</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for idx in latest.indexers %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-weight:500">{{ idx.indexer_name }}</td>
+        <td style="padding:8px">{{ '%.1f' | format(idx.deterministic_score) if idx.deterministic_score is not none else '—' }}</td>
+        <td style="padding:8px;font-weight:600">{{ '%.1f' | format(idx.ai_score) }}</td>
+        {% set delta = idx.ai_score - (idx.deterministic_score or idx.ai_score) %}
+        <td style="padding:8px;color:{{ 'var(--success)' if delta >= 0 else 'var(--danger)' }}">
+          {{ '%+.1f' | format(delta) }}
+        </td>
+        <td style="padding:8px">
+          <details>
+            <summary style="cursor:pointer;color:var(--text-dim)">Show reasoning</summary>
+            <pre style="white-space:pre-wrap;font-size:0.82rem;margin-top:0.4rem;max-height:12rem;overflow-y:auto;padding:0.5rem;background:var(--bg);border-radius:6px">{{ idx.ai_reasoning or '(none)' }}</pre>
+          </details>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Score Trend Chart (per indexer) -->
+<div class="form-section">
+  <div class="form-section-title">AI Score Trends</div>
+  <p class="hint" style="margin-bottom:0.75rem">
+    How AI scores have changed over time per indexer. Click an indexer to load its history.
+  </p>
+  <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem" id="indexer-chips">
+    {% set seen_ids = [] %}
+    {% for run in llm_runs %}
+      {% for idx in run.indexers %}
+        {% if idx.indexer_id not in seen_ids %}
+          {% if seen_ids.append(idx.indexer_id) %}{% endif %}
+          <button class="btn btn-sm btn-outline indexer-chip"
+                  data-id="{{ idx.indexer_id }}"
+                  onclick="loadHistory({{ idx.indexer_id }}, this)">
+            {{ idx.indexer_name }}
+          </button>
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+  </div>
+  <div id="trend-chart-area" style="min-height:200px;position:relative">
+    <p class="hint" id="trend-placeholder">Select an indexer above to view its AI score trend.</p>
+    <canvas id="trend-canvas" style="display:none;max-height:300px"></canvas>
+  </div>
+</div>
+
+<!-- Run History -->
+<div class="form-section">
+  <div class="form-section-title">Scoring Run History</div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead>
+      <tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:8px">Timestamp</th>
+        <th style="padding:8px">Model</th>
+        <th style="padding:8px">Indexers</th>
+        <th style="padding:8px">Cache</th>
+        <th style="padding:8px">Avg AI Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in llm_runs %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-family:'IBM Plex Mono',monospace;font-size:0.85rem">{{ run.scored_at[:19] | replace('T', ' ') }}</td>
+        <td style="padding:8px"><code>{{ run.model_used }}</code></td>
+        <td style="padding:8px">{{ run.indexers | length }}</td>
+        <td style="padding:8px">{{ '✓' if run.cache_hit else '—' }}</td>
+        {% set ns = namespace(total=0) %}
+        {% for idx in run.indexers %}{% set ns.total = ns.total + idx.ai_score %}{% endfor %}
+        <td style="padding:8px;font-weight:500">{{ '%.1f' | format(ns.total / run.indexers|length) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+
+</div>
+
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-date-fns/3.0.0/chartjs-adapter-date-fns.bundle.min.js"></script>
 <script>
+  // ── Tab switching ──────────────────────────────────────
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.remove('hidden');
+    document.querySelector('.tab-btn[data-tab="' + tab + '"]').classList.add('active');
+    // Show/hide health-specific topbar actions
+    var ha = document.getElementById('health-actions');
+    if (ha) ha.style.display = (tab === 'health') ? '' : 'none';
+    // Update URL without reload
+    history.replaceState(null, '', '/indexers' + (tab === 'health' ? '' : '?tab=' + tab));
+  }
+
+  // ── Health tab logic ───────────────────────────────────
   const prowlarrEnabled = {{ 'true' if prowlarr_enabled else 'false' }};
 
   const CHART_COLORS = [
@@ -266,7 +537,6 @@
              style="font-size:0.75rem;padding:2px 8px;${idx.enabled === false ? 'color:#ef4444' : ''}">${idx.enabled === false ? 'Enable' : 'Disable'}</button></td>
       `;
       const prioInput = tr.querySelector('.priority-input');
-      // BUG-12: restore any pending manual edit so a refresh doesn't silently lose it
       if (pendingPriorityChanges[idx.id] !== undefined) {
         prioInput.value = pendingPriorityChanges[idx.id];
       }
@@ -287,7 +557,6 @@
         () => toggleIndexerEnabled(idx.id, idx.name, idx.enabled === false));
       tbody.appendChild(tr);
     });
-    // Restore Apply button state if there are still pending edits after re-render
     document.getElementById('apply-btn').disabled = Object.keys(pendingPriorityChanges).length === 0;
   }
 
@@ -419,6 +688,77 @@
         });
       })
       .catch(e => { msg.textContent = 'Failed to load chart: ' + e; });
+  }
+
+  // ── AI Scoring tab logic ───────────────────────────────
+  // Check for Ollama model updates
+  fetch('/config/ollama/update-check')
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok && d.update_available) {
+        document.getElementById('ollama-update-model').textContent = d.model || '';
+        document.getElementById('ollama-update-banner').style.display = '';
+      }
+    })
+    .catch(() => {});
+
+  let trendChart = null;
+
+  async function loadHistory(indexerId, btn) {
+    document.querySelectorAll('.indexer-chip').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const res = await fetch('/api/llm-logs/history/' + indexerId);
+    const data = await res.json();
+    if (data.error || !data.length) {
+      document.getElementById('trend-placeholder').textContent = 'No history for this indexer.';
+      document.getElementById('trend-placeholder').style.display = '';
+      document.getElementById('trend-canvas').style.display = 'none';
+      return;
+    }
+    document.getElementById('trend-placeholder').style.display = 'none';
+    const canvas = document.getElementById('trend-canvas');
+    canvas.style.display = '';
+
+    const labels = data.map(d => d.scored_at.slice(5, 16).replace('T', ' '));
+    const aiScores = data.map(d => d.ai_score);
+    const detScores = data.map(d => d.deterministic_score);
+
+    if (trendChart) trendChart.destroy();
+    const isDark = document.documentElement.getAttribute('data-theme') !== 'light';
+    const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+    const textColor = isDark ? '#aaa' : '#666';
+
+    trendChart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'AI Score',
+            data: aiScores,
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99,102,241,0.1)',
+            tension: 0.3, fill: true, pointRadius: 3,
+          },
+          {
+            label: 'Deterministic',
+            data: detScores,
+            borderColor: '#94a3b8',
+            borderDash: [5, 3],
+            tension: 0.3, fill: false, pointRadius: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        scales: {
+          y: { min: 0, max: 100, grid: { color: gridColor }, ticks: { color: textColor } },
+          x: { grid: { color: gridColor }, ticks: { color: textColor, maxRotation: 45 } },
+        },
+        plugins: { legend: { labels: { color: textColor } } },
+      },
+    });
   }
 </script>
 {% endblock %}

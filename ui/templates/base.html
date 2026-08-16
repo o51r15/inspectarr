@@ -35,9 +35,6 @@
       <a href="/indexers" class="{{ 'active' if request.path.startswith('/indexers') else '' }}">
         <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="10" width="3" height="4"/><rect x="6.5" y="6" width="3" height="8"/><rect x="11" y="2" width="3" height="12"/></svg> Indexers
       </a>
-      <a href="/stats" class="{{ 'active' if request.path.startswith('/stats') else '' }}">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,12 6,6 10,9 14,3"/><polyline points="10,3 14,3 14,7"/></svg> Stats
-      </a>
       <div class="nav-group {{ 'open' if request.path.startswith('/system') else '' }}" id="system-group">
         <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/system') else '' }}" onclick="toggleNavGroup('system-group')" aria-expanded="{{ 'true' if request.path.startswith('/system') else 'false' }}" aria-controls="system-group-items">
           <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="5" rx="1"/><rect x="2" y="9" width="12" height="5" rx="1"/><circle cx="5" cy="4.5" r="0.75" fill="currentColor" stroke="none"/><circle cx="5" cy="11.5" r="0.75" fill="currentColor" stroke="none"/></svg> System
@@ -46,9 +43,9 @@
         <div class="nav-group-items" id="system-group-items">
           <a href="/system/status" class="{{ 'active' if request.path.startswith('/system/status') else '' }}">Status</a>
           <a href="/system/tasks" class="{{ 'active' if request.path.startswith('/system/tasks') else '' }}">Tasks</a>
+          <a href="/config#backups" data-pane="backups">Backups</a>
           <a href="/system/updates" class="{{ 'active' if request.path.startswith('/system/updates') else '' }}">Updates</a>
-          <a href="/system/events" class="{{ 'active' if request.path.startswith('/system/events') or request.path.startswith('/logs') else '' }}">Events</a>
-          <a href="/system/llm-logs" class="{{ 'active' if request.path.startswith('/system/llm-logs') else '' }}">LLM Logs</a>
+          <a href="/system/events" class="{{ 'active' if request.path.startswith('/system/events') or request.path.startswith('/logs') else '' }}">Logs</a>
         </div>
       </div>      <div class="nav-group {{ 'open' if request.path.startswith('/config') else '' }}" id="settings-group">
         <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/config') else '' }}" onclick="toggleNavGroup('settings-group')" aria-expanded="{{ 'true' if request.path.startswith('/config') else 'false' }}" aria-controls="settings-group-items">
@@ -58,11 +55,10 @@
         <div class="nav-group-items" id="settings-group-items">
           <a href="/config#connections"   data-pane="connections">Connections</a>
           <a href="/config#rules"         data-pane="rules">Rules</a>
-          <a href="/config#indexers"      data-pane="indexers">Indexers</a>
+          <a href="/config#indexers"      data-pane="indexers">Prowlarr</a>
           <a href="/config#notifications" data-pane="notifications">Notifications</a>
           <a href="/config#general"       data-pane="general">General</a>
           <a href="/config#advanced"      data-pane="advanced">Advanced</a>
-          <a href="/config#backups"       data-pane="backups">Backups</a>
         </div>
       </div>
       {% if auth_enabled %}

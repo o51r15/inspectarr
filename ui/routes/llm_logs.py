@@ -4,23 +4,15 @@ ui/routes/llm_logs.py — System → LLM Logs
 Shows AI scoring report (current run reasoning per indexer) and
 historical score trend data.
 """
-from flask import Blueprint, render_template, current_app, jsonify
+from flask import Blueprint, redirect, url_for, current_app, jsonify
 
 llm_logs_bp = Blueprint("llm_logs", __name__)
 
 
 @llm_logs_bp.route("/system/llm-logs")
 def llm_logs_page():
-    """Render the LLM Logs page."""
-    state = current_app.config.get("STATE")
-    error = None
-    runs = []
-    if state:
-        try:
-            runs = state.get_llm_scoring_runs(limit=50)
-        except Exception as exc:
-            error = str(exc)
-    return render_template("llm_logs.html", runs=runs, error=error)
+    """Redirect to Indexers hub AI Scoring tab."""
+    return redirect("/indexers/ai-scoring", code=301)
 
 
 @llm_logs_bp.route("/api/llm-logs/history/<int:indexer_id>")
