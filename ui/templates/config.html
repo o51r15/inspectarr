@@ -846,8 +846,11 @@
   });
 
   // ---- Dirty-state tracking ----
+  // Delay arming so JS-driven population (qBit categories, model selects,
+  // default values) doesn't false-trigger the "unsaved changes" warning.
   const savebar = document.getElementById('savebar');
-  function markDirty() { savebar.classList.add('dirty'); }
+  let armed = false;
+  function markDirty() { if (armed) savebar.classList.add('dirty'); }
   document.getElementById('config-form').addEventListener('input', markDirty);
   document.getElementById('config-form').addEventListener('change', markDirty);
   // Clear dirty flag on submit so the warning doesn't fire during navigation
@@ -858,6 +861,8 @@
     if (savebar.classList.contains('dirty')) { e.preventDefault(); e.returnValue = ''; }
   }
   window.addEventListener('beforeunload', beforeUnloadHandler);
+  // Arm after a tick — all dynamic selects / defaults are populated by then
+  setTimeout(() => { armed = true; }, 500);
 
   // ---- qBit category population + rules gating ----
   let qbitCategories = [];
