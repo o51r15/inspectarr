@@ -159,8 +159,8 @@ def ollama_score_indexers(
 
     results = {}
     for item in parsed:
-        iid = item.get("indexer_id") or item.get("id")
-        score = item.get("health_score") or item.get("score")
+        iid = item.get("indexer_id")
+        score = item.get("health_score")
         if iid is None or score is None:
             continue
         try:
@@ -175,7 +175,5 @@ def ollama_score_indexers(
         log.info("Ollama scored %d indexer(s) successfully", len(results))
     else:
         log.warning("Ollama response parsed but contained no valid scores")
-        log.warning("Parsed items: %s", repr(parsed[:3]) if parsed else "[]")
-        log.warning("Raw Ollama response (first 2000 chars): %s", repr(raw_response[:2000]))
 
     return results
