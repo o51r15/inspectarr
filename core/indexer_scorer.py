@@ -293,9 +293,20 @@ class IndexerScorer:
                 "trend":                    s.get("trend"),
             })
 
-        # Content-hash cache: skip Ollama if identical input was scored recently
+        # Content-hash cache: skip Ollama if identical input was scored recently.
+        # The key MUST include the model and system prompt, not just the indexer
+        # stats. Keying on stats alone meant swapping models returned the old
+        # model's cached scores under the new model's name, silently invalidating
+        # any A/B comparison between models for a full cache TTL.
         content_hash = hashlib.sha256(
-            json.dumps(payload, sort_keys=True).encode()
+            json.dumps(
+                {
+                    "payload":       payload,
+                    "model":         ocfg.model,
+                    "system_prompt": ocfg.system_prompt,
+                },
+                sort_keys=True,
+            ).encode()
         ).hexdigest()
 
         cached = self.state.get_llm_cache(content_hash, ocfg.cache_ttl_hours)
@@ -303,6 +314,12 @@ class IndexerScorer:
             log.info("AI scoring cache hit — reusing previous result")
             ai_results = json.loads(cached)
         else:
+            previous_model = self.state.get_recent_cache_model()
+            if previous_model and previous_model != ocfg.model:
+                log.info(
+                    f"AI scoring model changed ({previous_model} -> "
+                    f"{ocfg.model}) — cache bypassed, scoring fresh"
+                )
             ai_results_raw = ollama_score_indexers(
                 payload, ocfg.url, ocfg.model, ocfg.timeout,
                 custom_prompt=ocfg.system_prompt,
@@ -311,9 +328,11 @@ class IndexerScorer:
                 log.info("AI scoring unavailable — using deterministic scores")
                 return scored
             # Cache the result
-            self.state.save_llm_cache(content_hash, json.dumps(
-                {int(k): v for k, v in ai_results_raw.items()}
-            ))
+            self.state.save_llm_cache(
+                content_hash,
+                json.dumps({int(k): v for k, v in ai_results_raw.items()}),
+                model=ocfg.model,
+            )
             ai_results = ai_results_raw
 
         # Convert keys back to int if loaded from cache (JSON keys are strings)

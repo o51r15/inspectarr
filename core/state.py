@@ -223,6 +223,17 @@ class StateManager:
                 if "duplicate column" not in str(exc).lower():
                     log.warning(f"indexer_stats migration failed ({col}): {exc}")
 
+        # Migrate llm_cache to record which model produced each entry.
+        # Pre-migration rows get NULL: their model is genuinely unknown, and
+        # the new cache key means they can never be hit again anyway.
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute("ALTER TABLE llm_cache ADD COLUMN model TEXT")
+                conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                log.warning(f"llm_cache migration failed (model): {exc}")
+
 
     # ------------------------------------------------------------------
     # processed_hashes
@@ -734,13 +745,35 @@ class StateManager:
             return None
         return row["response_json"]
 
-    def save_llm_cache(self, content_hash: str, response_json: str):
+    def save_llm_cache(self, content_hash: str, response_json: str,
+                       model: str | None = None):
         with self._lock, self._conn() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO llm_cache (content_hash, response_json, scored_at) VALUES (?, ?, ?)",
-                (content_hash, response_json, _now_iso()),
+                "INSERT OR REPLACE INTO llm_cache "
+                "(content_hash, response_json, scored_at, model) "
+                "VALUES (?, ?, ?, ?)",
+                (content_hash, response_json, _now_iso(), model),
             )
             conn.commit()
+
+    def get_recent_cache_model(self) -> str | None:
+        """
+        Return the model that produced the most recent cache entry.
+
+        Used to report model swaps: when a rescore misses the cache, comparing
+        this against the configured model distinguishes "the stats changed"
+        from "you changed models", which matters when A/B testing models.
+        Returns None on any failure -- this is reporting, not control flow.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                row = conn.execute(
+                    "SELECT model FROM llm_cache WHERE model IS NOT NULL "
+                    "ORDER BY scored_at DESC LIMIT 1"
+                ).fetchone()
+            return row["model"] if row else None
+        except Exception:
+            return None
 
     def prune_llm_cache(self, ttl_hours: int = 24):
         cutoff = (_now_dt() - timedelta(hours=ttl_hours)).isoformat()
