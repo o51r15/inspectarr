@@ -1,6 +1,8 @@
 from flask import Blueprint, render_template, current_app, request, redirect, url_for, jsonify
 import yaml
 import os
+import threading
+from datetime import datetime
 
 from werkzeug.security import generate_password_hash
 from ui.routes._utils import safe_error
@@ -594,6 +596,210 @@ def prowlarr_rescore():
         return jsonify({"ok": True, "changed": changed})
     except Exception as exc:
         return jsonify({"ok": False, "message": safe_error(exc)})
+
+
+# ---------------------------------------------------------------------------
+# Model validation
+#
+# Validation takes minutes: a cold model load plus two scoring calls, one of
+# them at full indexer count. Running that inside the request would hold a
+# waitress worker thread for the whole run, and enough concurrent attempts
+# would starve the pool and freeze the UI. So it runs on a background thread
+# and the browser polls -- the same shape ui/scheduler.py uses for scans.
+#
+# One run at a time: these are expensive, and a second concurrent run against
+# the same Ollama host would only make both slower and the timings meaningless.
+# ---------------------------------------------------------------------------
+_validation_lock = threading.Lock()
+_validation_state = {"running": False, "model": None, "stage": None,
+                     "done": 0, "total": 3, "result": None, "error": None,
+                     "started_at": None}
+
+
+def _validation_worker(app, config_path, url, model, timeout,
+                       indexer_count, system_prompt):
+    from core.model_validator import validate_model
+
+    def progress(stage, done, total):
+        with _validation_lock:
+            _validation_state.update(stage=stage, done=done, total=total)
+
+    try:
+        result = validate_model(url, model, timeout=timeout,
+                                indexer_count=indexer_count,
+                                system_prompt=system_prompt,
+                                progress_cb=progress)
+        digest = _model_digest(url, model)
+        state = app.config.get("STATE")
+        if state:
+            state.save_validation(model, result, digest=digest)
+        with _validation_lock:
+            _validation_state.update(running=False, result=result, stage="Done")
+    except Exception as exc:
+        # A crash here must not leave the UI polling forever on running=True.
+        with _validation_lock:
+            _validation_state.update(running=False, error=str(exc),
+                                     stage="Failed")
+
+
+def _model_digest(url, model):
+    """Current digest of a model, used to flag stored results as stale."""
+    try:
+        import requests as req
+        r = req.post(f"{url.rstrip('/')}/api/show",
+                     json={"name": model}, timeout=10)
+        if r.status_code == 200:
+            d = r.json()
+            return (d.get("digest")
+                    or (d.get("details") or {}).get("parent_model")
+                    or (d.get("model_info") or {}).get("general.file_type"))
+    except Exception:
+        pass
+    return None
+
+
+@config_bp.route("/config/ai/model", methods=["POST"])
+def ai_set_model():
+    """
+    Set the active scoring model.
+
+    Gated: a model that has not passed validation is refused unless the
+    caller passes force=true, which the UI only sends after the user
+    confirms an explicit "Apply anyway". Forced selections are recorded as
+    such so the UI can badge them -- distinct from a model that failed,
+    because the user chose this knowingly.
+    """
+    config_path = current_app.config["CONFIG_PATH"]
+    data = request.get_json(silent=True) or {}
+    model = (data.get("model") or "").strip()
+    force = bool(data.get("force"))
+    if not model:
+        return jsonify({"ok": False, "message": "No model specified"}), 400
+
+    state = current_app.config.get("STATE")
+    record = state.get_validation(model) if state else None
+    validated = bool(record and record.get("status") == "supported")
+
+    if not validated and not force:
+        return jsonify({
+            "ok": False,
+            "needs_validation": True,
+            "status": (record or {}).get("status", "untested"),
+            "message": f"{model} has not passed validation.",
+        }), 409
+
+    try:
+        raw = _load_raw(config_path)
+        prowlarr = dict(raw.get("prowlarr", {}) or {})
+        ollama = dict(prowlarr.get("ollama", {}) or {})
+        ollama["model"] = model
+        prowlarr["ollama"] = ollama
+        raw["prowlarr"] = prowlarr
+        _save_raw(config_path, raw)
+
+        if not validated and state:
+            state.mark_model_forced(
+                model, digest=_model_digest(ollama.get("url", ""), model))
+
+        return jsonify({
+            "ok": True,
+            "forced": not validated,
+            "message": (f"{model} applied without validation"
+                        if not validated else f"{model} applied"),
+        })
+    except Exception as exc:
+        return jsonify({"ok": False, "message": safe_error(exc)}), 500
+
+
+@config_bp.route("/config/ai/validate", methods=["POST"])
+def ai_validate():
+    """Start a validation run in the background. Returns immediately."""
+    config_path = current_app.config["CONFIG_PATH"]
+    data = request.get_json(silent=True) or {}
+    model = (data.get("model") or "").strip()
+    if not model:
+        return jsonify({"ok": False, "message": "No model specified"}), 400
+
+    with _validation_lock:
+        if _validation_state["running"]:
+            return jsonify({
+                "ok": False,
+                "message": f"Validation already running for "
+                           f"{_validation_state['model']}",
+            }), 409
+
+    try:
+        raw = _load_raw(config_path)
+        ollama = (raw.get("prowlarr", {}) or {}).get("ollama", {}) or {}
+        url = (ollama.get("url") or "").strip()
+        if not url:
+            return jsonify({"ok": False,
+                            "message": "Set an Ollama URL first"}), 400
+
+        # Validate against the real indexer count so a pass means it works
+        # on this deployment, not in the abstract.
+        state = current_app.config.get("STATE")
+        indexer_count = 20
+        try:
+            if state:
+                rows = state.get_all_indexer_stats()
+                if rows:
+                    indexer_count = len(rows)
+        except Exception:
+            pass
+
+        with _validation_lock:
+            _validation_state.update(
+                running=True, model=model, stage="Starting", done=0, total=3,
+                result=None, error=None, started_at=datetime.now().isoformat(),
+                indexer_count=indexer_count)
+
+        t = threading.Thread(
+            target=_validation_worker,
+            args=(current_app._get_current_object(), config_path, url, model,
+                  _int(ollama.get("timeout"), 300), indexer_count,
+                  ollama.get("system_prompt") or ""),
+            daemon=True, name=f"inspectarr-validate-{model}")
+        t.start()
+        return jsonify({"ok": True, "message": "Validation started",
+                        "indexer_count": indexer_count})
+    except Exception as exc:
+        with _validation_lock:
+            _validation_state.update(running=False)
+        return jsonify({"ok": False, "message": safe_error(exc)}), 500
+
+
+@config_bp.route("/config/ai/validate/status", methods=["GET"])
+def ai_validate_status():
+    """Poll the in-flight (or most recent) validation run."""
+    with _validation_lock:
+        return jsonify({"ok": True, **_validation_state})
+
+
+@config_bp.route("/config/ai/validations", methods=["GET"])
+def ai_validations():
+    """Every model validation on record, for the comparison table."""
+    state = current_app.config.get("STATE")
+    if not state:
+        return jsonify({"ok": True, "validations": []})
+    out = []
+    for v in state.get_validations():
+        import json as _json
+        try:
+            res = _json.loads(v.get("results_json") or "{}")
+        except Exception:
+            res = {}
+        out.append({
+            "model": v.get("model"),
+            "status": v.get("status"),
+            "validated_at": v.get("validated_at"),
+            "indexer_count": v.get("indexer_count"),
+            "avg_response_ms": v.get("avg_response_ms"),
+            "tests": [{"name": t.get("name"), "passed": t.get("passed"),
+                       "detail": t.get("detail", "")}
+                      for t in (res.get("tests") or [])],
+        })
+    return jsonify({"ok": True, "validations": out})
 
 
 @config_bp.route("/config/ai/test-connection", methods=["POST"])

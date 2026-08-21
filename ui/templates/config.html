@@ -502,13 +502,14 @@
             <div class="form-group">
               <label>Model</label>
               <div style="display:flex;gap:8px;align-items:center">
-                <select id="ollama-model-select" style="flex:1" disabled>
+                <select id="ollama-model-select" style="flex:1" onchange="renderValidationDetail()" disabled>
                   <option value="">Loading…</option>
                 </select>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="loadOllamaModels()" title="Refresh model list">↻</button>
               </div>
             </div>
             <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
+              <button type="button" class="btn btn-ghost btn-sm" id="ollama-validate-btn" onclick="validateModel()">Validate</button>
               <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn" onclick="applyOllamaModel()" disabled>Apply</button>
               <span id="ollama-model-status" class="hint"></span>
             </div>
@@ -533,6 +534,46 @@
             <textarea id="ollama-system-prompt" rows="12"
                       style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap"
                       placeholder="Loading…"></textarea>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Model Validation</div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            Validation runs three scoring tests against a model: can it tell a
+            good indexer from a bad one, does it return the expected shape, and
+            can it handle a prompt covering every one of your indexers. A model
+            must pass before it can be applied.
+          </p>
+
+          <div id="validation-detail" class="hint"
+               style="padding:10px;border:1px solid var(--border);border-radius:4px;margin-bottom:0.75rem">
+            Select a model to see its validation status.
+          </div>
+
+          <div id="validation-progress" style="display:none;margin-bottom:0.75rem">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="spinner" aria-hidden="true"></span>
+              <span id="validation-stage">Starting…</span>
+            </div>
+            <p class="hint" style="margin-top:4px">
+              This takes a few minutes. You can leave this page — the run
+              continues in the background.
+            </p>
+          </div>
+
+          <div style="overflow-x:auto">
+            <table class="data-table" id="validation-table" style="display:none">
+              <caption class="sr-only">Validated models and their test results</caption>
+              <thead>
+                <tr>
+                  <th>Model</th><th>Status</th><th>Discrimination</th>
+                  <th>Schema</th><th>Context</th><th>Avg response</th>
+                  <th>Validated</th>
+                </tr>
+              </thead>
+              <tbody id="validation-tbody"></tbody>
+            </table>
           </div>
         </div>
 
@@ -942,6 +983,7 @@
   showPane(_initialPane);
 
   syncAiDependentControls();
+  loadValidations();
   (function () {
     const u = document.getElementById('ollama_url');
     if (u) u.addEventListener('input', syncAiDependentControls);
@@ -1379,28 +1421,231 @@
           `<option value="${esc(m)}"${m === d.current ? ' selected' : ''}>${esc(m)}</option>`
         ).join('');
         sel.disabled = false; btn.disabled = false;
+        decorateModelOptions();
+        renderValidationDetail();
       })
       .catch(() => {
         sel.innerHTML = '<option value="">Failed to fetch models</option>';
       });
   }
 
-  function applyOllamaModel() {
-    const sel   = document.getElementById('ollama-model-select');
-    const st    = document.getElementById('ollama-model-status');
+  // ---- Model validation ---------------------------------------------------
+  let _validations = {};      // model -> record
+  let _validationPoll = null;
+
+  const VAL_MARK = {supported: '✓ validated', failed: '✗ failed',
+                    forced: '⚠ forced'};
+
+  // A native <select> cannot carry per-option colour or markup reliably
+  // across browsers, so status rides in the option text. The rich view lives
+  // in the detail box and table below, where real markup works.
+  function decorateModelOptions() {
+    const sel = document.getElementById('ollama-model-select');
+    if (!sel) return;
+    Array.from(sel.options).forEach(function (opt) {
+      const base = opt.dataset.baseLabel || opt.textContent.trim();
+      opt.dataset.baseLabel = base;
+      const rec = _validations[opt.value];
+      const mark = rec ? (VAL_MARK[rec.status] || '') : '— untested';
+      opt.textContent = mark ? base + '  ' + mark : base;
+    });
+  }
+
+  function renderValidationDetail() {
+    const sel = document.getElementById('ollama-model-select');
+    const box = document.getElementById('validation-detail');
+    if (!sel || !box) return;
     const model = sel.value;
+    if (!model) { box.textContent = 'Select a model to see its validation status.'; return; }
+    const rec = _validations[model];
+    if (!rec) {
+      box.innerHTML = '<strong>' + escapeHtml(model) + '</strong> — not yet validated. ' +
+                      'Click Validate to test it.';
+      return;
+    }
+    let rows = (rec.tests || []).map(function (t) {
+      return '<li>' + (t.passed ? '✓ ' : '✗ ') +
+             escapeHtml(t.name) + ' — ' + escapeHtml(t.detail || '') + '</li>';
+    }).join('');
+    const when = rec.validated_at ? rec.validated_at.replace('T', ' ').slice(0, 16) : '';
+    box.innerHTML =
+      '<strong>' + escapeHtml(model) + '</strong> — ' +
+      (VAL_MARK[rec.status] || rec.status) +
+      (rec.indexer_count ? ' at ' + rec.indexer_count + ' indexers' : '') +
+      (rec.avg_response_ms ? ', avg ' + Math.round(rec.avg_response_ms / 1000) + 's' : '') +
+      (when ? ', ' + when : '') +
+      (rows ? '<ul style="margin:6px 0 0 18px">' + rows + '</ul>' : '');
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;',
+              '"': '&quot;', "'": '&#39;'}[c];
+    });
+  }
+
+  function loadValidations() {
+    return fetch('/config/ai/validations')
+      .then(r => r.json())
+      .then(function (d) {
+        _validations = {};
+        (d.validations || []).forEach(function (v) { _validations[v.model] = v; });
+        decorateModelOptions();
+        renderValidationDetail();
+        renderValidationTable(d.validations || []);
+      })
+      .catch(function () { /* status display only -- never block the pane */ });
+  }
+
+  function renderValidationTable(list) {
+    const tbl = document.getElementById('validation-table');
+    const body = document.getElementById('validation-tbody');
+    if (!tbl || !body) return;
+    if (!list.length) { tbl.style.display = 'none'; return; }
+    tbl.style.display = '';
+    function cell(t) {
+      if (!t) return '<td class="mono">—</td>';
+      return '<td class="mono" title="' + escapeHtml(t.detail || '') + '">' +
+             (t.passed ? '✓' : '✗') + '</td>';
+    }
+    body.innerHTML = list.map(function (v) {
+      const byName = {};
+      (v.tests || []).forEach(function (t) {
+        if (/^Discrimination/.test(t.name)) byName.disc = t;
+        else if (/^Schema/.test(t.name)) byName.schema = t;
+        else if (/^Context/.test(t.name)) byName.ctx = t;
+      });
+      return '<tr>' +
+        '<td class="mono">' + escapeHtml(v.model) + '</td>' +
+        '<td>' + (VAL_MARK[v.status] || escapeHtml(v.status)) + '</td>' +
+        cell(byName.disc) + cell(byName.schema) + cell(byName.ctx) +
+        '<td class="mono">' + (v.avg_response_ms
+            ? Math.round(v.avg_response_ms / 1000) + 's' : '—') + '</td>' +
+        '<td class="mono">' + escapeHtml((v.validated_at || '')
+            .replace('T', ' ').slice(0, 16)) + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  function validateModel() {
+    const sel = document.getElementById('ollama-model-select');
+    const model = sel ? sel.value : '';
     if (!model) return;
-    st.textContent = 'Saving…'; st.style.color = '';
-    fetch('/config/ollama/model', {
+    fetch('/config/ai/validate', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model}),
+      body: JSON.stringify({model: model}),
     })
-    .then(r => r.json())
-    .then(d => {
-      st.textContent = d.message;
-      st.style.color = d.ok ? 'var(--success)' : 'var(--error)';
-    })
-    .catch(() => { st.textContent = 'Request failed'; st.style.color = 'var(--error)'; });
+      .then(r => r.json().then(d => ({code: r.status, d: d})))
+      .then(function (res) {
+        if (!res.d.ok) {
+          document.getElementById('validation-detail').textContent = res.d.message;
+          return;
+        }
+        document.getElementById('validation-progress').style.display = '';
+        pollValidation();
+      });
+  }
+
+  function pollValidation() {
+    if (_validationPoll) clearInterval(_validationPoll);
+    _validationPoll = setInterval(function () {
+      fetch('/config/ai/validate/status').then(r => r.json()).then(function (s) {
+        const stage = document.getElementById('validation-stage');
+        if (stage) {
+          stage.textContent = (s.stage || 'Working') +
+            ' (' + (s.done || 0) + '/' + (s.total || 3) + ')' +
+            (s.model ? ' — ' + s.model : '');
+        }
+        if (!s.running) {
+          clearInterval(_validationPoll); _validationPoll = null;
+          document.getElementById('validation-progress').style.display = 'none';
+          loadValidations();
+        }
+      }).catch(function () {
+        clearInterval(_validationPoll); _validationPoll = null;
+        document.getElementById('validation-progress').style.display = 'none';
+      });
+    }, 2000);
+  }
+
+  // Apply never starts a validation run. On an unvalidated model it explains
+  // the situation and offers Cancel or Apply anyway; validation is always an
+  // explicit, separate action via the Validate button.
+  function applyOllamaModel() {
+    const sel = document.getElementById('ollama-model-select');
+    const status = document.getElementById('ollama-model-status');
+    const model = sel ? sel.value : '';
+    if (!model) return;
+    _applyModel(model, false).then(function (res) {
+      if (res.code === 409 && res.d.needs_validation) {
+        showApplyAnywayDialog(model, res.d.status);
+        return;
+      }
+      if (status) status.textContent = (res.d.ok ? '✓ ' : '✗ ') + res.d.message;
+      if (res.d.ok) loadValidations();
+    });
+  }
+
+  function _applyModel(model, force) {
+    return fetch('/config/ai/model', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model: model, force: !!force}),
+    }).then(r => r.json().then(d => ({code: r.status, d: d})));
+  }
+
+  function showApplyAnywayDialog(model, status) {
+    const existing = document.getElementById('apply-anyway-backdrop');
+    if (existing) existing.remove();
+    const known = (status === 'failed')
+      ? 'This model has been validated and <strong>failed</strong>.'
+      : 'This model has not been validated yet.';
+    const wrap = document.createElement('div');
+    wrap.id = 'apply-anyway-backdrop';
+    wrap.setAttribute('role', 'dialog');
+    wrap.setAttribute('aria-modal', 'true');
+    wrap.setAttribute('aria-labelledby', 'apply-anyway-title');
+    wrap.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;' +
+      'display:flex;align-items:center;justify-content:center;padding:16px';
+    wrap.innerHTML =
+      '<div style="background:var(--card);border:1px solid var(--border);' +
+      'border-radius:4px;max-width:460px;padding:18px">' +
+        '<div id="apply-anyway-title" class="form-section-title" ' +
+             'style="margin-bottom:10px">Apply an unvalidated model?</div>' +
+        '<p class="hint" style="margin-bottom:8px">' + known + '</p>' +
+        '<p class="hint" style="margin-bottom:8px"><code>' +
+          escapeHtml(model) + '</code> may score indexers incorrectly — ' +
+          'a model that silently mishandles the prompt returns plausible ' +
+          'numbers rather than an error.</p>' +
+        '<p class="hint" style="margin-bottom:14px">Run <strong>Validate' +
+          '</strong> first to check it, or apply anyway and it will be ' +
+          'flagged as forced.</p>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+          '<button type="button" class="btn btn-ghost btn-sm" ' +
+                  'id="apply-anyway-cancel">Cancel</button>' +
+          '<button type="button" class="btn btn-primary btn-sm" ' +
+                  'id="apply-anyway-go">Apply anyway</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(wrap);
+
+    function close() {
+      document.removeEventListener('keydown', onKey);
+      wrap.remove();
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    document.addEventListener('keydown', onKey);
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) close(); });
+    document.getElementById('apply-anyway-cancel').onclick = close;
+    document.getElementById('apply-anyway-go').onclick = function () {
+      close();
+      _applyModel(model, true).then(function (res) {
+        const status = document.getElementById('ollama-model-status');
+        if (status) status.textContent = (res.d.ok ? '⚠ ' : '✗ ') + res.d.message;
+        loadValidations();
+      });
+    };
+    document.getElementById('apply-anyway-go').focus();
   }
 
   // ---- Ollama update check ----
