@@ -43,6 +43,96 @@ class StateManager:
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # inspections
+    # ------------------------------------------------------------------
+
+    def record_inspection(self, record: dict, reasons: list[dict]) -> bool:
+        """
+        Persist one inspection and its reasons in a single transaction.
+
+        Both tables are written together so a crash can never leave an
+        inspection whose evidence is missing -- the record exists to explain
+        WHY something was actioned, and half of it is worse than none.
+
+        Unknown keys in `record` are ignored rather than raising, so callers
+        added by later ROADMAP items (risk_level, operating_mode, outcome)
+        need no change here.
+
+        Returns True on success. Evidence recording must never break a scan,
+        so failures are logged and swallowed.
+        """
+        cols = [
+            "inspection_id", "scan_id", "torrent_hash", "torrent_name",
+            "category", "rule_name", "arr_app", "indexer", "file_count",
+            "total_size", "flagged", "action", "action_detail",
+            "arr_success", "client_success", "risk_score", "risk_level",
+            "decision", "operating_mode", "replacement_id", "outcome",
+            "created_at", "updated_at",
+        ]
+        row = {c: record.get(c) for c in cols}
+        if not row["inspection_id"] or not row["torrent_hash"]:
+            log.warning("record_inspection: missing inspection_id or hash")
+            return False
+        row["created_at"] = row["created_at"] or _now_iso()
+        if row["flagged"] is None:
+            row["flagged"] = 1
+
+        placeholders = ", ".join("?" for _ in cols)
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    f"INSERT OR REPLACE INTO inspections ({', '.join(cols)}) "
+                    f"VALUES ({placeholders})",
+                    tuple(row[c] for c in cols),
+                )
+                for r in reasons:
+                    conn.execute(
+                        "INSERT INTO inspection_reasons "
+                        "(inspection_id, signal, detail, file_path, file_size, severity) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (row["inspection_id"], r.get("signal"), r.get("detail"),
+                         r.get("file_path"), r.get("file_size"), r.get("severity")),
+                    )
+                conn.commit()
+            return True
+        except Exception as exc:
+            log.warning(f"Failed to record inspection: {exc}")
+            return False
+
+    def get_inspections(self, limit: int = 50, torrent_hash: str = None) -> list[dict]:
+        """Recent inspections, newest first; optionally for one torrent."""
+        try:
+            with self._lock, self._conn() as conn:
+                if torrent_hash:
+                    rows = conn.execute(
+                        "SELECT * FROM inspections WHERE torrent_hash = ? "
+                        "ORDER BY created_at DESC LIMIT ?",
+                        (torrent_hash, limit),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM inspections ORDER BY created_at DESC LIMIT ?",
+                        (limit,),
+                    ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            log.warning(f"Failed to read inspections: {exc}")
+            return []
+
+    def get_inspection_reasons(self, inspection_id: str) -> list[dict]:
+        """Evidence rows for one inspection, in the order they fired."""
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM inspection_reasons WHERE inspection_id = ? "
+                    "ORDER BY id", (inspection_id,),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            log.warning(f"Failed to read inspection reasons: {exc}")
+            return []
+
     def ping(self) -> bool:
         """
         Cheap liveness check on the SQLite connection.
@@ -163,6 +253,76 @@ class StateManager:
                     response_json TEXT NOT NULL,
                     scored_at TEXT NOT NULL
                 )
+            """)
+            # inspections -- one durable record per FLAGGED release.
+            #
+            # Deliberately not one row per torrent per scan: at a 15-minute
+            # poll that writes thousands of "still clean, unchanged" rows a
+            # day. seen_torrents already handles first-sight dedup and
+            # processed_hashes already records terminal outcomes, so nothing
+            # is lost by recording only findings.
+            #
+            # Columns for ROADMAP items 24/25/26/27 exist here from the start
+            # and stay NULL until those land. Adding a nullable column later
+            # is an ALTER TABLE; reshaping a populated one is a migration.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS inspections (
+                    inspection_id  TEXT PRIMARY KEY,
+                    scan_id        TEXT,
+                    torrent_hash   TEXT NOT NULL,
+                    torrent_name   TEXT,
+                    category       TEXT,
+                    rule_name      TEXT,
+                    arr_app        TEXT,
+                    indexer        TEXT,
+                    file_count     INTEGER,
+                    total_size     INTEGER,
+                    flagged        INTEGER NOT NULL DEFAULT 1,
+                    action         TEXT,
+                    action_detail  TEXT,
+                    arr_success    INTEGER,
+                    client_success INTEGER,
+                    risk_score     INTEGER,
+                    risk_level     TEXT,
+                    decision       TEXT,
+                    operating_mode TEXT,
+                    replacement_id TEXT,
+                    outcome        TEXT,
+                    created_at     TEXT NOT NULL,
+                    updated_at     TEXT
+                )
+            """)
+            # inspection_reasons -- one row per signal that fired.
+            # Normalized rather than a JSON blob because item 24 assigns
+            # severity PER SIGNAL, and indexer-level questions ("how often
+            # does this indexer trip bad_extension?") are cheap SQL over rows
+            # and awkward over JSON.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS inspection_reasons (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    inspection_id TEXT NOT NULL,
+                    signal        TEXT NOT NULL,
+                    detail        TEXT,
+                    file_path     TEXT,
+                    file_size     INTEGER,
+                    severity      TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_insp_hash
+                ON inspections (torrent_hash, created_at DESC)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_insp_created
+                ON inspections (created_at DESC)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_insp_scan
+                ON inspections (scan_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reason_insp
+                ON inspection_reasons (inspection_id)
             """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS auto_manage_state (

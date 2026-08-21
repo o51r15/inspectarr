@@ -7,7 +7,7 @@ from .arrs.base import AbstractArrClient
 from .arrs.sonarr import SonarrClient
 from .arrs.radarr import RadarrClient
 from .notifier import Notifier
-from .rules import evaluate_rule
+from .rules import evaluate_rule, findings_to_filenames
 from .state import StateManager
 
 
@@ -197,7 +197,8 @@ class Scanner:
             self.log.warning(f"  Could not get files for {name}: {exc}")
             return False, False
 
-        flagged, bad_files = evaluate_rule(rule, files)
+        flagged, findings = evaluate_rule(rule, files)
+        bad_files = findings_to_filenames(findings)
 
         if not flagged:
             # Attribute grab for clean torrents (first sight only, deduped)
@@ -375,7 +376,8 @@ class Scanner:
             return
 
         # Re-evaluate (torrent may have been manually cleaned)
-        flagged, bad_files = evaluate_rule(rule, files)
+        flagged, retry_findings = evaluate_rule(rule, files)
+        bad_files = findings_to_filenames(retry_findings)
         if not flagged:
             self.log.info(f"  No longer flagged — resolving retry for {name}")
             self.state.resolve_retry(h)
