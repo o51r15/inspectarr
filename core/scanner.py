@@ -1,5 +1,6 @@
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from .config import AppConfig, Rule
 from .torrent_client import build_torrent_client
@@ -61,6 +62,9 @@ class Scanner:
         )
         self.qbit     = build_torrent_client(config)
         self.notifier = Notifier(config)
+        # Correlation ID for the current scan run. Every inspection and
+        # log event produced by one pass shares it (ROADMAP item 22).
+        self._scan_id = None
 
 
     # ------------------------------------------------------------------
@@ -96,11 +100,15 @@ class Scanner:
             due = self.state.get_due_retries(self.config.retry.max_attempts)
         if not due:
             return
+        # process_retries can run outside a scan (--retry-now), so it needs a
+        # correlation ID of its own rather than inheriting a stale one.
+        self._scan_id = str(uuid.uuid4())
         self.log.info(f"Processing {len(due)} retry queue entry/entries")
         for entry in due:
             self._process_one_retry(entry)
 
     def run_scan(self) -> dict:
+        self._scan_id = str(uuid.uuid4())
         stats = {
             "torrents_checked": 0,
             "flagged": 0,
@@ -206,13 +214,27 @@ class Scanner:
                 self._record_grab_attribution(h, name, rule.app)
             return False, False
 
-        self.log.info(f"FLAGGED [{rule.name}] {name} | bad: {bad_files}")
+        # One inspection per flagged release. This id correlates the log
+        # events, the arr/client calls and the stored evidence below.
+        inspection_id = str(uuid.uuid4())
+        self.log.info(
+            f"FLAGGED [{rule.name}] {name} | bad: {bad_files} "
+            f"| inspection={inspection_id}"
+        )
+
+        file_count = len(files)
+        total_size = sum(f.get("size", 0) or 0 for f in files)
 
         if self.config.dry_run:
-            self._handle_dry_run(h, name, rule, bad_files)
+            self._handle_dry_run(h, name, rule, bad_files,
+                                 inspection_id=inspection_id, findings=findings)
             return True, False
 
-        actioned = self._attempt_action(h, name, rule, bad_files)
+        actioned = self._attempt_action(
+            h, name, rule, bad_files,
+            inspection_id=inspection_id, findings=findings,
+            file_count=file_count, total_size=total_size,
+        )
         return True, actioned
 
 
@@ -220,19 +242,68 @@ class Scanner:
     # Action handlers
     # ------------------------------------------------------------------
 
-    def _handle_dry_run(self, hash: str, name: str, rule: Rule, bad_files: list[str]):
+    def _record_inspection(self, inspection_id, findings, hash, name, rule,
+                           action, arr_success=None, client_success=None,
+                           action_detail=None, indexer=None, file_count=None,
+                           total_size=None):
+        """
+        Persist the evidence for one flagged release (ROADMAP item 23).
+
+        Called at every terminal point of the action paths so each outcome --
+        deleted, dry-run, aborted, failed -- states explicitly what happened
+        rather than being inferred later from log ordering.
+
+        Never raises: the state layer swallows and logs its own failures, and
+        recording evidence must not be able to break a scan.
+        """
+        self.state.record_inspection(
+            {
+                "inspection_id":  inspection_id,
+                "scan_id":        self._scan_id,
+                "torrent_hash":   hash,
+                "torrent_name":   name,
+                "category":       rule.category,
+                "rule_name":      rule.name,
+                "arr_app":        rule.app,
+                "indexer":        indexer,
+                "file_count":     file_count,
+                "total_size":     total_size,
+                "flagged":        1,
+                "action":         action,
+                "action_detail":  action_detail,
+                "arr_success":    None if arr_success is None else int(arr_success),
+                "client_success": None if client_success is None else int(client_success),
+            },
+            [
+                {
+                    "signal":    f.signal,
+                    "detail":    f.detail,
+                    "file_path": f.file_path,
+                    "file_size": f.file_size,
+                }
+                for f in (findings or [])
+            ],
+        )
+
+    def _handle_dry_run(self, hash: str, name: str, rule: Rule, bad_files: list[str],
+                        inspection_id: str = None, findings: list = None):
         self.log.info(f"  [DRY RUN] Would delete: {name}")
         self.state.write_log({
             "level": "DRY_RUN", "event": "dry_run_flagged",
+            "inspection_id": inspection_id,
             "torrent_name": name, "hash": hash,
             "category": rule.category, "rule": rule.name, "bad_files": bad_files,
         })
         self.state.record_action(hash, name, rule.category, rule.name,
                                   "dry_run", False, False)
+        self._record_inspection(inspection_id, findings, hash, name, rule,
+                                action="dry_run")
         self.notifier.notify_dry_run(name, bad_files)
 
     def _attempt_action(
-        self, hash: str, name: str, rule: Rule, bad_files: list[str]
+        self, hash: str, name: str, rule: Rule, bad_files: list[str],
+        inspection_id: str = None, findings: list = None,
+        file_count: int = None, total_size: int = None,
     ) -> bool:
         """
         Blocklist in arr, then delete from qBittorrent.
@@ -261,6 +332,7 @@ class Scanner:
             self.log.error(f"  Arr blocklist failed ({rule.app}): {reason}")
             self.state.write_log({
                 "level": "ERROR", "event": "arr_failure",
+                "inspection_id": inspection_id,
                 "torrent_name": name, "hash": hash,
                 "arr": rule.app, "reason": reason,
                 "on_arr_failure": self.config.on_arr_failure,
@@ -269,6 +341,13 @@ class Scanner:
             if self.config.on_arr_failure == "abort":
                 self.state.record_action(hash, name, rule.category, rule.name,
                                           "failed", False, False)
+                self._record_inspection(
+                    inspection_id, findings, hash, name, rule,
+                    action="failed", arr_success=False, client_success=False,
+                    action_detail=f"arr blocklist failed: {reason}",
+                    indexer=indexer_name, file_count=file_count,
+                    total_size=total_size,
+                )
                 if self.config.retry.enabled:
                     count = self.state.queue_retry(
                         hash, name, rule.category, rule.name,
@@ -284,9 +363,29 @@ class Scanner:
             qbit_ok = False
             reason  = str(exc)
             self.log.error(f"  qBit delete failed: {reason}")
+            # The arr-failure path above writes a structured event but this
+            # one never did, so a torrent-client delete failure was invisible
+            # on the Events page -- visible only as a notification and a line
+            # in the process log. Symmetry matters here: this is a failed
+            # destructive action and must leave a trace in the action log.
+            self.state.write_log({
+                "level": "ERROR", "event": "client_delete_failed",
+                "inspection_id": inspection_id,
+                "torrent_name": name, "hash": hash,
+                "category": rule.category, "rule": rule.name,
+                "client": self.config.torrent_client,
+                "reason": reason, "arr_blocklisted": arr_success,
+            })
             self.notifier.notify_error(f"qBit delete failed: {name}", reason)
             self.state.record_action(hash, name, rule.category, rule.name,
                                       "failed", arr_success, False)
+            self._record_inspection(
+                inspection_id, findings, hash, name, rule,
+                action="failed", arr_success=arr_success, client_success=False,
+                action_detail=f"torrent client delete failed: {reason}",
+                indexer=indexer_name, file_count=file_count,
+                total_size=total_size,
+            )
             if self.config.retry.enabled:
                 count = self.state.queue_retry(
                     hash, name, rule.category, rule.name,
@@ -299,8 +398,14 @@ class Scanner:
         self.state.record_action(hash, name, rule.category, rule.name,
                                   "deleted", arr_success, qbit_ok)
         self.state.resolve_retry(hash)
+        self._record_inspection(
+            inspection_id, findings, hash, name, rule,
+            action="deleted", arr_success=arr_success, client_success=qbit_ok,
+            indexer=indexer_name, file_count=file_count, total_size=total_size,
+        )
         self.state.write_log({
             "level": "ACTION", "event": "torrent_deleted",
+            "inspection_id": inspection_id,
             "torrent_name": name, "hash": hash,
             "category": rule.category, "rule": rule.name,
             "arr": rule.app, "bad_files": bad_files,
@@ -383,7 +488,14 @@ class Scanner:
             self.state.resolve_retry(h)
             return
 
-        success = self._attempt_action(h, name, rule, bad_files)
+        # A retry that reaches here is a fresh action attempt, so it opens
+        # its own inspection rather than mutating the original.
+        success = self._attempt_action(
+            h, name, rule, bad_files,
+            inspection_id=str(uuid.uuid4()), findings=retry_findings,
+            file_count=len(files),
+            total_size=sum(f.get("size", 0) or 0 for f in files),
+        )
         if success:
             self.state.resolve_retry(h)
 
