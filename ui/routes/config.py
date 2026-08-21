@@ -354,6 +354,21 @@ def _form_to_config(form, existing: dict) -> dict:
             }
         elif "scoring" in (existing.get("prowlarr") or {}):
             prowlarr_block["scoring"] = existing["prowlarr"]["scoring"]
+        # AI (Ollama) settings from the AI pane. Merge INTO the existing
+        # sub-block: `model` and `system_prompt` are written by their own
+        # endpoints and have no field here, so a wholesale replace would wipe
+        # both on every save (same clobber class as BUG-10/BUG-11).
+        if "ollama_url" in form:
+            ollama_block = dict(prowlarr_block.get("ollama", {}) or {})
+            ollama_block.update({
+                # Normalise once here rather than at each call site doing
+                # f"{url}/api/tags" -- a trailing slash yields a 404.
+                "url":                form.get("ollama_url", "").strip().rstrip("/"),
+                "timeout":            _int(form.get("ollama_timeout"), 120),
+                "cache_ttl_hours":    _int(form.get("ollama_cache_ttl_hours"), 24),
+                "update_check_hours": _int(form.get("ollama_update_check_hours"), 24),
+            })
+            prowlarr_block["ollama"] = ollama_block
         # Auto-manage from form fields
         prowlarr_block["auto_manage"] = {
             "enabled": "prowlarr_auto_manage_enabled" in form,
@@ -577,6 +592,34 @@ def prowlarr_rescore():
         scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
         changed = scorer.reorder()
         return jsonify({"ok": True, "changed": changed})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": safe_error(exc)})
+
+
+@config_bp.route("/config/ai/test-connection", methods=["POST"])
+def ai_test_connection():
+    """
+    Probe an Ollama server and report what it has.
+
+    Takes the URL from the request body so the field can be tested before it
+    is saved -- matching the other eight test-connection endpoints.
+    """
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip().rstrip("/")
+    if not url:
+        return jsonify({"ok": False, "message": "No URL provided"})
+    try:
+        import requests as req
+        resp = req.get(f"{url}/api/tags", timeout=10)
+        if resp.status_code != 200:
+            return jsonify({"ok": False,
+                            "message": f"HTTP {resp.status_code} from {url}"})
+        models = resp.json().get("models", []) or []
+        return jsonify({
+            "ok": True,
+            "message": f"Connected — {len(models)} model(s) available",
+            "model_count": len(models),
+        })
     except Exception as exc:
         return jsonify({"ok": False, "message": safe_error(exc)})
 

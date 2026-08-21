@@ -338,40 +338,6 @@
         </div>
 
         <div class="form-section">
-          <div class="form-section-title" style="display:flex;align-items:center;gap:8px">
-            AI Model (Ollama)
-            <span id="ollama-update-badge" class="badge badge-warning" style="display:none;cursor:pointer"
-                  onclick="document.getElementById('ollama-update-info').style.display='block'"
-                  title="A newer version of this model is available">Update available</span>
-          </div>
-          <div id="ollama-update-info" class="hint" style="display:none;margin-bottom:0.5rem;padding:8px;background:var(--bg-hover);border-radius:6px">
-            ⬆ A newer version of your Ollama model is available. Open your Ollama host and run
-            <code>ollama pull &lt;model&gt;</code> to update.
-            <button type="button" class="btn btn-ghost btn-sm" style="margin-left:8px"
-                    onclick="this.parentElement.style.display='none'">Dismiss</button>
-          </div>
-          <p class="hint" style="margin-bottom:0.75rem">
-            Select which Ollama model to use for AI-powered indexer scoring and analysis.
-            Requires a valid Ollama URL configured above.
-          </p>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Model</label>
-              <div style="display:flex;gap:8px;align-items:center">
-                <select id="ollama-model-select" style="flex:1" disabled>
-                  <option value="">Loading…</option>
-                </select>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="loadOllamaModels()" title="Refresh model list">↻</button>
-              </div>
-            </div>
-            <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
-              <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn" onclick="applyOllamaModel()" disabled>Apply</button>
-              <span id="ollama-model-status" class="hint"></span>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-section">
           <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
             <span>Scoring Weights &amp; Multipliers</span>
             <button type="button" class="btn btn-ghost btn-sm" onclick="resetScoringDefaults()"
@@ -442,27 +408,6 @@
         </div>
 
         <div class="form-section">
-          <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
-            <span>AI Scoring Prompt</span>
-            <div style="display:flex;gap:8px;align-items:center">
-              <button type="button" class="btn btn-ghost btn-sm" onclick="resetSystemPrompt()"
-                      title="Reset to the built-in default prompt">Reset to Default</button>
-              <button type="button" class="btn btn-primary btn-sm" onclick="saveSystemPrompt()">Save Prompt</button>
-              <span id="system-prompt-status" class="hint"></span>
-            </div>
-          </div>
-          <p class="hint" style="margin-bottom:0.75rem">
-            The system prompt sent to Ollama when scoring indexers. Edit to customize scoring behavior.
-            Leave empty or click "Reset to Default" to use the built-in prompt.
-          </p>
-          <div class="form-group">
-            <textarea id="ollama-system-prompt" rows="12"
-                      style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap"
-                      placeholder="Loading…"></textarea>
-          </div>
-        </div>
-
-        <div class="form-section">
           <div class="form-section-title">Auto-Manage Indexers</div>
           <p class="hint" style="margin-bottom:0.75rem">
             Automatically disable indexers that consistently score below a health threshold,
@@ -501,6 +446,117 @@
       </div>
 
       <!-- PANE: Notifications -->
+      <!-- PANE: AI -->
+      <div class="settings-pane" data-pane="ai">
+
+        <p class="hint" style="margin-bottom:1rem">
+          AI features are entirely optional. Inspectarr scores indexers with a
+          deterministic weighted formula on its own; Ollama adds an advisory
+          overlay on top. Leave the URL blank to run without AI.
+        </p>
+
+        <div class="form-section">
+          <div class="form-section-title">Ollama Connection</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Ollama URL</label>
+              <input type="text" name="ollama_url" id="ollama_url"
+                     placeholder="http://192.168.1.125:11434"
+                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('url','') }}">
+              <span class="hint">Base URL of your Ollama server. Blank disables all AI features.</span>
+            </div>
+            <div class="form-group">
+              <label>Timeout (seconds)</label>
+              <input type="number" name="ollama_timeout" id="ollama_timeout" min="10" max="1800"
+                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('timeout',120) }}">
+              <span class="hint">Hard cutoff per scoring run. Allow extra on the first run after a model swap — the model has to load.</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex-direction:row;align-items:center;gap:8px">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="testOllama()">Test Connection</button>
+              <span id="ollama-test-status" class="hint"></span>
+            </div>
+          </div>
+        </div>
+
+
+        <div class="form-section">
+          <div class="form-section-title" style="display:flex;align-items:center;gap:8px">
+            AI Model (Ollama)
+            <span id="ollama-update-badge" class="badge badge-warning" style="display:none;cursor:pointer"
+                  onclick="document.getElementById('ollama-update-info').style.display='block'"
+                  title="A newer version of this model is available">Update available</span>
+          </div>
+          <div id="ollama-update-info" class="hint" style="display:none;margin-bottom:0.5rem;padding:8px;background:var(--bg-hover);border-radius:6px">
+            ⬆ A newer version of your Ollama model is available. Open your Ollama host and run
+            <code>ollama pull &lt;model&gt;</code> to update.
+            <button type="button" class="btn btn-ghost btn-sm" style="margin-left:8px"
+                    onclick="this.parentElement.style.display='none'">Dismiss</button>
+          </div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            Select which Ollama model to use for AI-powered indexer scoring and analysis.
+            Requires a valid Ollama URL configured above.
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Model</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <select id="ollama-model-select" style="flex:1" disabled>
+                  <option value="">Loading…</option>
+                </select>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="loadOllamaModels()" title="Refresh model list">↻</button>
+              </div>
+            </div>
+            <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
+              <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn" onclick="applyOllamaModel()" disabled>Apply</button>
+              <span id="ollama-model-status" class="hint"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>AI Scoring Prompt</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="resetSystemPrompt()"
+                      title="Reset to the built-in default prompt">Reset to Default</button>
+              <button type="button" class="btn btn-primary btn-sm" onclick="saveSystemPrompt()">Save Prompt</button>
+              <span id="system-prompt-status" class="hint"></span>
+            </div>
+          </div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            The system prompt sent to Ollama when scoring indexers. Edit to customize scoring behavior.
+            Leave empty or click "Reset to Default" to use the built-in prompt.
+          </p>
+          <div class="form-group">
+            <textarea id="ollama-system-prompt" rows="12"
+                      style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap"
+                      placeholder="Loading…"></textarea>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Scoring Behaviour</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Cache TTL (hours)</label>
+              <input type="number" name="ollama_cache_ttl_hours" id="ollama_cache_ttl_hours" min="0" max="720"
+                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('cache_ttl_hours',24) }}">
+              <span class="hint">How long an AI result is reused for identical input. The cache key includes the model and system prompt, so changing either always rescores.</span>
+            </div>
+            <div class="form-group">
+              <label>Model update check (hours)</label>
+              <input type="number" name="ollama_update_check_hours" id="ollama_update_check_hours" min="0" max="720"
+                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('update_check_hours',24) }}">
+              <span class="hint">How often to check whether your model has a newer version published. 0 disables the check.</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+
       <div class="settings-pane" data-pane="notifications">
         <div class="form-section">
           <div class="form-section-title">Apprise Notifications</div>
@@ -804,10 +860,66 @@
   }
   setEditMode('form');
 
+  // ---- AI pane -----------------------------------------------------------
+  function aiSettingsPayload() {
+    return {
+      url:                document.getElementById('ollama_url').value.trim(),
+      timeout:            document.getElementById('ollama_timeout').value,
+      cache_ttl_hours:    document.getElementById('ollama_cache_ttl_hours').value,
+      update_check_hours: document.getElementById('ollama_update_check_hours').value,
+    };
+  }
+
+  function testOllama() {
+    const el = document.getElementById('ollama-test-status');
+    const url = document.getElementById('ollama_url').value.trim();
+    if (!url) { el.textContent = 'Enter a URL first'; return; }
+    el.textContent = 'Testing…';
+    fetch('/config/ai/test-connection', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url}),
+    })
+      .then(r => r.json())
+      .then(d => { el.textContent = (d.ok ? '✓ ' : '✗ ') + d.message; })
+      .catch(e => { el.textContent = '✗ ' + e; });
+  }
+
+  // Ollama toggles on the Notifications pane depend on a configured URL.
+  // Disable rather than hide them, so it is clear the capability exists and
+  // what unlocks it.
+  function syncAiDependentControls() {
+    const urlEl = document.getElementById('ollama_url');
+    if (!urlEl) return;
+    const configured = urlEl.value.trim().length > 0;
+    ['digest_use_ollama', 'summary_use_ollama'].forEach(function (id) {
+      const cb = document.getElementById(id);
+      if (!cb) return;
+      cb.disabled = !configured;
+      const row = cb.closest('.toggle-row') || cb.parentElement;
+      if (row) row.style.opacity = configured ? '' : '0.5';
+      const lbl = row ? row.querySelector('label[for="' + id + '"]') : null;
+      if (lbl) {
+        lbl.title = configured ? '' : 'Requires an Ollama URL — set one in Settings → AI';
+      }
+      let hint = document.getElementById(id + '-ai-hint');
+      if (!configured && !hint && row) {
+        hint = document.createElement('span');
+        hint.id = id + '-ai-hint';
+        hint.className = 'hint';
+        hint.style.marginLeft = '8px';
+        hint.innerHTML = 'Requires <a href="/config#ai">Ollama</a>';
+        row.appendChild(hint);
+      } else if (configured && hint) {
+        hint.remove();
+      }
+    });
+  }
+
   // ---- Pane switching — driven by the sidebar Settings group + URL hash ----
   const paneNames = {
     connections: 'Connections', rules: 'Rules', indexers: 'Indexers',
-    notifications: 'Notifications', general: 'General', advanced: 'Advanced',
+    notifications: 'Notifications', ai: 'AI', general: 'General', advanced: 'Advanced',
     backups: 'Backups',
   };
 
@@ -828,6 +940,12 @@
   // script via the showPane wrapper. Store initial pane and re-fire after wrapper.
   var _initialPane = (window.location.hash || '').replace('#', '') || 'connections';
   showPane(_initialPane);
+
+  syncAiDependentControls();
+  (function () {
+    const u = document.getElementById('ollama_url');
+    if (u) u.addEventListener('input', syncAiDependentControls);
+  })();
 
   // Sidebar sub-item clicks: switch pane without a full reload (same page)
   document.querySelectorAll('#settings-group .nav-group-items a').forEach(a => {
