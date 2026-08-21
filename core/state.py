@@ -133,6 +133,80 @@ class StateManager:
             log.warning(f"Failed to read inspection reasons: {exc}")
             return []
 
+    # ------------------------------------------------------------------
+    # validated_models
+    # ------------------------------------------------------------------
+
+    def save_validation(self, model: str, result: dict,
+                        digest: str = None) -> bool:
+        """Store a validation run. status is 'supported', 'failed' or 'forced'."""
+        import json as _json
+        try:
+            status = "supported" if result.get("passed") else "failed"
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO validated_models "
+                    "(model, validated_at, status, passed, indexer_count, "
+                    " avg_response_ms, model_digest, results_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (model, _now_iso(), status, 1 if result.get("passed") else 0,
+                     result.get("indexer_count"), result.get("avg_response_ms"),
+                     digest, _json.dumps(result)),
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            log.warning(f"Failed to save validation for {model}: {exc}")
+            return False
+
+    def mark_model_forced(self, model: str, digest: str = None) -> bool:
+        """
+        Record that a model was applied without passing validation.
+
+        Kept distinct from 'failed' so the UI can say "you chose this
+        knowingly" rather than "this is broken", and so a later successful
+        validation cleanly overwrites it.
+        """
+        import json as _json
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO validated_models "
+                    "(model, validated_at, status, passed, indexer_count, "
+                    " avg_response_ms, model_digest, results_json) "
+                    "VALUES (?, ?, 'forced', 0, NULL, NULL, ?, ?)",
+                    (model, _now_iso(), digest,
+                     _json.dumps({"forced": True})),
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            log.warning(f"Failed to mark {model} forced: {exc}")
+            return False
+
+    def get_validations(self) -> list[dict]:
+        """Every validation on record, most recent first."""
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM validated_models ORDER BY validated_at DESC"
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            log.warning(f"Failed to read validations: {exc}")
+            return []
+
+    def get_validation(self, model: str) -> dict | None:
+        try:
+            with self._lock, self._conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM validated_models WHERE model = ?", (model,)
+                ).fetchone()
+            return dict(row) if row else None
+        except Exception as exc:
+            log.warning(f"Failed to read validation for {model}: {exc}")
+            return None
+
     def ping(self) -> bool:
         """
         Cheap liveness check on the SQLite connection.
@@ -297,6 +371,21 @@ class StateManager:
             # severity PER SIGNAL, and indexer-level questions ("how often
             # does this indexer trip bad_extension?") are cheap SQL over rows
             # and awkward over JSON.
+            # validated_models -- proof that a model can do the scoring job.
+            # indexer_count records what it was proven against: "passes" is
+            # only meaningful relative to the prompt size it handled.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS validated_models (
+                    model           TEXT PRIMARY KEY,
+                    validated_at    TEXT NOT NULL,
+                    status          TEXT NOT NULL,
+                    passed          INTEGER NOT NULL DEFAULT 0,
+                    indexer_count   INTEGER,
+                    avg_response_ms INTEGER,
+                    model_digest    TEXT,
+                    results_json    TEXT
+                )
+            """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS inspection_reasons (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
