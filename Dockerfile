@@ -19,9 +19,12 @@ RUN mkdir -p /app/data && chown -R inspectarr:inspectarr /app/data
 
 USER inspectarr
 
-# M-08: healthcheck ensures container reports healthy status
+# Healthcheck probes /api/health, which reports process, database and
+# scheduler state and returns 503 when a core component has failed.
+# It must NOT point at "/" -- that route is behind basic auth, so an
+# auth-enabled deployment would report unhealthy and be restarted forever.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/')" || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8585/api/health')" || exit 1
 
 # Web UI + built-in scheduler daemon
 EXPOSE 8585

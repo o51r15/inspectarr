@@ -43,6 +43,22 @@ class StateManager:
         except Exception:
             pass
 
+    def ping(self) -> bool:
+        """
+        Cheap liveness check on the SQLite connection.
+
+        Runs a trivial query under the same lock every other operation uses,
+        so it proves the shared connection is genuinely usable rather than
+        merely non-None. Returns False instead of raising -- callers are
+        health probes that must never themselves be a source of errors.
+        """
+        try:
+            with self._lock:
+                self._db.execute("SELECT 1").fetchone()
+            return True
+        except Exception:
+            return False
+
     def __del__(self):
         self.close()
 

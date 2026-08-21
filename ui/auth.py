@@ -119,6 +119,15 @@ def check_auth(config_path: str):
     if request.path.startswith("/webhook/"):
         return None
 
+    # The bare /api/health probe is exempt: Docker's HEALTHCHECK runs inside
+    # the container with no credentials, and gating it behind auth would mark
+    # every auth-enabled deployment unhealthy. It exposes only version,
+    # database state and scheduler state -- no config, paths or service names.
+    # ?deps=1 reaches out to the network, so that variant is NOT exempt and
+    # the route re-checks auth itself.
+    if request.path == "/api/health" and not request.args.get("deps"):
+        return None
+
     if _cross_origin_write():
         return Response("Cross-origin request rejected.", 403)
 

@@ -108,3 +108,101 @@ def api_logs():
         return jsonify({"ok": True, "entries": entries, "total": len(entries)})
     except Exception as exc:
         return jsonify({"ok": False, "message": safe_error(exc)}), 500
+
+
+@api_bp.route("/api/health", methods=["GET"])
+def api_health():
+    """
+    Liveness / readiness probe.
+
+    Fast by default: makes NO outbound network calls, so it is safe for a
+    Docker HEALTHCHECK polling every 30s. It reports Inspectarr's own health
+    -- the process, its database, and its scheduler thread -- deliberately
+    NOT the health of Sonarr/Prowlarr/etc. A probe that failed because a
+    downstream service was down would restart a perfectly healthy container.
+
+    Pass ?deps=1 to additionally run live connection checks against every
+    configured service. That path does make outbound calls, is slow when a
+    service is unreachable, and still requires authentication. Do not use it
+    in a HEALTHCHECK.
+
+    Status: 200 when healthy, 503 when a core component has failed.
+    """
+    from core import __version__
+
+    checks = {}
+    healthy = True
+
+    # --- Database -----------------------------------------------------
+    state = current_app.config.get("STATE")
+    if state is None:
+        checks["database"] = "unavailable"
+        healthy = False
+    elif state.ping():
+        checks["database"] = "ok"
+    else:
+        checks["database"] = "error"
+        healthy = False
+
+    # --- Scheduler ----------------------------------------------------
+    # "stopped" is a legitimate configuration: the scheduler ships disabled
+    # by default and webhook-only deployments never start it. The one state
+    # that genuinely means unhealthy is the flag claiming it runs while the
+    # thread is gone -- that means the loop died without cleaning up.
+    scheduler = current_app.config.get("SCHEDULER")
+    last_scan = None
+    if scheduler is None:
+        checks["scheduler"] = "unavailable"
+        healthy = False
+    else:
+        try:
+            last_scan = scheduler.last_run
+            thread = getattr(scheduler, "_thread", None)
+            thread_alive = bool(thread is not None and thread.is_alive())
+            if scheduler.running and not thread_alive:
+                checks["scheduler"] = "died"
+                healthy = False
+            elif not scheduler.running:
+                checks["scheduler"] = "stopped"
+            elif scheduler.is_scanning():
+                checks["scheduler"] = "scanning"
+            else:
+                checks["scheduler"] = "running"
+        except Exception:
+            checks["scheduler"] = "error"
+            healthy = False
+
+    payload = {
+        "status":    "healthy" if healthy else "unhealthy",
+        "version":   __version__,
+        "checks":    checks,
+        "last_scan": last_scan,
+    }
+
+    # --- Optional dependency checks (?deps=1) -------------------------
+    # Auth is re-checked here because check_auth() exempts the bare probe so
+    # Docker can reach it without credentials. This branch reaches out to the
+    # network, so it does not get that exemption.
+    if request.args.get("deps"):
+        from ui.auth import check_auth
+        denied = check_auth(current_app.config["CONFIG_PATH"])
+        if denied is not None:
+            return denied
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            from core.config import load_config
+            from ui.routes.system import _check_one
+
+            cfg = load_config(current_app.config["CONFIG_PATH"])
+            names = ["Torrent Client", "Sonarr", "Radarr",
+                     "Lidarr", "Prowlarr", "Ollama"]
+            with ThreadPoolExecutor(max_workers=len(names)) as pool:
+                results = list(pool.map(lambda n: _check_one(n, cfg), names))
+            payload["dependencies"] = results
+        except Exception as exc:
+            # A dependency-check failure is reported, not raised: the core
+            # health verdict above stands on its own.
+            payload["dependencies"] = []
+            payload["dependencies_error"] = safe_error(exc)
+
+    return jsonify(payload), (200 if healthy else 503)
