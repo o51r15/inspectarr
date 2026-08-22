@@ -517,6 +517,23 @@
         </p>
 
         <div class="form-section">
+          <div class="form-section-title">AI Features</div>
+          <div class="toggle-row" style="margin-bottom:0.5rem">
+            <input type="checkbox" name="ollama_enabled" id="ollama_enabled"
+                   onchange="syncAiEnabled()"
+                   {{ 'checked' if cfg.get('prowlarr',{}).get('ollama',{}).get('enabled', (cfg.get('prowlarr',{}).get('ollama',{}).get('url') or '') != '') else '' }}>
+            <label for="ollama_enabled">Enable AI features</label>
+          </div>
+          <p class="hint" style="margin:0">
+            Off by default. While disabled, nothing on this page is used:
+            indexer AI scoring, AI notification digests and periodic summaries
+            are all skipped, and Inspectarr never contacts an Ollama server.
+            Detection, severity grading, quarantine and remediation are
+            unaffected — none of them use AI.
+          </p>
+        </div>
+
+        <div class="form-section">
           <div class="form-section-title">Ollama Connection</div>
           <div class="form-row">
             <div class="form-group">
@@ -962,6 +979,43 @@
   }
   setEditMode('form');
 
+  // The AI master switch. Everything on this pane, plus the Ollama-backed
+  // notification options, is meaningless without it -- disable rather than
+  // hide, so the capability stays discoverable and it is obvious what
+  // unlocks it.
+  const AI_FIELDS = ['ollama_url', 'ollama_timeout', 'ollama_cache_ttl_hours',
+                     'ollama_update_check_hours', 'ollama-model-select',
+                     'ollama-apply-btn', 'ollama-validate-btn',
+                     'ollama-system-prompt'];
+
+  function aiEnabled() {
+    const t = document.getElementById('ollama_enabled');
+    return !t || t.checked;
+  }
+
+  function syncAiEnabled() {
+    const on = aiEnabled();
+    AI_FIELDS.forEach(function (id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.disabled = !on;
+      const grp = el.closest('.form-group') || el.parentElement;
+      if (grp) grp.style.opacity = on ? '' : '0.5';
+    });
+    document.querySelectorAll('[data-pane="ai"] .form-section').forEach(
+      function (sec, i) {
+        // Leave the switch's own section fully lit.
+        if (i === 0) return;
+        sec.style.opacity = on ? '' : '0.55';
+      });
+    // Buttons driven by onclick rather than an id lookup.
+    document.querySelectorAll('[data-pane="ai"] button').forEach(function (b) {
+      if (b.id === 'ollama_enabled') return;
+      b.disabled = !on;
+    });
+    syncAiDependentControls();
+  }
+
   // ---- AI pane -----------------------------------------------------------
   function aiSettingsPayload() {
     return {
@@ -993,7 +1047,9 @@
   function syncAiDependentControls() {
     const urlEl = document.getElementById('ollama_url');
     if (!urlEl) return;
-    const configured = urlEl.value.trim().length > 0;
+    const master = document.getElementById('ollama_enabled');
+    const configured = urlEl.value.trim().length > 0
+                       && (!master || master.checked);
     ['digest_use_ollama', 'summary_use_ollama'].forEach(function (id) {
       const cb = document.getElementById(id);
       if (!cb) return;
@@ -1043,7 +1099,7 @@
   var _initialPane = (window.location.hash || '').replace('#', '') || 'connections';
   showPane(_initialPane);
 
-  syncAiDependentControls();
+  syncAiEnabled();
   describeBands();
   loadValidations();
   (function () {

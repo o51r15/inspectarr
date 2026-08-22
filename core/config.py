@@ -114,6 +114,9 @@ class AuthConfig:
 
 @dataclass
 class OllamaConfig:
+    # Master switch for every AI feature. Ships off: AI is optional, and a
+    # fresh install should not reach out to a model nobody configured.
+    enabled: bool = False   # master switch
     url: str = ""
     model: str = ""
     timeout: int = 120
@@ -272,6 +275,37 @@ def _as_list(value, default=None):
     return [value]
 
 
+def _parse_ollama(o_raw: dict) -> "OllamaConfig":
+    """
+    Build the Ollama config, honouring the master switch.
+
+    When AI is disabled the URL is deliberately resolved to "" rather than
+    kept. Every consumer -- indexer scoring, the notifier, the summarizer,
+    the Status page connection check -- already treats a blank URL as "no AI
+    available", so blanking it here disables AI everywhere through one change
+    instead of six scattered `if enabled` guards that a future consumer could
+    forget to add. The value on disk is untouched, so the Settings form still
+    shows it and re-enabling restores it.
+
+    `enabled` defaults to whether a URL is configured, NOT to False. A fresh
+    install has no URL and is therefore off, which is the intended shipping
+    default -- but an existing install that was working before this key
+    existed keeps working instead of silently losing AI on upgrade. Writing
+    `enabled: false` explicitly always wins.
+    """
+    url = (o_raw.get("url") or "").rstrip("/")
+    enabled = bool(o_raw.get("enabled", bool(url)))
+    return OllamaConfig(
+        enabled=enabled,
+        url=url if enabled else "",
+        model=o_raw.get("model", ""),
+        timeout=o_raw.get("timeout", 120),
+        cache_ttl_hours=o_raw.get("cache_ttl_hours", 24),
+        system_prompt=o_raw.get("system_prompt", ""),
+        update_check_hours=int(o_raw.get("update_check_hours", 24)),
+    )
+
+
 def load_config(path: str = "config.yaml") -> AppConfig:
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
@@ -411,14 +445,7 @@ def _parse_config(raw: dict) -> AppConfig:
             query_failure_mult=float(s_raw.get("query_failure_mult", 1.0)),
             rss_failure_mult=float(s_raw.get("rss_failure_mult", 0.5)),
         ),
-        ollama=OllamaConfig(
-            url=o_raw.get("url", "").rstrip("/"),
-            model=o_raw.get("model", ""),
-            timeout=o_raw.get("timeout", 120),
-            cache_ttl_hours=o_raw.get("cache_ttl_hours", 24),
-            system_prompt=o_raw.get("system_prompt", ""),
-            update_check_hours=int(o_raw.get("update_check_hours", 24)),
-        ),
+        ollama=_parse_ollama(o_raw),
         auto_manage=AutoManageConfig(
             enabled=am_raw.get("enabled", False),
             disable_threshold=float(am_raw.get("disable_threshold", 30.0)),

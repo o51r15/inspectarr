@@ -366,6 +366,9 @@ def _form_to_config(form, existing: dict) -> dict:
         if "ollama_url" in form:
             ollama_block = dict(prowlarr_block.get("ollama", {}) or {})
             ollama_block.update({
+                # Master switch. Checkbox absence means unchecked, which is
+                # exactly the semantics we want: unticking it disables AI.
+                "enabled":            "ollama_enabled" in form,
                 # Normalise once here rather than at each call site doing
                 # f"{url}/api/tags" -- a trailing slash yields a 404.
                 "url":                form.get("ollama_url", "").strip().rstrip("/"),
@@ -771,6 +774,11 @@ def ai_validate():
         raw = _load_raw(config_path)
         ollama = (raw.get("prowlarr", {}) or {}).get("ollama", {}) or {}
         url = (ollama.get("url") or "").strip()
+        # Validation makes real model calls, so it honours the master switch
+        # even though the form fields are read straight from the raw config.
+        if not ollama.get("enabled", bool(url)):
+            return jsonify({"ok": False,
+                            "message": "AI features are disabled"}), 400
         if not url:
             return jsonify({"ok": False,
                             "message": "Set an Ollama URL first"}), 400
