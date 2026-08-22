@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Quarantine — inspectarr{% endblock %}
+{% block page_title %}Quarantine{% endblock %}
+
+{% block content %}
+
+<div class="form-section">
+  <p class="hint" style="margin:0">
+    Torrents held for review instead of deleted. Each one is paused and waiting
+    on a decision. Nothing here is removed automatically unless you configure a
+    quarantine timeout.
+  </p>
+</div>
+
+{% if not held %}
+  <div class="form-section">
+    <div class="form-section-title">Nothing held</div>
+    <p class="hint" style="margin:0">
+      Quarantine holds a catch instead of deleting it when its severity falls
+      between <code>min_severity</code> and <code>remediate_at</code>. Both
+      default to <code>LOW</code>, which means everything flagged is removed
+      immediately and nothing is ever held. Raise
+      <code>remediation.remediate_at</code> in
+      <a href="/config#ai">Settings</a> to start holding lower-severity catches
+      for review.
+    </p>
+  </div>
+{% else %}
+<div class="form-section">
+  <div class="form-section-title">Awaiting review ({{ held|length }})</div>
+  <div style="overflow-x:auto">
+    <table class="data-table">
+      <caption class="sr-only">Torrents currently held in quarantine</caption>
+      <thead>
+        <tr>
+          <th>Torrent</th><th>Risk</th><th>Rule</th><th>Why</th>
+          <th>Held since</th><th>Expires</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for q in held %}
+        <tr id="row-{{ q.hash }}">
+          <td>
+            {{ q.torrent_name }}
+            {% if q.paused_ok == 0 %}
+              <span class="badge badge-warning"
+                    title="The torrent client refused to pause this — it is still downloading">
+                not paused</span>
+            {% endif %}
+          </td>
+          <td><span class="mono">{{ q.risk_level or '—' }}</span></td>
+          <td class="mono">{{ q.rule_name }}</td>
+          <td class="mono">{{ (q.bad_files or [])[:3]|join(', ') }}{% if (q.bad_files or [])|length > 3 %} +{{ (q.bad_files|length) - 3 }}{% endif %}</td>
+          <td class="mono">{{ (q.quarantined_at or '')[:16]|replace('T', ' ') }}</td>
+          <td class="mono">{{ (q.expires_at or '—')[:16]|replace('T', ' ') }}</td>
+          <td style="white-space:nowrap">
+            <button type="button" class="btn btn-ghost btn-sm"
+                    onclick="qAction('{{ q.hash }}', 'release')"
+                    title="Resume the download — this was a false positive">Release</button>
+            <button type="button" class="btn btn-ghost btn-sm"
+                    onclick="qAction('{{ q.hash }}', 'keep')"
+                    title="Leave it paused but stop asking">Keep paused</button>
+            <button type="button" class="btn btn-primary btn-sm"
+                    onclick="qAction('{{ q.hash }}', 'remediate')"
+                    title="Blocklist in the arr and delete from the torrent client">Delete</button>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p id="q-status" class="hint" style="margin-top:0.5rem"></p>
+</div>
+{% endif %}
+
+{% if recent %}
+<div class="form-section">
+  <div class="form-section-title">Recently resolved</div>
+  <div style="overflow-x:auto">
+    <table class="data-table">
+      <caption class="sr-only">Recently resolved quarantine entries</caption>
+      <thead>
+        <tr><th>Torrent</th><th>Risk</th><th>Outcome</th><th>Why</th><th>Resolved</th></tr>
+      </thead>
+      <tbody>
+      {% for q in recent %}
+        <tr>
+          <td>{{ q.torrent_name }}</td>
+          <td class="mono">{{ q.risk_level or '—' }}</td>
+          <td class="mono">{{ q.status }}</td>
+          <td class="hint">{{ q.resolution or '' }}</td>
+          <td class="mono">{{ (q.resolved_at or '')[:16]|replace('T', ' ') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<script>
+  function qAction(hash, action) {
+    const el = document.getElementById('q-status');
+    const row = document.getElementById('row-' + hash);
+    // Deleting is irreversible, so it asks. Release and keep are both
+    // recoverable — re-running a scan re-evaluates the torrent — so they do
+    // not interrupt with a dialog.
+    if (action === 'remediate' &&
+        !confirm('Blocklist and delete this torrent? This cannot be undone.')) {
+      return;
+    }
+    if (row) row.style.opacity = '0.5';
+    if (el) el.textContent = 'Working…';
+    fetch('/quarantine/action', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hash: hash, action: action}),
+    })
+      .then(r => r.json().then(d => ({code: r.status, d: d})))
+      .then(function (res) {
+        if (el) el.textContent = (res.d.ok ? '✓ ' : '✗ ') + res.d.message;
+        if (res.d.ok) {
+          // Only remove the row once the server confirmed the action; a
+          // failed resume leaves it held and it must stay visible.
+          if (row) row.remove();
+          const body = document.querySelector('.data-table tbody');
+          if (body && !body.children.length) setTimeout(() => location.reload(), 800);
+        } else if (row) {
+          row.style.opacity = '';
+        }
+      })
+      .catch(function (e) {
+        if (el) el.textContent = '✗ ' + e;
+        if (row) row.style.opacity = '';
+      });
+  }
+</script>
+{% endblock %}

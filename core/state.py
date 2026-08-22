@@ -134,6 +134,155 @@ class StateManager:
             return []
 
     # ------------------------------------------------------------------
+    # quarantine
+    # ------------------------------------------------------------------
+
+    def add_quarantine(self, record: dict) -> bool:
+        """
+        Hold a torrent for review.
+
+        INSERT OR REPLACE on the hash: a torrent already held that matches
+        again should have its hold refreshed, not duplicated into a second
+        row the user must resolve twice.
+
+        Never raises -- a bookkeeping failure must not abort a scan.
+        """
+        import json as _json
+        cols = ["hash", "inspection_id", "torrent_name", "category",
+                "rule_name", "arr_app", "risk_level", "risk_score",
+                "bad_files", "quarantined_at", "expires_at", "status",
+                "resolution", "resolved_at", "paused_ok"]
+        row = {c: record.get(c) for c in cols}
+        if not row["hash"]:
+            log.warning("add_quarantine: missing hash")
+            return False
+        row["quarantined_at"] = row["quarantined_at"] or _now_iso()
+        row["status"] = row["status"] or "held"
+        if isinstance(row["bad_files"], (list, tuple)):
+            row["bad_files"] = _json.dumps(list(row["bad_files"]))
+        if row["paused_ok"] is not None:
+            row["paused_ok"] = int(bool(row["paused_ok"]))
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    f"INSERT OR REPLACE INTO quarantine ({', '.join(cols)}) "
+                    f"VALUES ({', '.join('?' for _ in cols)})",
+                    tuple(row[c] for c in cols),
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            log.warning(f"Failed to quarantine {row['hash']}: {exc}")
+            return False
+
+    def get_quarantine(self, status: str = "held", limit: int = 200) -> list[dict]:
+        """Quarantine entries, newest first. status=None returns every row."""
+        import json as _json
+        try:
+            with self._lock, self._conn() as conn:
+                if status:
+                    rows = conn.execute(
+                        "SELECT * FROM quarantine WHERE status = ? "
+                        "ORDER BY quarantined_at DESC LIMIT ?",
+                        (status, limit),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM quarantine "
+                        "ORDER BY quarantined_at DESC LIMIT ?", (limit,),
+                    ).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                try:
+                    d["bad_files"] = _json.loads(d.get("bad_files") or "[]")
+                except Exception:
+                    d["bad_files"] = []
+                out.append(d)
+            return out
+        except Exception as exc:
+            log.warning(f"Failed to read quarantine: {exc}")
+            return []
+
+    def get_quarantine_entry(self, hash: str) -> dict | None:
+        import json as _json
+        try:
+            with self._lock, self._conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM quarantine WHERE hash = ?", (hash,)
+                ).fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            try:
+                d["bad_files"] = _json.loads(d.get("bad_files") or "[]")
+            except Exception:
+                d["bad_files"] = []
+            return d
+        except Exception as exc:
+            log.warning(f"Failed to read quarantine entry {hash}: {exc}")
+            return None
+
+    def resolve_quarantine(self, hash: str, status: str,
+                           resolution: str = None) -> bool:
+        """
+        Close out a hold. `status` records the outcome (released, remediated,
+        kept, expired) and `resolution` says why, so the row remains a
+        readable audit trail rather than just disappearing.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                cur = conn.execute(
+                    "UPDATE quarantine SET status = ?, resolution = ?, "
+                    "resolved_at = ? WHERE hash = ?",
+                    (status, resolution, _now_iso(), hash),
+                )
+                conn.commit()
+            return cur.rowcount > 0
+        except Exception as exc:
+            log.warning(f"Failed to resolve quarantine {hash}: {exc}")
+            return False
+
+    def get_expired_quarantine(self) -> list[dict]:
+        """
+        Held entries whose expires_at has passed.
+
+        NULL expires_at means hold indefinitely and is never returned -- the
+        conservative default must not be swept up by the timeout worker.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM quarantine WHERE status = 'held' "
+                    "AND expires_at IS NOT NULL AND expires_at <= ? "
+                    "ORDER BY expires_at", (_now_iso(),),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            log.warning(f"Failed to read expired quarantine: {exc}")
+            return []
+
+    def has_active_quarantine(self, hash: str) -> bool:
+        """
+        True while a torrent is held.
+
+        The scan loop needs this for the same reason it needs
+        has_active_retry(): without it, every pass would re-evaluate and
+        re-hold a torrent that is already sitting in the queue awaiting a
+        human decision.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                row = conn.execute(
+                    "SELECT 1 FROM quarantine WHERE hash = ? AND status = 'held'",
+                    (hash,),
+                ).fetchone()
+            return row is not None
+        except Exception as exc:
+            log.warning(f"has_active_quarantine failed for {hash}: {exc}")
+            return False
+
+    # ------------------------------------------------------------------
     # validated_models
     # ------------------------------------------------------------------
 
@@ -392,6 +541,39 @@ class StateManager:
             # validated_models -- proof that a model can do the scoring job.
             # indexer_count records what it was proven against: "passes" is
             # only meaningful relative to the prompt size it handled.
+            # quarantine -- torrents held for review instead of deleted.
+            #
+            # Keyed on hash, not an id, because a torrent can only be in
+            # quarantine once: re-quarantining the same hash should update the
+            # existing hold rather than create a second one the user has to
+            # resolve twice.
+            #
+            # paused_ok records whether the pause actually succeeded. If the
+            # client refused, the torrent is still downloading and the UI must
+            # say so rather than implying it is safely held.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS quarantine (
+                    hash           TEXT PRIMARY KEY,
+                    inspection_id  TEXT,
+                    torrent_name   TEXT,
+                    category       TEXT,
+                    rule_name      TEXT,
+                    arr_app        TEXT,
+                    risk_level     TEXT,
+                    risk_score     INTEGER,
+                    bad_files      TEXT,
+                    quarantined_at TEXT NOT NULL,
+                    expires_at     TEXT,
+                    status         TEXT NOT NULL DEFAULT 'held',
+                    resolution     TEXT,
+                    resolved_at    TEXT,
+                    paused_ok      INTEGER
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_quarantine_status
+                ON quarantine (status, quarantined_at DESC)
+            """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS validated_models (
                     model           TEXT PRIMARY KEY,

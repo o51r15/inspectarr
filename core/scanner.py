@@ -1,7 +1,7 @@
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from .config import AppConfig, Rule
 from .torrent_client import build_torrent_client
 from .arrs.base import AbstractArrClient
@@ -200,6 +200,10 @@ class Scanner:
             self.log.debug(f"  Skip (retry queue owns it): {name}")
             return False, False
 
+        if self.state.has_active_quarantine(h):
+            self.log.debug(f"  Skip (held in quarantine): {name}")
+            return False, False
+
         try:
             files = self.qbit.get_torrent_files(h)
         except Exception as exc:
@@ -225,7 +229,8 @@ class Scanner:
         overrides = getattr(rem, "severity_overrides", {}) or {}
         min_sev = getattr(rem, "min_severity", sev.LOW) or sev.LOW
         assessment = sev.assess(findings, overrides)
-        decision = sev.decide(assessment["risk_level"], min_sev)
+        remediate_at = getattr(rem, "remediate_at", sev.LOW) or sev.LOW
+        decision = sev.decide(assessment["risk_level"], min_sev, remediate_at)
 
         self.log.info(
             f"FLAGGED [{rule.name}] {name} | bad: {bad_files} "
@@ -260,6 +265,14 @@ class Scanner:
             self._handle_dry_run(h, name, rule, bad_files,
                                  inspection_id=inspection_id, findings=findings,
                                  assessment=assessment, decision=decision)
+            return True, False
+
+        if decision == sev.QUARANTINE:
+            self._handle_quarantine(h, name, rule, bad_files,
+                                    inspection_id=inspection_id,
+                                    findings=findings, assessment=assessment,
+                                    file_count=file_count,
+                                    total_size=total_size)
             return True, False
 
         actioned = self._attempt_action(
@@ -323,6 +336,73 @@ class Scanner:
                 for i, f in enumerate(findings or [])
             ],
         )
+
+    def _handle_quarantine(self, hash: str, name: str, rule: Rule,
+                           bad_files: list[str], inspection_id: str = None,
+                           findings: list = None, assessment: dict = None,
+                           file_count: int = None, total_size: int = None):
+        """
+        Hold a torrent for review instead of deleting it.
+
+        Pausing is attempted first and its outcome recorded. A failed pause
+        does NOT abort the hold: the torrent still needs a human decision and
+        must appear in the queue. But paused_ok=0 is stored so the UI can say
+        the torrent is still downloading rather than implying it is contained
+        -- silently claiming safety we did not achieve would be worse than
+        reporting the failure.
+        """
+        paused = False
+        try:
+            paused = bool(self.qbit.pause_torrent(hash))
+            if not paused:
+                self.log.warning(f"  Could not pause {name} — holding anyway")
+        except Exception as exc:
+            self.log.warning(f"  Pause failed for {name}: {exc} — holding anyway")
+
+        expires_at = None
+        timeout_min = getattr(self.config.remediation,
+                              "quarantine_timeout_minutes", 0) or 0
+        if timeout_min > 0:
+            expires_at = (datetime.now(timezone.utc)
+                          + timedelta(minutes=timeout_min)).isoformat()
+
+        risk_level = (assessment or {}).get("risk_level")
+        self.state.add_quarantine({
+            "hash": hash, "inspection_id": inspection_id,
+            "torrent_name": name, "category": rule.category,
+            "rule_name": rule.name, "arr_app": rule.app,
+            "risk_level": risk_level,
+            "risk_score": (assessment or {}).get("risk_score"),
+            "bad_files": bad_files, "expires_at": expires_at,
+            "status": "held", "paused_ok": paused,
+        })
+
+        self.state.write_log({
+            "level": "ACTION", "event": "torrent_quarantined",
+            "inspection_id": inspection_id,
+            "torrent_name": name, "hash": hash,
+            "category": rule.category, "rule": rule.name,
+            "risk_level": risk_level, "bad_files": bad_files,
+            "paused": paused, "expires_at": expires_at,
+        })
+        self._record_inspection(
+            inspection_id, findings, hash, name, rule, action="quarantined",
+            client_success=paused, file_count=file_count,
+            total_size=total_size, assessment=assessment,
+            decision=sev.QUARANTINE,
+            action_detail=None if paused else "pause failed; held unpaused")
+
+        try:
+            self.notifier.notify_quarantine(name, bad_files, risk_level, paused)
+        except AttributeError:
+            # Older notifier without the quarantine event -- fall back rather
+            # than losing the alert entirely.
+            self.notifier.notify_dry_run(name, bad_files)
+        except Exception as exc:
+            self.log.warning(f"  Quarantine notification failed: {exc}")
+
+        self.log.info(f"  QUARANTINED [{risk_level}] {name}"
+                      f"{'' if paused else ' (pause failed)'}")
 
     def _handle_dry_run(self, hash: str, name: str, rule: Rule, bad_files: list[str],
                         inspection_id: str = None, findings: list = None,

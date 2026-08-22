@@ -76,6 +76,40 @@ class Notifier:
             return
         self._send("[DRY RUN] Would remove", f"{torrent_name}\nBad files: {files}")
 
+    def notify_quarantine(self, torrent_name: str, bad_files: list[str],
+                          risk_level: str = None, paused: bool = True):
+        """
+        A torrent is being held for review.
+
+        Unlike an action notification this one asks for something: the hold
+        waits for a decision. A failed pause is called out explicitly, because
+        the torrent is still downloading and that changes how urgent this is.
+        """
+        # Fall back to "action" when "quarantine" is not listed. Existing
+        # configs predate this event, and a hold is the one notification that
+        # actually needs a reply -- defaulting it to silent would let torrents
+        # pile up unseen. Adding "quarantine" explicitly still works.
+        if not (self._should("quarantine") or self._should("action")):
+            return
+        files = ", ".join(bad_files[:3])
+        if len(bad_files) > 3:
+            files += f" (+{len(bad_files) - 3} more)"
+        level = f"[{risk_level}] " if risk_level else ""
+        warn = "" if paused else "\nWARNING: could not pause — still downloading."
+        if self._digest_mode:
+            self._buffer.append({
+                "type": "quarantine",
+                "torrent": torrent_name,
+                "files": files,
+                "risk_level": risk_level,
+                "paused": paused,
+            })
+            return
+        self._send(
+            f"{level}Quarantined — awaiting review",
+            f"{torrent_name}\nBad files: {files}{warn}",
+        )
+
     def notify_action(
         self, torrent_name: str, bad_files: list[str],
         arr_blocklisted: bool, qbit_deleted: bool, app_name: str = "arr"

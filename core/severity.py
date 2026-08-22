@@ -170,27 +170,47 @@ QUARANTINE = "quarantine"
 RECORD     = "record"
 
 
-def decide(risk_level: str, min_severity: str = LOW) -> str:
+def decide(risk_level: str, min_severity: str = LOW,
+           remediate_at: str = LOW) -> str:
     """
     Map an aggregate risk level to what should happen.
 
-    `min_severity` is the floor for acting. It defaults to LOW, which means
-    "act on everything" -- byte-identical to the behaviour before severity
-    existed. Raising it to HIGH stops auto-deleting matches whose worst
-    finding is only an archive or a filename heuristic, without touching
-    anything that finds an executable.
+    Two thresholds, three bands:
 
-    Deliberately conservative: anything at or above the floor remediates.
-    Splitting MEDIUM off to notify-only belongs with quarantine (item 25),
-    where a held torrent has somewhere to go; doing it now would silently
-    stop actioning things the user currently expects to be actioned.
+        risk < min_severity                     -> RECORD
+        min_severity <= risk < remediate_at     -> QUARANTINE
+        risk >= remediate_at                    -> REMEDIATE
+
+    Both default to LOW, which collapses the quarantine band to nothing and
+    reproduces the behaviour from before either existed: everything flagged
+    is remediated. Raising remediate_at to HIGH holds low- and medium-severity
+    catches for review while still deleting anything that finds an executable.
+
+    Quarantine is deliberately the MIDDLE band rather than a separate mode.
+    The dangerous failure is not "held something that was fine" -- it is
+    "deleted something that was fine", and a band between record and delete
+    is what removes that cliff.
     """
     if not risk_level:
         return RECORD
     if not is_valid(min_severity):
         log.warning(f"Invalid min_severity {min_severity!r}; using {LOW}")
         min_severity = LOW
-    return REMEDIATE if rank(risk_level) >= rank(min_severity) else RECORD
+    if not is_valid(remediate_at):
+        log.warning(f"Invalid remediate_at {remediate_at!r}; using {LOW}")
+        remediate_at = LOW
+
+    # A remediate floor below the record floor is contradictory. Trust the
+    # more conservative of the two rather than guessing which was intended.
+    if rank(remediate_at) < rank(min_severity):
+        remediate_at = min_severity
+
+    r = rank(risk_level)
+    if r < rank(min_severity):
+        return RECORD
+    if r < rank(remediate_at):
+        return QUARANTINE
+    return REMEDIATE
 
 
 def explain(risk_level: str, counts: dict) -> str:

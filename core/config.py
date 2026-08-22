@@ -202,6 +202,24 @@ class RemediationConfig:
     min_severity: str = "LOW"
     severity_overrides: dict = field(default_factory=dict)
 
+    # Two thresholds, forming three bands:
+    #   below min_severity          -> record only, no action
+    #   >= min_severity, < remediate_at -> QUARANTINE (pause and hold)
+    #   >= remediate_at             -> remediate (blocklist + delete)
+    #
+    # remediate_at defaults to LOW, which collapses the quarantine band to
+    # nothing and reproduces the behaviour from before quarantine existed.
+    # Raising it to HIGH holds low- and medium-severity catches for review
+    # while still deleting anything that finds an executable.
+    remediate_at: str = "LOW"
+
+    # How a hold ends on its own. None/0 = hold indefinitely (the default):
+    # a torrent waits for a human rather than being deleted by a timer.
+    quarantine_timeout_minutes: int = 0
+    # What happens when a timeout does elapse: "release" or "remediate".
+    # Defaults to release -- a timer expiring is not evidence of guilt.
+    quarantine_timeout_action: str = "release"
+
 
 @dataclass
 class AppConfig:
@@ -435,6 +453,11 @@ def _parse_config(raw: dict) -> AppConfig:
             (k if not k.startswith(".") else k.lower()): str(v).upper()
             for k, v in (rem_raw.get("severity_overrides", {}) or {}).items()
         },
+        remediate_at=str(rem_raw.get("remediate_at", "LOW")).upper(),
+        quarantine_timeout_minutes=int(
+            rem_raw.get("quarantine_timeout_minutes") or 0),
+        quarantine_timeout_action=str(
+            rem_raw.get("quarantine_timeout_action", "release")).lower(),
     )
 
     return AppConfig(
