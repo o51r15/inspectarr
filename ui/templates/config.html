@@ -1099,6 +1099,7 @@
   showPane(_initialPane);
 
   syncAiEnabled();
+  resumeValidationIfRunning();
   describeBands();
   loadValidations();
   (function () {
@@ -1684,23 +1685,72 @@
       .then(function () { loadValidations(); });
   }
 
+  // Show the progress row and start polling. Used both when we start a run
+  // and when we discover one already in flight -- a validation takes a
+  // couple of minutes and survives a page reload, so the UI has to be able
+  // to rejoin one it did not start.
+  function attachToValidation(model) {
+    const prog = document.getElementById('validation-progress');
+    const stage = document.getElementById('validation-stage');
+    if (stage) {
+      stage.textContent = 'Starting…' + (model ? ' — ' + model : '');
+    }
+    if (prog) prog.style.display = '';
+    pollValidation();
+  }
+
   function validateModel() {
     const sel = document.getElementById('ollama-model-select');
     const model = sel ? sel.value : '';
     if (!model) return;
+    // Immediate feedback: the request itself can take a moment, and silence
+    // reads as a dead button.
+    attachToValidation(model);
     fetch('/config/ai/validate', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({model: model}),
     })
       .then(r => r.json().then(d => ({code: r.status, d: d})))
       .then(function (res) {
-        if (!res.d.ok) {
-          document.getElementById('validation-detail').textContent = res.d.message;
+        if (res.d.ok) return;                 // polling already attached
+        if (res.code === 409) {
+          // Something else is already validating. Follow that run rather
+          // than reporting an error, but say so -- otherwise the progress
+          // row appears to be for the model the user just clicked, and it
+          // is not. Only one run at a time: concurrent runs against one
+          // Ollama host make both slower and the timings meaningless.
+          const el = document.getElementById('validation-detail');
+          if (el) {
+            el.textContent = (res.d.message || 'Already running') +
+              '. Showing that run — another model is still being validated, ' +
+              'so this one has not started. Try again once it finishes.';
+          }
           return;
         }
-        document.getElementById('validation-progress').style.display = '';
-        pollValidation();
+        if (_validationPoll) { clearInterval(_validationPoll); _validationPoll = null; }
+        const prog = document.getElementById('validation-progress');
+        if (prog) prog.style.display = 'none';
+        document.getElementById('validation-detail').textContent =
+          res.d.message || 'Could not start validation';
+      })
+      .catch(function (e) {
+        if (_validationPoll) { clearInterval(_validationPoll); _validationPoll = null; }
+        const prog = document.getElementById('validation-progress');
+        if (prog) prog.style.display = 'none';
+        document.getElementById('validation-detail').textContent = 'Request failed: ' + e;
       });
+  }
+
+  // On load, rejoin a validation that is already running -- otherwise a
+  // reload during a two-minute run leaves it invisible, and the next click
+  // just reports "already running" with nothing on screen to explain it.
+  function resumeValidationIfRunning() {
+    fetch('/config/ai/validate/status')
+      .then(r => r.json())
+      .then(function (s) {
+        if (s && s.running) attachToValidation(s.model);
+      })
+      .catch(function () { /* status only -- never block the pane */ });
   }
 
   function pollValidation() {
