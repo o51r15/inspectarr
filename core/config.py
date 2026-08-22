@@ -124,6 +124,16 @@ class OllamaConfig:
     system_prompt: str = ""         # empty = use built-in default
     update_check_hours: int = 24    # 0 = disable update checks
 
+    def is_active(self) -> bool:
+        """
+        True when AI can actually run: switched on AND configured.
+
+        Every consumer asks this rather than testing `url` directly, so the
+        master switch is honoured explicitly instead of being implied by a
+        blanked-out value.
+        """
+        return bool(self.enabled and self.url and self.model)
+
 
 @dataclass
 class PollingConfig:
@@ -279,13 +289,9 @@ def _parse_ollama(o_raw: dict) -> "OllamaConfig":
     """
     Build the Ollama config, honouring the master switch.
 
-    When AI is disabled the URL is deliberately resolved to "" rather than
-    kept. Every consumer -- indexer scoring, the notifier, the summarizer,
-    the Status page connection check -- already treats a blank URL as "no AI
-    available", so blanking it here disables AI everywhere through one change
-    instead of six scattered `if enabled` guards that a future consumer could
-    forget to add. The value on disk is untouched, so the Settings form still
-    shows it and re-enabling restores it.
+    The URL is kept exactly as configured whether or not AI is enabled --
+    "disabled" and "not configured" are different states and conflating them
+    makes the config lie about itself. Callers ask is_active() instead.
 
     `enabled` defaults to whether a URL is configured, NOT to False. A fresh
     install has no URL and is therefore off, which is the intended shipping
@@ -297,7 +303,7 @@ def _parse_ollama(o_raw: dict) -> "OllamaConfig":
     enabled = bool(o_raw.get("enabled", bool(url)))
     return OllamaConfig(
         enabled=enabled,
-        url=url if enabled else "",
+        url=url,
         model=o_raw.get("model", ""),
         timeout=o_raw.get("timeout", 120),
         cache_ttl_hours=o_raw.get("cache_ttl_hours", 24),

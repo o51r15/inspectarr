@@ -27,8 +27,9 @@ class LogSummarizer:
         self.cfg = config
         self.apprise_cfg = config.notifications.apprise
         self.summary = config.notifications.summary
-        self._ollama_url = config.prowlarr.ollama.url or ""
-        self._ollama_model = config.prowlarr.ollama.model or ""
+        _ocfg = config.prowlarr.ollama
+        self._ollama_url = _ocfg.url if _ocfg.is_active() else ""
+        self._ollama_model = _ocfg.model if _ocfg.is_active() else ""
         self._ollama_timeout = config.prowlarr.ollama.timeout
         # Build Apprise instance
         self._apprise = apprise.Apprise()

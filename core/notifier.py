@@ -23,8 +23,11 @@ class Notifier:
     def __init__(self, config):
         self.cfg = config.notifications.apprise
         self.digest_cfg = config.notifications.digest
-        self._ollama_url = config.prowlarr.ollama.url if config.prowlarr.ollama.url else ""
-        self._ollama_model = config.prowlarr.ollama.model if config.prowlarr.ollama.model else ""
+        # Only expose Ollama to the digest path when the master switch is on;
+        # a configured-but-disabled server must not be contacted.
+        _ocfg = config.prowlarr.ollama
+        self._ollama_url = _ocfg.url if _ocfg.is_active() else ""
+        self._ollama_model = _ocfg.model if _ocfg.is_active() else ""
         self._ollama_timeout = config.prowlarr.ollama.timeout
         self._buffer: list[dict] = []
         # Build the Apprise instance once

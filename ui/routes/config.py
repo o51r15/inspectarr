@@ -509,7 +509,7 @@ def prowlarr_indexers():
         results = scorer.score_all(skip_ai=True)
         for r in results:
             r.pop("_raw", None)
-        ai_available = bool(cfg.prowlarr.ollama.url and cfg.prowlarr.ollama.model)
+        ai_available = cfg.prowlarr.ollama.is_active()
         return jsonify({"ok": True, "indexers": results, "ai_available": ai_available})
     except Exception as exc:
         return jsonify({"ok": False, "message": safe_error(exc)})
@@ -526,7 +526,10 @@ def prowlarr_indexers_ai():
         cfg = load_config(config_path)
         if not cfg.prowlarr.enabled:
             return jsonify({"ok": False, "message": "Prowlarr is not enabled"})
-        if not cfg.prowlarr.ollama.url or not cfg.prowlarr.ollama.model:
+        if not cfg.prowlarr.ollama.enabled:
+            return jsonify({"ok": False,
+                            "message": "AI features are disabled"})
+        if not cfg.prowlarr.ollama.is_active():
             return jsonify({"ok": False, "message": "Ollama is not configured"})
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
         state    = _get_state(cfg)   # IMP-2: shared app-wide StateManager

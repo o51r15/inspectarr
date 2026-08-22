@@ -263,7 +263,8 @@ class IndexerScorer:
         On any failure, returns the original deterministic scores unchanged.
         """
         ocfg = self.cfg.ollama
-        if not ocfg.url or not ocfg.model:
+        # is_active() covers the master switch as well as url/model being set.
+        if not ocfg.is_active():
             return scored
 
         # Build the payload — everything we have per indexer

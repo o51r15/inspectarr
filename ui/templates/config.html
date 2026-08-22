@@ -510,12 +510,6 @@
       <!-- PANE: AI -->
       <div class="settings-pane" data-pane="ai">
 
-        <p class="hint" style="margin-bottom:1rem">
-          AI features are entirely optional. Inspectarr scores indexers with a
-          deterministic weighted formula on its own; Ollama adds an advisory
-          overlay on top. Leave the URL blank to run without AI.
-        </p>
-
         <div class="form-section">
           <div class="form-section-title">AI Features</div>
           <div class="toggle-row" style="margin-bottom:0.5rem">
@@ -525,11 +519,16 @@
             <label for="ollama_enabled">Enable AI features</label>
           </div>
           <p class="hint" style="margin:0">
-            Off by default. While disabled, nothing on this page is used:
-            indexer AI scoring, AI notification digests and periodic summaries
-            are all skipped, and Inspectarr never contacts an Ollama server.
-            Detection, severity grading, quarantine and remediation are
-            unaffected — none of them use AI.
+            AI is entirely optional and off by default. Inspectarr scores
+            indexers with a deterministic weighted formula on its own; Ollama
+            only adds an advisory overlay on top, plus narrated notification
+            digests and summaries.
+          </p>
+          <p class="hint" style="margin:0.5rem 0 0">
+            While this is off, none of the settings below are used, no Ollama
+            request is ever made, and AI scoring is unavailable on the
+            Indexers page. Detection, severity grading, quarantine and
+            remediation never use AI and are unaffected either way.
           </p>
         </div>
 

@@ -92,8 +92,12 @@ def _check_one(name: str, cfg) -> dict:
             c = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
             return {"name": name, "configured": True, "ok": c.test_connection()}
         if name == "Ollama":
-            url = cfg.prowlarr.ollama.url
-            model = cfg.prowlarr.ollama.model
+            ocfg = cfg.prowlarr.ollama
+            url, model = ocfg.url, ocfg.model
+            if not ocfg.enabled:
+                # Distinct from unconfigured: the user switched AI off.
+                return {"name": f"{name} (disabled)", "configured": False,
+                        "ok": False}
             if not url or not model:
                 return {"name": name, "configured": False, "ok": False}
             import requests
