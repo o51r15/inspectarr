@@ -131,6 +131,37 @@ notifications:
     use_ollama: true                # Use Ollama to generate natural-language summaries
 
 # ---------------------------------------------------------------------------
+# Remediation severity (ROADMAP item 24)
+#
+# Every rule match is assigned a severity per finding, then aggregated with
+# MAX -- one executable is never diluted by a pile of low-severity noise.
+#
+# Built-in classification:
+#   executables/scripts (.exe .bat .msi .js .vbs .dmg .scr .lnk ...) CRITICAL
+#   archives            (.zip .rar .7z .iso ...)                     HIGH
+#   undersized primary file (min_file_size_mb)                       HIGH
+#   filename pattern match                                           MEDIUM
+#   any other flagged extension                                      MEDIUM
+# ---------------------------------------------------------------------------
+remediation:
+  # Lowest severity that still gets acted on. LOW means "act on everything",
+  # which is the behaviour from before severity existed -- so leaving this
+  # alone changes nothing.
+  #
+  # Raise to HIGH to stop auto-deleting matches whose worst finding is only
+  # an archive or a filename heuristic, while still acting on anything that
+  # finds an executable. Anything below the floor is still inspected,
+  # recorded and visible -- it simply is not deleted.
+  min_severity: LOW           # LOW | MEDIUM | HIGH | CRITICAL
+
+  # Reclassify specific extensions or signals. Extension keys (leading dot)
+  # win over signal keys.
+  severity_overrides: {}
+  #   ".rar": LOW                     # RAR is normal in your library
+  #   ".iso": CRITICAL                # but a disc image never is
+  #   "bad_filename_pattern": LOW     # trust your patterns less
+
+# ---------------------------------------------------------------------------
 # Dry run
 # true  = log and notify matches but do NOT delete or blocklist anything
 # false = live mode (default)

@@ -9,6 +9,7 @@ from .arrs.sonarr import SonarrClient
 from .arrs.radarr import RadarrClient
 from .notifier import Notifier
 from .rules import evaluate_rule, findings_to_filenames
+from . import severity as sev
 from .state import StateManager
 
 
@@ -217,23 +218,55 @@ class Scanner:
         # One inspection per flagged release. This id correlates the log
         # events, the arr/client calls and the stored evidence below.
         inspection_id = str(uuid.uuid4())
+
+        # Severity is assessed per finding and aggregated with max, so one
+        # executable is never diluted by a pile of low-severity noise.
+        rem = getattr(self.config, "remediation", None)
+        overrides = getattr(rem, "severity_overrides", {}) or {}
+        min_sev = getattr(rem, "min_severity", sev.LOW) or sev.LOW
+        assessment = sev.assess(findings, overrides)
+        decision = sev.decide(assessment["risk_level"], min_sev)
+
         self.log.info(
             f"FLAGGED [{rule.name}] {name} | bad: {bad_files} "
-            f"| inspection={inspection_id}"
+            f"| risk={sev.explain(assessment['risk_level'], assessment['counts'])} "
+            f"| decision={decision} | inspection={inspection_id}"
         )
 
         file_count = len(files)
         total_size = sum(f.get("size", 0) or 0 for f in files)
 
+        if decision == sev.RECORD:
+            # Flagged, but below the configured remediation floor. The
+            # evidence is still recorded -- that is the whole point of having
+            # a floor rather than simply not matching.
+            self.log.info(
+                f"  Below remediation floor ({min_sev}) — recording only: {name}")
+            self.state.write_log({
+                "level": "INFO", "event": "below_severity_floor",
+                "inspection_id": inspection_id,
+                "torrent_name": name, "hash": h,
+                "category": rule.category, "rule": rule.name,
+                "risk_level": assessment["risk_level"],
+                "min_severity": min_sev, "bad_files": bad_files,
+            })
+            self._record_inspection(
+                inspection_id, findings, h, name, rule, action="recorded",
+                file_count=file_count, total_size=total_size,
+                assessment=assessment, decision=decision)
+            return True, False
+
         if self.config.dry_run:
             self._handle_dry_run(h, name, rule, bad_files,
-                                 inspection_id=inspection_id, findings=findings)
+                                 inspection_id=inspection_id, findings=findings,
+                                 assessment=assessment, decision=decision)
             return True, False
 
         actioned = self._attempt_action(
             h, name, rule, bad_files,
             inspection_id=inspection_id, findings=findings,
             file_count=file_count, total_size=total_size,
+            assessment=assessment, decision=decision,
         )
         return True, actioned
 
@@ -245,7 +278,7 @@ class Scanner:
     def _record_inspection(self, inspection_id, findings, hash, name, rule,
                            action, arr_success=None, client_success=None,
                            action_detail=None, indexer=None, file_count=None,
-                           total_size=None):
+                           total_size=None, assessment=None, decision=None):
         """
         Persist the evidence for one flagged release (ROADMAP item 23).
 
@@ -256,6 +289,7 @@ class Scanner:
         Never raises: the state layer swallows and logs its own failures, and
         recording evidence must not be able to break a scan.
         """
+        levels = (assessment or {}).get("severities") or []
         self.state.record_inspection(
             {
                 "inspection_id":  inspection_id,
@@ -269,6 +303,9 @@ class Scanner:
                 "file_count":     file_count,
                 "total_size":     total_size,
                 "flagged":        1,
+                "risk_level":     (assessment or {}).get("risk_level"),
+                "risk_score":     (assessment or {}).get("risk_score"),
+                "decision":       decision,
                 "action":         action,
                 "action_detail":  action_detail,
                 "arr_success":    None if arr_success is None else int(arr_success),
@@ -280,30 +317,37 @@ class Scanner:
                     "detail":    f.detail,
                     "file_path": f.file_path,
                     "file_size": f.file_size,
+                    # Positionally aligned with `findings` by assess().
+                    "severity":  (levels[i] if i < len(levels) else None),
                 }
-                for f in (findings or [])
+                for i, f in enumerate(findings or [])
             ],
         )
 
     def _handle_dry_run(self, hash: str, name: str, rule: Rule, bad_files: list[str],
-                        inspection_id: str = None, findings: list = None):
+                        inspection_id: str = None, findings: list = None,
+                        assessment: dict = None, decision: str = None):
         self.log.info(f"  [DRY RUN] Would delete: {name}")
         self.state.write_log({
             "level": "DRY_RUN", "event": "dry_run_flagged",
             "inspection_id": inspection_id,
+            "risk_level": (assessment or {}).get("risk_level"),
+            "decision": decision,
             "torrent_name": name, "hash": hash,
             "category": rule.category, "rule": rule.name, "bad_files": bad_files,
         })
         self.state.record_action(hash, name, rule.category, rule.name,
                                   "dry_run", False, False)
         self._record_inspection(inspection_id, findings, hash, name, rule,
-                                action="dry_run")
+                                action="dry_run", assessment=assessment,
+                                decision=decision)
         self.notifier.notify_dry_run(name, bad_files)
 
     def _attempt_action(
         self, hash: str, name: str, rule: Rule, bad_files: list[str],
         inspection_id: str = None, findings: list = None,
         file_count: int = None, total_size: int = None,
+        assessment: dict = None, decision: str = None,
     ) -> bool:
         """
         Blocklist in arr, then delete from qBittorrent.
@@ -347,6 +391,7 @@ class Scanner:
                     action_detail=f"arr blocklist failed: {reason}",
                     indexer=indexer_name, file_count=file_count,
                     total_size=total_size,
+                    assessment=assessment, decision=decision,
                 )
                 if self.config.retry.enabled:
                     count = self.state.queue_retry(
@@ -385,6 +430,7 @@ class Scanner:
                 action_detail=f"torrent client delete failed: {reason}",
                 indexer=indexer_name, file_count=file_count,
                 total_size=total_size,
+                assessment=assessment, decision=decision,
             )
             if self.config.retry.enabled:
                 count = self.state.queue_retry(
@@ -402,10 +448,13 @@ class Scanner:
             inspection_id, findings, hash, name, rule,
             action="deleted", arr_success=arr_success, client_success=qbit_ok,
             indexer=indexer_name, file_count=file_count, total_size=total_size,
+                                                         assessment=assessment, decision=decision,
         )
         self.state.write_log({
             "level": "ACTION", "event": "torrent_deleted",
             "inspection_id": inspection_id,
+            "risk_level": (assessment or {}).get("risk_level"),
+            "decision": decision,
             "torrent_name": name, "hash": hash,
             "category": rule.category, "rule": rule.name,
             "arr": rule.app, "bad_files": bad_files,

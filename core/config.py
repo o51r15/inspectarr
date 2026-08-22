@@ -186,6 +186,24 @@ class WebConfig:
 
 
 @dataclass
+class RemediationConfig:
+    """
+    Severity gating for automatic remediation (ROADMAP item 24).
+
+    min_severity defaults to LOW, i.e. act on everything -- byte-identical to
+    behaviour before severity existed. Raising it to HIGH stops auto-deleting
+    matches whose worst finding is only an archive or a filename heuristic,
+    while still acting on anything that finds an executable.
+
+    severity_overrides maps an extension (".rar") or a signal name
+    ("bad_filename_pattern") to one of LOW/MEDIUM/HIGH/CRITICAL. Extension
+    keys win over signal keys.
+    """
+    min_severity: str = "LOW"
+    severity_overrides: dict = field(default_factory=dict)
+
+
+@dataclass
 class AppConfig:
     qbittorrent: QBittorrentConfig
     on_arr_failure: str          # "delete" | "abort"
@@ -205,6 +223,7 @@ class AppConfig:
     web: WebConfig = field(default_factory=WebConfig)
     prowlarr: ProwlarrConfig = field(default_factory=ProwlarrConfig)
     scanning: ScanningConfig = field(default_factory=ScanningConfig)
+    remediation: RemediationConfig = field(default_factory=RemediationConfig)
     poll_interval_seconds: int = 300  # backward compat — overridden by scanning.polling
     dry_run: bool = False
 
@@ -212,6 +231,28 @@ class AppConfig:
 # ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
+
+def _as_list(value, default=None):
+    """
+    Coerce a YAML value to a list.
+
+    dict.get(key, default) only returns `default` when the key is ABSENT. A
+    key present but empty ("urls:" with nothing under it) yields None, and
+    every list comprehension downstream then raises TypeError. That is not a
+    hypothetical: config.example.yaml ships with `urls:` empty, so copying
+    the reference config to config.yaml crashed on startup.
+
+    Accepts a bare string as a single-element list, which is the other shape
+    users naturally write.
+    """
+    if value is None:
+        return list(default) if default else []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
+
 
 def load_config(path: str = "config.yaml") -> AppConfig:
     with open(path, "r", encoding="utf-8") as f:
@@ -243,9 +284,9 @@ def _parse_config(raw: dict) -> AppConfig:
 
     # Rules
     rules: list[Rule] = []
-    for r in raw.get("rules", []):
+    for r in _as_list(raw.get("rules")):
         c = r.get("conditions", {})
-        exts = [e.lower() for e in c.get("bad_extensions", [])]
+        exts = [str(e).lower() for e in _as_list(c.get("bad_extensions"))]
         rules.append(Rule(
             name=r["name"],
             category=r["category"],
@@ -254,7 +295,7 @@ def _parse_config(raw: dict) -> AppConfig:
                 bad_extensions=exts,
                 match_mode=c.get("match_mode", "any"),
                 min_file_size_mb=c.get("min_file_size_mb", None),
-                bad_filename_patterns=c.get("bad_filename_patterns", []),
+                bad_filename_patterns=_as_list(c.get("bad_filename_patterns")),
             ),
         ))
 
@@ -285,14 +326,13 @@ def _parse_config(raw: dict) -> AppConfig:
     dig_raw = notif_raw.get("digest", {})
     sum_raw = notif_raw.get("summary", {})
     # Normalize urls: accept string (single URL) or list
-    apprise_urls = app_raw.get("urls", [])
-    if isinstance(apprise_urls, str):
-        apprise_urls = [apprise_urls] if apprise_urls.strip() else []
+    apprise_urls = _as_list(app_raw.get("urls"))
     notif_cfg = NotificationsConfig(
         apprise=AppriseConfig(
             enabled=app_raw.get("enabled", False),
             urls=[u for u in apprise_urls if u and u.strip()],
-            notify_on=app_raw.get("notify_on", ["action", "error"]),
+            notify_on=_as_list(app_raw.get("notify_on"),
+                               ["action", "error"]),
         ),
         digest=DigestConfig(
             enabled=dig_raw.get("enabled", False),
@@ -386,7 +426,19 @@ def _parse_config(raw: dict) -> AppConfig:
         ),
     )
 
+    rem_raw = raw.get("remediation", {}) or {}
+    remediation_cfg = RemediationConfig(
+        min_severity=str(rem_raw.get("min_severity", "LOW")).upper(),
+        # Normalise keys once here so lookups never have to care about case
+        # or a missing leading dot on an extension.
+        severity_overrides={
+            (k if not k.startswith(".") else k.lower()): str(v).upper()
+            for k, v in (rem_raw.get("severity_overrides", {}) or {}).items()
+        },
+    )
+
     return AppConfig(
+        remediation=remediation_cfg,
         qbittorrent=qbit_cfg,
         torrent_client=torrent_client,
         transmission=transmission_cfg,
