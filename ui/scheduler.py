@@ -203,6 +203,15 @@ class Scheduler:
                 # the originating scan's run_history actioned count — that row
                 # permanently shows actioned=0. Expected; see _process_one_retry.
                 scanner.process_retries()
+            # Runs before the scan so an expired hold is resolved before the
+            # same torrent is re-evaluated, and so a release takes effect
+            # promptly rather than waiting a full extra cycle.
+            try:
+                scanner.process_quarantine_timeouts()
+            except Exception as exc:
+                # Never let timeout bookkeeping abort the scan itself.
+                print(f"Quarantine timeout sweep failed: {exc}",
+                      file=sys.stderr)
             stats = scanner.run_scan()
         except Exception as exc:
             result["error"] = str(exc)

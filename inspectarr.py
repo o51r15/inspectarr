@@ -75,6 +75,7 @@ def _run_daemon(args):
         try:
             if config.retry.enabled:
                 scanner.process_retries()
+            scanner.process_quarantine_timeouts()
             scanner.run_scan()
         except Exception as exc:
             print(f"ERROR during scan: {exc}")

@@ -154,6 +154,32 @@ remediation:
   # recorded and visible -- it simply is not deleted.
   min_severity: LOW           # LOW | MEDIUM | HIGH | CRITICAL
 
+  # Lowest severity that gets DELETED. Together with min_severity this makes
+  # three bands:
+  #
+  #   below min_severity            -> recorded only, no action
+  #   min_severity .. remediate_at  -> QUARANTINE (paused, held for review)
+  #   remediate_at and above        -> blocklisted and deleted
+  #
+  # Also LOW by default, which collapses the quarantine band to nothing and
+  # reproduces the behaviour from before quarantine existed: everything
+  # flagged is deleted.
+  #
+  # Example: remediate_at: CRITICAL holds .rar/.zip catches on the Quarantine
+  # page for review while still deleting anything containing an executable.
+  remediate_at: LOW           # LOW | MEDIUM | HIGH | CRITICAL
+
+  # How a hold ends without a human. 0 = hold indefinitely (default) -- a
+  # quarantined torrent waits for a decision rather than being resolved by a
+  # timer.
+  quarantine_timeout_minutes: 0
+
+  # What an elapsed timeout does: "release" (resume the download) or
+  # "remediate" (blocklist and delete). Defaults to release, because a timer
+  # expiring means nobody looked -- which is not the same as deciding the
+  # torrent was malicious.
+  quarantine_timeout_action: release
+
   # Reclassify specific extensions or signals. Extension keys (leading dot)
   # win over signal keys.
   severity_overrides: {}

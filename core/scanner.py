@@ -108,6 +108,104 @@ class Scanner:
         for entry in due:
             self._process_one_retry(entry)
 
+    def process_quarantine_timeouts(self) -> int:
+        """
+        Resolve holds whose timeout has elapsed. Returns how many were acted on.
+
+        Only entries with an expires_at are considered -- the default is to
+        hold indefinitely, and a torrent waiting on a person must never be
+        swept up by a timer that was never configured.
+
+        The timeout action defaults to `release` because an expiring clock is
+        not evidence of guilt: nobody looked, which is not the same as
+        somebody deciding it was malicious. Setting it to `remediate` is an
+        explicit choice to let the timer delete.
+        """
+        expired = self.state.get_expired_quarantine()
+        if not expired:
+            return 0
+
+        action = (getattr(self.config.remediation,
+                          "quarantine_timeout_action", "release")
+                  or "release").lower()
+        if action not in ("release", "remediate"):
+            self.log.warning(
+                f"Unknown quarantine_timeout_action {action!r} — treating as "
+                f"'release' (the non-destructive option)")
+            action = "release"
+
+        self.log.info(f"Quarantine: {len(expired)} hold(s) expired — {action}")
+        handled = 0
+        for entry in expired:
+            # Per-entry isolation: one unreachable torrent must not stop the
+            # rest of the queue from being processed.
+            try:
+                if self._expire_one(entry, action):
+                    handled += 1
+            except Exception as exc:
+                self.log.error(
+                    f"  Quarantine timeout failed for "
+                    f"{entry.get('torrent_name')}: {exc}")
+        return handled
+
+    def _expire_one(self, entry: dict, action: str) -> bool:
+        h = entry.get("hash")
+        name = entry.get("torrent_name") or h
+
+        if action == "release":
+            ok = False
+            try:
+                ok = bool(self.qbit.resume_torrent(h))
+            except Exception as exc:
+                self.log.warning(f"  Could not resume {name}: {exc}")
+            # Resolve either way: the hold has expired and leaving it "held"
+            # would make the timer fire again on every pass. The resolution
+            # text records whether the resume actually worked.
+            self.state.resolve_quarantine(
+                h, "released",
+                "quarantine timeout elapsed"
+                + ("" if ok else " (resume failed)"))
+            self.state.write_log({
+                "level": "ACTION", "event": "quarantine_timeout_released",
+                "inspection_id": entry.get("inspection_id"),
+                "torrent_name": name, "hash": h, "resumed": ok,
+            })
+            self.log.info(f"  Released {name}{'' if ok else ' (resume failed)'}")
+            return True
+
+        # action == "remediate"
+        arr_ok = False
+        try:
+            arr_ok = bool(_build_arr_client(
+                entry.get("arr_app") or "sonarr", self.config).blocklist(h))
+        except Exception as exc:
+            self.log.warning(f"  Blocklist failed for {name}: {exc}")
+        try:
+            deleted = bool(self.qbit.delete_torrent(h, delete_files=True))
+        except Exception as exc:
+            self.log.error(f"  Delete failed for {name}: {exc}")
+            # Stay held rather than claiming a deletion that did not happen.
+            return False
+        if not deleted:
+            self.log.error(f"  Client refused to delete {name} — still held")
+            return False
+
+        self.state.record_action(h, name, entry.get("category"),
+                                 entry.get("rule_name"), "deleted", arr_ok, True)
+        self.state.resolve_quarantine(
+            h, "remediated",
+            f"quarantine timeout elapsed (blocklist "
+            f"{'ok' if arr_ok else 'failed'})")
+        self.state.write_log({
+            "level": "ACTION", "event": "quarantine_timeout_remediated",
+            "inspection_id": entry.get("inspection_id"),
+            "torrent_name": name, "hash": h,
+            "category": entry.get("category"), "rule": entry.get("rule_name"),
+            "arr_blocklisted": arr_ok, "qbit_deleted": True,
+        })
+        self.log.info(f"  Remediated {name}")
+        return True
+
     def run_scan(self) -> dict:
         self._scan_id = str(uuid.uuid4())
         stats = {
