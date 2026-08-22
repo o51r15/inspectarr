@@ -1,11 +1,14 @@
 from flask import Blueprint, render_template, current_app, request, redirect, url_for, jsonify
 import yaml
 import os
+import logging
 import threading
 from datetime import datetime
 
 from werkzeug.security import generate_password_hash
 from ui.routes._utils import safe_error
+
+log = logging.getLogger("inspectarr")
 
 config_bp = Blueprint("config", __name__)
 
@@ -610,6 +613,8 @@ def prowlarr_rescore():
 # One run at a time: these are expensive, and a second concurrent run against
 # the same Ollama host would only make both slower and the timings meaningless.
 # ---------------------------------------------------------------------------
+INFLIGHT_KEY = "validation_inflight"
+
 _validation_lock = threading.Lock()
 _validation_state = {"running": False, "model": None, "stage": None,
                      "done": 0, "total": 3, "result": None, "error": None,
@@ -629,7 +634,7 @@ def _validation_worker(app, config_path, url, model, timeout,
                                 indexer_count=indexer_count,
                                 system_prompt=system_prompt,
                                 progress_cb=progress)
-        digest = _model_digest(url, model)
+        digest = _ollama_digest(url, model)
         state = app.config.get("STATE")
         if state:
             state.save_validation(model, result, digest=digest)
@@ -640,21 +645,40 @@ def _validation_worker(app, config_path, url, model, timeout,
         with _validation_lock:
             _validation_state.update(running=False, error=str(exc),
                                      stage="Failed")
+    finally:
+        # Always clear the in-flight marker -- a stale one would report a
+        # phantom interruption on the next poll.
+        try:
+            st = app.config.get("STATE")
+            if st:
+                st.set_app_state(INFLIGHT_KEY, "")
+        except Exception:
+            pass
 
 
-def _model_digest(url, model):
-    """Current digest of a model, used to flag stored results as stale."""
+def _ollama_digest(url, model):
+    """
+    Digest identifying the exact build of a model, from /api/tags.
+
+    NOT from /api/show -- that response has no `digest` key at all (verified
+    against Ollama 2026-08: its top-level keys are capabilities, details,
+    license, model_info, modelfile, modified_at, system, template, tensors).
+    The previous implementation read `digest` from /api/show and so always
+    got an empty string, silently defeating every staleness check built on it.
+
+    Returns None on any failure -- this feeds an advisory badge, never a
+    control-flow decision.
+    """
     try:
         import requests as req
-        r = req.post(f"{url.rstrip('/')}/api/show",
-                     json={"name": model}, timeout=10)
-        if r.status_code == 200:
-            d = r.json()
-            return (d.get("digest")
-                    or (d.get("details") or {}).get("parent_model")
-                    or (d.get("model_info") or {}).get("general.file_type"))
-    except Exception:
-        pass
+        r = req.get(f"{url.rstrip('/')}/api/tags", timeout=10)
+        if r.status_code != 200:
+            return None
+        for m in (r.json().get("models") or []):
+            if m.get("name") == model or m.get("model") == model:
+                return m.get("digest") or None
+    except Exception as exc:
+        log.debug(f"Could not read digest for {model}: {exc}")
     return None
 
 
@@ -699,7 +723,7 @@ def ai_set_model():
 
         if not validated and state:
             state.mark_model_forced(
-                model, digest=_model_digest(ollama.get("url", ""), model))
+                model, digest=_ollama_digest(ollama.get("url", ""), model))
 
         return jsonify({
             "ok": True,
@@ -754,6 +778,12 @@ def ai_validate():
                 result=None, error=None, started_at=datetime.now().isoformat(),
                 indexer_count=indexer_count)
 
+        if state:
+            try:
+                state.set_app_state(INFLIGHT_KEY, model)
+            except Exception:
+                pass
+
         t = threading.Thread(
             target=_validation_worker,
             args=(current_app._get_current_object(), config_path, url, model,
@@ -773,7 +803,48 @@ def ai_validate():
 def ai_validate_status():
     """Poll the in-flight (or most recent) validation run."""
     with _validation_lock:
-        return jsonify({"ok": True, **_validation_state})
+        snapshot = {"ok": True, **_validation_state}
+
+    # B-03: _validation_state lives in the process. If it says nothing is
+    # running but a marker survives in the database, the run was killed
+    # mid-flight (restart, crash) -- say so rather than showing nothing.
+    if not snapshot.get("running") and not snapshot.get("result"):
+        state = current_app.config.get("STATE")
+        if state:
+            try:
+                stale = state.get_app_state(INFLIGHT_KEY)
+                if stale:
+                    state.set_app_state(INFLIGHT_KEY, "")
+                    snapshot["interrupted"] = True
+                    snapshot["model"] = snapshot.get("model") or stale
+                    snapshot["stage"] = "Interrupted"
+                    snapshot["error"] = (
+                        f"Validation of {stale} was interrupted "
+                        f"(the service restarted). Run it again.")
+            except Exception:
+                pass
+    return jsonify(snapshot)
+
+
+@config_bp.route("/config/ai/validation/delete", methods=["POST"])
+def ai_validation_delete():
+    """
+    Clear a stored validation record (B-02).
+
+    Without this a 'forced' or 'failed' badge could only be replaced by a
+    successful re-validation, never retracted.
+    """
+    data = request.get_json(silent=True) or {}
+    model = (data.get("model") or "").strip()
+    if not model:
+        return jsonify({"ok": False, "message": "No model specified"}), 400
+    state = current_app.config.get("STATE")
+    if not state:
+        return jsonify({"ok": False, "message": "State unavailable"}), 503
+    ok = state.delete_validation(model)
+    return jsonify({"ok": ok,
+                    "message": (f"Cleared validation record for {model}"
+                                if ok else "Could not clear record")})
 
 
 @config_bp.route("/config/ai/validations", methods=["GET"])
@@ -905,51 +976,94 @@ def ollama_set_system_prompt():
 
 @config_bp.route("/config/ollama/update-check", methods=["GET"])
 def ollama_update_check():
-    """Check if the current Ollama model has an update available."""
-    import requests as req
+    """
+    Report whether the active model has changed since it was validated.
+
+    This deliberately does NOT ask the registry whether a newer version
+    exists upstream. The previous implementation called /api/pull with
+    stream=false to find out -- but Ollama has no dry-run, so that call
+    genuinely pulls: every Settings page load re-pulled the configured model,
+    and when an update DID exist it began a multi-gigabyte download that was
+    then abandoned at the 30s timeout. Its verdict was inverted too, because
+    a successful pull of a NEW version also reports "success", which the code
+    read as "up to date".
+
+    What actually matters here is local: has the model under this name been
+    replaced since we proved it could score correctly? Comparing the current
+    /api/tags digest against the one stored at validation answers that
+    exactly, costs one cheap GET, and changes nothing on the host.
+
+    Honours prowlarr.ollama.update_check_hours (0 disables). The last check
+    is stamped in app_state so a page refresh does not re-query.
+    """
     config_path = current_app.config["CONFIG_PATH"]
     raw = _load_raw(config_path)
-    ollama_url = raw.get("prowlarr", {}).get("ollama", {}).get("url", "")
-    model = raw.get("prowlarr", {}).get("ollama", {}).get("model", "")
-    if not ollama_url or not model:
+    ollama = (raw.get("prowlarr", {}) or {}).get("ollama", {}) or {}
+    url = (ollama.get("url") or "").strip()
+    model = (ollama.get("model") or "").strip()
+    if not url or not model:
         return jsonify({"ok": False, "message": "Ollama not configured"})
-    try:
-        # Get local model digest
-        local_resp = req.post(
-            f"{ollama_url.rstrip('/')}/api/show",
-            json={"name": model},
-            timeout=15,
-        )
-        if local_resp.status_code != 200:
-            return jsonify({"ok": False, "message": f"Could not query local model: HTTP {local_resp.status_code}"})
-        local_data = local_resp.json()
-        local_digest = local_data.get("digest", "")
-        # Try to check the registry for the latest digest
-        # Ollama's /api/pull with stream=false in dry-run is not available,
-        # so we use the manifest approach: pull with stream and read first status
-        try:
-            pull_resp = req.post(
-                f"{ollama_url.rstrip('/')}/api/pull",
-                json={"name": model, "stream": False},
-                timeout=30,
-            )
-            if pull_resp.status_code == 200:
-                pull_data = pull_resp.json()
-                # If status is "success" immediately, model is up to date
-                status = pull_data.get("status", "")
-                if "up to date" in status.lower() or status == "success":
-                    return jsonify({"ok": True, "update_available": False, "model": model})
-                else:
-                    return jsonify({"ok": True, "update_available": True, "model": model,
-                                    "message": f"Update available for {model}"})
-        except Exception:
-            pass
-        # If pull check fails, just return the local info
+
+    interval = _int(ollama.get("update_check_hours"), 24)
+    state = current_app.config.get("STATE")
+
+    if interval <= 0:
         return jsonify({"ok": True, "update_available": False, "model": model,
-                        "message": "Could not check registry — local model info returned",
-                        "digest": local_digest[:12] if local_digest else ""})
-    except Exception as exc:
-        return jsonify({"ok": False, "message": safe_error(exc)})
+                        "message": "Update checking disabled"})
+
+    # Respect the configured interval. Cached verdicts are returned verbatim
+    # so the badge stays stable between checks rather than flickering off.
+    CACHE_KEY = "ollama_update_check"
+    if state:
+        try:
+            cached = state.get_app_state(CACHE_KEY)
+            if cached:
+                import json as _json
+                c = _json.loads(cached)
+                last = datetime.fromisoformat(c["checked_at"])
+                age_h = (datetime.now() - last).total_seconds() / 3600
+                if c.get("model") == model and age_h < interval:
+                    c["cached"] = True
+                    return jsonify(c)
+        except Exception as exc:
+            log.debug(f"Ignoring unreadable update-check cache: {exc}")
+
+    current = _ollama_digest(url, model)
+    if not current:
+        return jsonify({"ok": True, "update_available": False, "model": model,
+                        "message": "Could not read model digest"})
+
+    record = state.get_validation(model) if state else None
+    known = (record or {}).get("model_digest")
+
+    if not known:
+        result = {
+            "ok": True, "update_available": False, "model": model,
+            "digest": current[:12],
+            "message": ("Not validated yet" if not record
+                        else "Validated before digests were recorded"),
+        }
+    elif known == current:
+        result = {"ok": True, "update_available": False, "model": model,
+                  "digest": current[:12], "message": "Model unchanged since validation"}
+    else:
+        result = {
+            "ok": True, "update_available": True, "model": model,
+            "digest": current[:12], "validated_digest": known[:12],
+            "message": (f"{model} has changed since it was validated "
+                        f"({known[:12]} -> {current[:12]}). Re-validate to "
+                        f"confirm it still scores correctly."),
+        }
+
+    if state:
+        try:
+            import json as _json
+            stamped = dict(result)
+            stamped["checked_at"] = datetime.now().isoformat()
+            state.set_app_state(CACHE_KEY, _json.dumps(stamped))
+        except Exception as exc:
+            log.debug(f"Could not stamp update check: {exc}")
+    return jsonify(result)
 
 
 @config_bp.route("/config/prowlarr/toggle-indexer", methods=["POST"])

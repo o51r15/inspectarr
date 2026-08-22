@@ -47,10 +47,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # B-01: this MUST NOT be :dev.
+      #
+      # release.yml also tags :dev on every push to main. Both workflows wrote
+      # the same tag, so whichever finished last owned it -- deploys were
+      # non-deterministic between two builds.
+      #
+      # The images were near-identical in practice (devcontainer.json builds
+      # from ../Dockerfile, so the app's USER, HEALTHCHECK, WORKDIR and CMD
+      # were all present), which is why this went unnoticed. But the
+      # devcontainer build does not apply the OCI labels release.yml sets, so
+      # when it won the race the deployed image carried no
+      # org.opencontainers.image.revision and could not be traced to a commit.
+      #
+      # The dev container now has its own tag. If devcontainer.json ever
+      # diverges from the Dockerfile, that can no longer silently change what
+      # production runs.
       - name: Build and push dev container
         uses: devcontainers/ci@v0.3
         with:
           imageName: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}
-          cacheFrom: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}
+          cacheFrom: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:devcontainer
           push: always
-          imageTag: dev
+          imageTag: devcontainer

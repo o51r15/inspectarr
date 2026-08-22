@@ -569,7 +569,7 @@
                 <tr>
                   <th>Model</th><th>Status</th><th>Discrimination</th>
                   <th>Schema</th><th>Context</th><th>Avg response</th>
-                  <th>Validated</th>
+                  <th>Validated</th><th><span class="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody id="validation-tbody"></tbody>
@@ -1523,8 +1523,24 @@
             ? Math.round(v.avg_response_ms / 1000) + 's' : '—') + '</td>' +
         '<td class="mono">' + escapeHtml((v.validated_at || '')
             .replace('T', ' ').slice(0, 16)) + '</td>' +
+        '<td><button type="button" class="btn btn-ghost btn-sm" ' +
+            'onclick="clearValidation(\'' + escapeHtml(v.model) + '\')" ' +
+            'title="Forget this result so the model shows as untested">' +
+            'Clear</button></td>' +
       '</tr>';
     }).join('');
+  }
+
+  function clearValidation(model) {
+    // Retracts a stored verdict. The model itself is untouched -- it simply
+    // shows as untested again, and Apply will warn as it does for any
+    // unvalidated model.
+    fetch('/config/ai/validation/delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model: model}),
+    })
+      .then(r => r.json())
+      .then(function () { loadValidations(); });
   }
 
   function validateModel() {
@@ -1559,6 +1575,9 @@
         if (!s.running) {
           clearInterval(_validationPoll); _validationPoll = null;
           document.getElementById('validation-progress').style.display = 'none';
+          if (s.interrupted && s.error) {
+            document.getElementById('validation-detail').textContent = s.error;
+          }
           loadValidations();
         }
       }).catch(function () {

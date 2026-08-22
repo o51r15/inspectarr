@@ -196,6 +196,24 @@ class StateManager:
             log.warning(f"Failed to read validations: {exc}")
             return []
 
+    def delete_validation(self, model: str) -> bool:
+        """
+        Remove a stored validation record.
+
+        Needed because a 'forced' or 'failed' row could otherwise only be
+        replaced by a successful re-validation, never cleared -- leaving a
+        misleading badge on a model with no way to retract it except SQL.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute("DELETE FROM validated_models WHERE model = ?",
+                             (model,))
+                conn.commit()
+            return True
+        except Exception as exc:
+            log.warning(f"Failed to delete validation for {model}: {exc}")
+            return False
+
     def get_validation(self, model: str) -> dict | None:
         try:
             with self._lock, self._conn() as conn:
@@ -471,6 +489,31 @@ class StateManager:
                 # BUG-16: see above — log real failures, ignore duplicates.
                 if "duplicate column" not in str(exc).lower():
                     log.warning(f"indexer_stats migration failed ({col}): {exc}")
+
+        # Clear bogus model_digest values written before the digest source
+        # was fixed. The old helper read `digest` from /api/show -- a key that
+        # response does not have -- and fell through to guesses like
+        # model_info["general.file_type"] (an int) or details.parent_model.
+        # Those stored values ("15", "4", "muse-glimmer") can never match a
+        # real digest, so every model would report "changed since validation"
+        # forever. A real Ollama digest is 64 hex characters; anything else is
+        # not a digest, and NULL correctly reads as "recorded before digests
+        # were tracked".
+        try:
+            with self._lock, self._conn() as conn:
+                cur = conn.execute(
+                    "UPDATE validated_models SET model_digest = NULL "
+                    "WHERE model_digest IS NOT NULL "
+                    "AND (length(model_digest) != 64 "
+                    "     OR lower(model_digest) GLOB '*[^0-9a-f]*')"
+                )
+                if cur.rowcount:
+                    log.info(f"Cleared {cur.rowcount} bogus model_digest "
+                             f"value(s) from validated_models")
+                conn.commit()
+        except sqlite3.OperationalError as exc:
+            # Table may not exist yet on a fresh database -- harmless.
+            log.debug(f"model_digest cleanup skipped: {exc}")
 
         # Migrate llm_cache to record which model produced each entry.
         # Pre-migration rows get NULL: their model is genuinely unknown, and
