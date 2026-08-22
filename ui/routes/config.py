@@ -382,8 +382,23 @@ def _form_to_config(form, existing: dict) -> dict:
             "cooldown_hours": _int(form.get("prowlarr_auto_manage_cooldown"), 24),
         }
 
+    # Remediation thresholds. Merged onto the existing block so
+    # severity_overrides -- which has no form field and is edited in the raw
+    # YAML view -- is not wiped every time the Rules pane is saved.
+    remediation_block = dict(existing.get("remediation", {}) or {})
+    if "remediation_min_severity" in form:
+        remediation_block.update({
+            "min_severity": form.get("remediation_min_severity", "LOW").upper(),
+            "remediate_at": form.get("remediation_remediate_at", "LOW").upper(),
+            "quarantine_timeout_minutes":
+                _int(form.get("remediation_quarantine_timeout"), 0),
+            "quarantine_timeout_action":
+                form.get("remediation_timeout_action", "release").lower(),
+        })
+
     return {
         "torrent_client": form.get("torrent_client", "qbittorrent"),
+        "remediation": remediation_block,
         "qbittorrent": {
             "url":      form.get("qbit_url", ""),
             "username": form.get("qbit_username", ""),

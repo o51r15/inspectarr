@@ -281,6 +281,67 @@
           </div>
           {% endfor %}
         </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Remediation &amp; Severity</div>
+          <p class="hint" style="margin-bottom:0.75rem">
+            What happens when a rule matches. Every finding is graded
+            (executables CRITICAL, archives HIGH, undersized primary file
+            HIGH, filename patterns MEDIUM) and the worst one decides the
+            outcome. These two thresholds split that grade into three bands.
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="remediation_min_severity">Act at or above</label>
+              <select name="remediation_min_severity" id="remediation_min_severity"
+                      onchange="describeBands()">
+                {% set ms = cfg.get('remediation',{}).get('min_severity','LOW') %}
+                {% for lvl in ['LOW','MEDIUM','HIGH','CRITICAL'] %}
+                  <option value="{{ lvl }}" {{ 'selected' if ms == lvl else '' }}>{{ lvl }}</option>
+                {% endfor %}
+              </select>
+              <span class="hint">Anything below this is recorded but never acted on.</span>
+            </div>
+            <div class="form-group">
+              <label for="remediation_remediate_at">Delete at or above</label>
+              <select name="remediation_remediate_at" id="remediation_remediate_at"
+                      onchange="describeBands()">
+                {% set ra = cfg.get('remediation',{}).get('remediate_at','LOW') %}
+                {% for lvl in ['LOW','MEDIUM','HIGH','CRITICAL'] %}
+                  <option value="{{ lvl }}" {{ 'selected' if ra == lvl else '' }}>{{ lvl }}</option>
+                {% endfor %}
+              </select>
+              <span class="hint">Between the two, catches are
+                <a href="/quarantine">quarantined</a> instead of deleted.</span>
+            </div>
+          </div>
+          <p id="band-explainer" class="hint"
+             style="padding:8px;border:1px solid var(--border);border-radius:4px"></p>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="remediation_quarantine_timeout">Quarantine timeout (minutes)</label>
+              <input type="number" name="remediation_quarantine_timeout"
+                     id="remediation_quarantine_timeout" min="0" max="100000"
+                     value="{{ cfg.get('remediation',{}).get('quarantine_timeout_minutes',0) }}">
+              <span class="hint">0 = hold indefinitely. A held torrent waits for your decision.</span>
+            </div>
+            <div class="form-group">
+              <label for="remediation_timeout_action">When the timeout elapses</label>
+              <select name="remediation_timeout_action" id="remediation_timeout_action">
+                {% set ta = cfg.get('remediation',{}).get('quarantine_timeout_action','release') %}
+                <option value="release" {{ 'selected' if ta != 'remediate' else '' }}>Release (resume the download)</option>
+                <option value="remediate" {{ 'selected' if ta == 'remediate' else '' }}>Delete (blocklist and remove)</option>
+              </select>
+              <span class="hint">A timer expiring means nobody looked — not that the release was bad.</span>
+            </div>
+          </div>
+          <p class="hint" style="margin-bottom:0">
+            Per-extension overrides (for example treating <code>.rar</code> as
+            LOW) are available in the Raw YAML editor under
+            <code>remediation.severity_overrides</code>.
+          </p>
+        </div>
       </div>
 
       <!-- PANE: Indexers (Prowlarr) -->
@@ -983,6 +1044,7 @@
   showPane(_initialPane);
 
   syncAiDependentControls();
+  describeBands();
   loadValidations();
   (function () {
     const u = document.getElementById('ollama_url');
@@ -1427,6 +1489,30 @@
       .catch(() => {
         sel.innerHTML = '<option value="">Failed to fetch models</option>';
       });
+  }
+
+  function describeBands() {
+    const el = document.getElementById('band-explainer');
+    if (!el) return;
+    const order = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+    const minEl = document.getElementById('remediation_min_severity');
+    const remEl = document.getElementById('remediation_remediate_at');
+    if (!minEl || !remEl) return;
+    let mi = order.indexOf(minEl.value), ri = order.indexOf(remEl.value);
+    // A delete floor below the act floor is contradictory; the backend clamps
+    // it, so describe what will actually happen rather than what was picked.
+    const clamped = ri < mi;
+    if (clamped) ri = mi;
+    const fmt = a => a.length ? a.join(', ') : 'nothing';
+    el.innerHTML =
+      '<strong>Recorded only:</strong> ' + fmt(order.slice(0, mi)) +
+      ' &nbsp;|&nbsp; <strong>Quarantined:</strong> ' + fmt(order.slice(mi, ri)) +
+      ' &nbsp;|&nbsp; <strong>Deleted:</strong> ' + fmt(order.slice(ri)) +
+      (clamped ? '<br><em>Delete threshold is below the act threshold - ' +
+                 'treating both as ' + order[mi] + '.</em>' : '') +
+      (order.slice(mi, ri).length ? '' :
+        '<br><em>No quarantine band - every catch that is acted on is ' +
+        'deleted immediately.</em>');
   }
 
   // ---- Model validation ---------------------------------------------------
