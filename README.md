@@ -29,7 +29,9 @@ rules (`.exe` in a TV category, undersized files, suspicious filenames), blockli
 them in Sonarr / Radarr / Lidarr, deletes the torrent, and notifies you via [Apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Discord, email, and 100+ services).
 Supports **qBittorrent**, **Transmission**, and **Deluge** — select your client in Settings
 and Inspectarr handles the rest. Scans can be triggered by a polling schedule, incoming
-webhooks from your *arr apps, or both at the same time.
+webhooks from your *arr apps, or both at the same time. Findings are graded by
+severity, so you can delete outright only what is genuinely dangerous and hold
+everything else on a review queue instead.
 
 It also scores your Prowlarr torrent indexers by health — response time, failure
 rate, malicious content, and grab success — then automatically reorders them so
@@ -45,14 +47,18 @@ with content-hash caching to minimize redundant calls.
 - **Multi-client support** — qBittorrent, Transmission (JSON-RPC), and Deluge (Web UI JSON-RPC) with config-driven selection and per-client Settings UI
 - **Bad torrent detection** — configurable rules per category: bad extensions, filename patterns, minimum file size
 - **Automatic remediation** — blocklist in the *arr, delete from qBit, retry on failure
+- **Severity grading** — every finding is graded (executables CRITICAL, archives HIGH, undersized primary file HIGH, filename patterns MEDIUM) and aggregated with MAX, so a pile of minor findings cannot dilute one dangerous file
+- **Quarantine mode** — a middle band between "just record it" and "delete it": matching torrents are paused and held on a review queue until you decide. Optional timeout with a configurable action. Off by default — both thresholds ship at LOW, which reproduces the previous behaviour exactly
 - **Webhook + polling** — receive push events from Sonarr/Radarr/Lidarr or poll on a schedule, or both
 - **Prowlarr indexer health scoring** — weighted failure rates, logarithmic response time curve, malicious content tracking, grab success rate, historical trend analysis
-- **AI-powered scoring** — optional Ollama integration with in-UI model selector and content-hash LLM caching
+- **AI-powered scoring** — optional Ollama integration with a dedicated Settings → AI pane, in-UI model selector and content-hash LLM caching. Ships **disabled**; one master switch turns every AI path off at once
+- **Model validation** — before a model can be selected it is tested against the real scoring path for discrimination, schema compliance and context capacity at your actual indexer count. Results are kept per model so you can compare them
 - **Grab attribution** — tracks which indexer served each torrent, increments malicious-hit counters automatically
 - **Auto-reorder** — demotes bad indexers, promotes good ones, syncs to all connected apps
 - **Auto-manage indexers** — automatically disable indexers that consistently score below a health threshold, re-enable after a configurable cooldown
 - **Apprise notifications** — Pushover, Telegram, Discord, email, and [100+ services](https://github.com/caronc/apprise/wiki) with optional Ollama-narrated digests and periodic log summaries (daily/weekly)
-- **Full web UI** — dashboard, scheduler, torrents, indexer health, stats, settings, backups, system status, update checker
+- **Full web UI** — dashboard, scheduler, torrents, indexer health, quarantine review, stats, settings, backups, system status, update checker
+- **Health endpoint** — `GET /api/health` for container orchestration; the fast path makes no outbound calls, `?deps=1` opts in to dependency checks
 - **Mobile responsive** — works on phone and tablet
 - **Docker-native** — single volume mount, GHCR images, non-root container, dev container CI
 - **CLI daemon mode** — `--daemon` flag for headless operation with graceful SIGINT/SIGTERM shutdown
@@ -117,8 +123,9 @@ Dark and light themes with toggle. Works on desktop and mobile.
 | **Dashboard** | Scheduler status, scan stats, last flagged torrent, run history |
 | **Torrents** | Browse qBittorrent — filter, pause, resume, delete, detail view |
 | **Indexers** | Health scores, rescore, reorder & sync, per-indexer ignore/reset |
+| **Quarantine** | Review queue for held torrents — release, keep paused, or delete + blocklist |
 | **Stats** | Grab attribution — total grabs, malicious hits, % malicious per indexer |
-| **Settings** | Connections, rules, indexers + AI model selector, notifications, general, advanced, backups |
+| **Settings** | Connections, rules + remediation thresholds, indexers, AI (Ollama + model validation), notifications, general, advanced, backups |
 | **System** | Status, scheduled tasks, update checker, LLM logs |
 | **Events** | Paginated log viewer with level filter and JSON export |
 | **LLM Logs** | AI scoring report card with per-indexer reasoning, score trend charts, run history |
