@@ -328,18 +328,23 @@ class Scanner:
         min_sev = getattr(rem, "min_severity", sev.LOW) or sev.LOW
         assessment = sev.assess(findings, overrides)
         remediate_at = getattr(rem, "remediate_at", sev.LOW) or sev.LOW
-        decision = sev.decide(assessment["risk_level"], min_sev, remediate_at)
+
+        # The thresholds decide which band this belongs in. The operating
+        # mode decides how far we are allowed to act on that -- two separate
+        # questions, kept separate, so both answers stay readable in the log.
+        raw_decision = sev.decide(assessment["risk_level"], min_sev, remediate_at)
+        mode = getattr(rem, "operating_mode", sev.DEFAULT_MODE) or sev.DEFAULT_MODE
 
         self.log.info(
             f"FLAGGED [{rule.name}] {name} | bad: {bad_files} "
             f"| risk={sev.explain(assessment['risk_level'], assessment['counts'])} "
-            f"| decision={decision} | inspection={inspection_id}"
+            f"| decision={raw_decision} | mode={mode} | inspection={inspection_id}"
         )
 
         file_count = len(files)
         total_size = sum(f.get("size", 0) or 0 for f in files)
 
-        if decision == sev.RECORD:
+        if raw_decision == sev.RECORD:
             # Flagged, but below the configured remediation floor. The
             # evidence is still recorded -- that is the whole point of having
             # a floor rather than simply not matching.
@@ -356,13 +361,49 @@ class Scanner:
             self._record_inspection(
                 inspection_id, findings, h, name, rule, action="recorded",
                 file_count=file_count, total_size=total_size,
-                assessment=assessment, decision=decision)
+                assessment=assessment, decision=raw_decision)
             return True, False
 
         if self.config.dry_run:
+            # Checked before the cap so that --dry-run combined with a mode
+            # still takes the dry-run path and still notifies. The flag is a
+            # per-run override; the mode is the persistent setting.
             self._handle_dry_run(h, name, rule, bad_files,
                                  inspection_id=inspection_id, findings=findings,
-                                 assessment=assessment, decision=decision)
+                                 assessment=assessment, decision=raw_decision)
+            return True, False
+
+        # Apply the ceiling. This can only reduce the decision, never raise
+        # it, so nothing below can become more destructive than the
+        # thresholds already permitted.
+        decision = sev.cap_for_mode(raw_decision, mode)
+
+        if decision != raw_decision:
+            self.log.info(
+                f"  Operating mode '{mode}' caps {raw_decision} "
+                f"-> {decision}: {name}")
+            self.state.write_log({
+                "level": "INFO", "event": "capped_by_operating_mode",
+                "inspection_id": inspection_id,
+                "torrent_name": name, "hash": h,
+                "category": rule.category, "rule": rule.name,
+                "risk_level": assessment["risk_level"],
+                "operating_mode": mode,
+                "decision_before_mode": raw_decision,
+                "decision": decision,
+                "bad_files": bad_files,
+            })
+
+        if decision == sev.RECORD:
+            # The mode, not the floor, stopped this one. Recorded with the
+            # full evidence so the Quarantine and Events pages can show
+            # exactly what would have happened in automatic mode.
+            self._record_inspection(
+                inspection_id, findings, h, name, rule, action="recorded",
+                file_count=file_count, total_size=total_size,
+                assessment=assessment, decision=decision,
+                action_detail=f"held by operating_mode={mode} "
+                              f"(would have been {raw_decision})")
             return True, False
 
         if decision == sev.QUARANTINE:
@@ -401,9 +442,12 @@ class Scanner:
         recording evidence must not be able to break a scan.
         """
         levels = (assessment or {}).get("severities") or []
+        _rem = getattr(self.config, "remediation", None)
+        _mode = getattr(_rem, "operating_mode", sev.DEFAULT_MODE) or sev.DEFAULT_MODE
         self.state.record_inspection(
             {
                 "inspection_id":  inspection_id,
+                "operating_mode": _mode,
                 "scan_id":        self._scan_id,
                 "torrent_hash":   hash,
                 "torrent_name":   name,
