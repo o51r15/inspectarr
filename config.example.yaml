@@ -144,6 +144,27 @@ notifications:
 #   any other flagged extension                                      MEDIUM
 # ---------------------------------------------------------------------------
 remediation:
+  # How far Inspectarr is allowed to act at all. This is a CEILING applied
+  # after the thresholds below have decided what a match deserves -- it can
+  # only ever reduce the outcome, never escalate one.
+  #
+  #   monitor     Findings are inspected, graded and recorded. Nothing is
+  #               paused, blocklisted or deleted. Use this to watch what the
+  #               rules would do before letting them do it.
+  #
+  #   quarantine  Nothing is ever deleted automatically. Anything that would
+  #               have been remediated is paused and held on the Quarantine
+  #               page for review instead.
+  #
+  #   automatic   The thresholds below are applied exactly as written.
+  #               (default -- this is the behaviour from before modes existed)
+  #
+  # The mode does NOT rewrite min_severity or remediate_at. Both keep the
+  # value you gave them, so switching to monitor and back is lossless and
+  # the UI can tell you precisely what is happening: "thresholds say DELETE,
+  # mode caps at record -- recorded only".
+  operating_mode: automatic   # monitor | quarantine | automatic
+
   # Lowest severity that still gets acted on. LOW means "act on everything",
   # which is the behaviour from before severity existed -- so leaving this
   # alone changes nothing.

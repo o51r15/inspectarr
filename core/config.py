@@ -233,6 +233,27 @@ class RemediationConfig:
     # Defaults to release -- a timer expiring is not evidence of guilt.
     quarantine_timeout_action: str = "release"
 
+    # Operating mode (ROADMAP item 26): a CEILING on how far the system may
+    # act, applied AFTER the thresholds above have chosen a band.
+    #
+    #   monitor     record findings; never pause, never delete
+    #   quarantine  hold instead of deleting; nothing is removed automatically
+    #   automatic   apply the thresholds as configured  (default)
+    #
+    # It lives here, next to the thresholds it caps, rather than at the top
+    # level as originally sketched -- one place to look, and the UI shows it
+    # alongside the settings it constrains.
+    #
+    # It does NOT rewrite min_severity or remediate_at. A preset that edited
+    # them would leave the file describing something the user never chose;
+    # a ceiling leaves both readings true and lets the UI explain the
+    # difference ("thresholds say DELETE, mode caps at record").
+    #
+    # Defaults to automatic so behaviour is unchanged for every existing
+    # install: the mode can only ever reduce what happens, so any other
+    # default would silently stop remediating on upgrade.
+    operating_mode: str = "automatic"
+
 
 @dataclass
 class AppConfig:
@@ -491,6 +512,11 @@ def _parse_config(raw: dict) -> AppConfig:
             rem_raw.get("quarantine_timeout_minutes") or 0),
         quarantine_timeout_action=str(
             rem_raw.get("quarantine_timeout_action", "release")).lower(),
+        # Not defaulted through .get() alone: an explicitly empty
+        # `operating_mode:` in YAML parses as None, and `or` catches that
+        # where a bare default would not. Same class of bug as B-07.
+        operating_mode=str(
+            rem_raw.get("operating_mode") or "automatic").lower().strip(),
     )
 
     return AppConfig(
@@ -539,6 +565,49 @@ def _validate(raw: dict, rules: list[Rule], arrs: ArrsConfig) -> None:
     on_fail = raw.get("on_arr_failure", "delete")
     if on_fail not in ("delete", "abort"):
         errors.append("on_arr_failure must be 'delete' or 'abort'")
+
+    # A mistyped operating mode must be reported, never absorbed. Falling
+    # back silently would mean a typo in the one setting whose whole job is
+    # to STOP the system acting resolves to full automatic deletion -- the
+    # most destructive possible reading of a typo.
+    from core import severity as _sev
+    _rem = raw.get("remediation", {}) or {}
+
+    # An omitted or explicitly-empty key means "use the default" and is fine.
+    # Only a value the user actually wrote, and got wrong, is an error.
+    _mode = _rem.get("operating_mode")
+    if _mode is not None and str(_mode).strip():
+        if not _sev.is_valid_mode(str(_mode)):
+            errors.append(
+                f"remediation.operating_mode must be one of "
+                f"{', '.join(_sev.MODES)} (got '{_mode}')")
+
+    for _field in ("min_severity", "remediate_at"):
+        _level = _rem.get(_field)
+        if _level is not None and str(_level).strip():
+            if not _sev.is_valid(str(_level)):
+                errors.append(
+                    f"remediation.{_field} must be one of "
+                    f"{', '.join(_sev.ORDER)} (got '{_level}')")
+
+    _tta = _rem.get("quarantine_timeout_action")
+    if _tta is not None and str(_tta).strip():
+        if str(_tta).lower() not in ("release", "remediate"):
+            errors.append(
+                f"remediation.quarantine_timeout_action must be "
+                f"'release' or 'remediate' (got '{_tta}')")
+
+    _qtm = _rem.get("quarantine_timeout_minutes")
+    if _qtm is not None and str(_qtm).strip():
+        try:
+            if int(_qtm) < 0:
+                errors.append(
+                    f"remediation.quarantine_timeout_minutes cannot be "
+                    f"negative (got {_qtm})")
+        except (TypeError, ValueError):
+            errors.append(
+                f"remediation.quarantine_timeout_minutes must be a whole "
+                f"number of minutes (got '{_qtm}')")
 
     for rule in rules:
         if rule.app == "sonarr" and not arrs.sonarr.enabled:

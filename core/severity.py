@@ -213,6 +213,103 @@ def decide(risk_level: str, min_severity: str = LOW,
     return REMEDIATE
 
 
+# ---------------------------------------------------------------------
+# Operating modes (ROADMAP item 26)
+# ---------------------------------------------------------------------
+#
+# A mode is a CEILING on how far the system may act. It is deliberately NOT
+# a preset that rewrites min_severity/remediate_at, and NOT an override that
+# replaces them.
+#
+# The thresholds answer "which band does this finding belong in".
+# The mode answers "how far am I allowed to act at all".
+# Those are different questions, and a config that answers them with one
+# control ends up lying about at least one of them: pick "monitor" from a
+# preset and your remediate_at silently becomes CRITICAL on disk, so the
+# stored config no longer describes what you configured.
+#
+# Keeping them separate means both stay true at once, and the UI can say
+# something honest and specific: "thresholds say DELETE, mode caps at
+# record -- recorded only".
+#
+# There are three modes, not the four originally sketched. "Monitor" and
+# "Dry Run" turned out to describe the same behaviour under two names --
+# compute the decision, record it, act on nothing -- so they are one mode.
+# The CLI --dry-run flag remains the way to get it for a single run.
+
+MODE_MONITOR    = "monitor"      # compute and record; never pause, never delete
+MODE_QUARANTINE = "quarantine"   # never delete; remediate is held instead
+MODE_AUTOMATIC  = "automatic"    # thresholds honoured exactly (current behaviour)
+
+MODES = [MODE_MONITOR, MODE_QUARANTINE, MODE_AUTOMATIC]
+DEFAULT_MODE = MODE_AUTOMATIC
+
+# How far each mode permits the system to go.
+_MODE_CEILING = {
+    MODE_MONITOR:    RECORD,
+    MODE_QUARANTINE: QUARANTINE,
+    MODE_AUTOMATIC:  REMEDIATE,
+}
+
+# Decisions ordered by how much they actually do. NOTIFY is deliberately
+# absent: it is defined in this module but never produced, and giving an
+# unreachable value a rank here would let it be silently escalated.
+_DECISION_ORDER = [RECORD, QUARANTINE, REMEDIATE]
+_DECISION_RANK = {d: i for i, d in enumerate(_DECISION_ORDER)}
+
+
+def is_valid_mode(mode: str) -> bool:
+    return (mode or "").lower().strip() in _MODE_CEILING
+
+
+def cap_for_mode(decision: str, mode: str = DEFAULT_MODE) -> str:
+    """
+    Reduce a decision to what the operating mode permits.
+
+    This only ever moves a decision DOWN. It cannot turn a RECORD into a
+    delete, whatever the mode -- a ceiling that could raise the outcome
+    would not be a safety control.
+
+        decision    monitor     quarantine   automatic
+        RECORD      RECORD      RECORD       RECORD
+        QUARANTINE  RECORD      QUARANTINE   QUARANTINE
+        REMEDIATE   RECORD      QUARANTINE   REMEDIATE
+
+    Unrecognised input fails toward doing less, not more: an unknown
+    decision becomes RECORD, and an unknown mode falls back to the default
+    rather than guessing. config.py rejects an invalid mode at load time,
+    so the mode fallback here is defence in depth rather than the real
+    guard -- a mistyped safety setting should be reported, not absorbed.
+    """
+    mode = (mode or "").lower().strip() or DEFAULT_MODE
+    if mode not in _MODE_CEILING:
+        log.warning(
+            f"Unknown operating_mode {mode!r}; using {DEFAULT_MODE}. "
+            f"Expected one of {', '.join(MODES)}")
+        mode = DEFAULT_MODE
+
+    if decision not in _DECISION_RANK:
+        log.warning(
+            f"Unrecognised decision {decision!r}; recording only. "
+            f"Expected one of {', '.join(_DECISION_ORDER)}")
+        return RECORD
+
+    ceiling = _MODE_CEILING[mode]
+    if _DECISION_RANK[decision] <= _DECISION_RANK[ceiling]:
+        return decision
+    return ceiling
+
+
+def describe_mode(mode: str) -> str:
+    """One-line summary for the UI banner and logs."""
+    mode = (mode or "").lower().strip() or DEFAULT_MODE
+    return {
+        MODE_MONITOR:    "Monitor - findings are recorded, nothing is paused or deleted",
+        MODE_QUARANTINE: "Quarantine - matches are held for review, nothing is deleted automatically",
+        MODE_AUTOMATIC:  "Automatic - the remediation thresholds are applied as configured",
+    }.get(mode, f"Unknown mode {mode!r} - treated as {DEFAULT_MODE}")
+
+
 def explain(risk_level: str, counts: dict) -> str:
     """One-line summary for logs and the UI."""
     if not risk_level:
