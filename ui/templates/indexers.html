@@ -208,6 +208,76 @@
 </div>
 {% endif %}
 
+{% if replacement_error %}
+<div class="alert alert-error" style="margin-top:1.5rem;">
+  <strong>Replacement stats unavailable:</strong> {{ replacement_error }}
+</div>
+{% elif replacement_rows %}
+<div class="card" style="margin-top:1.5rem;">
+  <h3 style="margin:0 0 0.35rem;font-size:1rem;">What happened after we deleted it</h3>
+  <p class="hint" style="margin:0 0 0.9rem;">
+    Grouped by the indexer that served the <em>bad</em> release. The useful
+    distinction is between an indexer whose mistakes get replaced cleanly and
+    one whose mistakes are never replaced at all — the health score cannot
+    tell those apart.
+  </p>
+  <div style="overflow-x:auto;">
+  <table class="table">
+    <caption class="sr-only">Replacement outcomes per indexer</caption>
+    <thead>
+      <tr>
+        <th>Indexer</th>
+        <th class="num">Rejections</th>
+        <th class="num">Replaced cleanly</th>
+        <th class="num">Replacement also bad</th>
+        <th class="num">Never replaced</th>
+        <th class="num">Still open</th>
+        <th class="num">Recovery</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in replacement_rows %}
+      {% set settled = (r.replaced_ok or 0) + (r.replaced_bad or 0) + (r.never_replaced or 0) %}
+      <tr>
+        <td>{{ r.indexer }}</td>
+        <td class="num">{{ r.rejections }}</td>
+        <td class="num">{{ r.replaced_ok or 0 }}</td>
+        <td class="num">
+          {% if r.replaced_bad %}<span class="badge badge-error">{{ r.replaced_bad }}</span>
+          {% else %}0{% endif %}
+        </td>
+        <td class="num">
+          {% if r.never_replaced %}<span class="badge badge-yellow">{{ r.never_replaced }}</span>
+          {% else %}0{% endif %}
+        </td>
+        <td class="num">{{ r.open or 0 }}</td>
+        <td class="num">
+          {# Percentage of SETTLED cases only. Counting open watches as
+             failures would show a brand-new install as 0% recovery when the
+             truthful answer is "not known yet". #}
+          {% if settled %}
+            {% set pct = ((r.replaced_ok or 0) / settled * 100) | round(0) | int %}
+            {% if pct >= 80 %}<span class="badge badge-green">{{ pct }}%</span>
+            {% elif pct >= 40 %}<span class="badge badge-yellow">{{ pct }}%</span>
+            {% else %}<span class="badge badge-error">{{ pct }}%</span>{% endif %}
+          {% else %}
+            <span class="text-muted" title="No watch has reached a conclusion yet">—</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div style="margin-top:0.75rem;font-size:0.82rem;color:var(--text-muted);">
+    Recovery is the share of <em>settled</em> cases that were replaced cleanly;
+    watches still open are excluded rather than counted as failures.
+    “Replacement also bad” means the release the *arr fetched next was flagged
+    too — the most useful signal here, and the rarest.
+  </div>
+</div>
+{% endif %}
+
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ -->

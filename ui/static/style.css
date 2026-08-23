@@ -296,6 +296,15 @@ a:hover { text-decoration: underline; }
 .badge-debug   { background: rgba(74,82,96,0.1);    color: #8a9099; border-color: rgba(74,82,96,0.2); }
 .badge-warning { background: rgba(212,134,58,0.12); color: #d4863a; border-color: rgba(212,134,58,0.25); }
 
+/* Numeric table cells. font-variant-numeric keeps digits the same width so
+   columns of counts line up instead of drifting, which matters more here
+   than usual: these tables are read by comparing rows to each other. */
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---- Operating mode banner (ROADMAP item 26) -------------------------
    Shown only when the mode is NOT automatic. The point is that a box which
    has been told to hold back should never be mistaken for one that is

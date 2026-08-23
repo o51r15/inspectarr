@@ -13,6 +13,8 @@ def indexers_view(tab=None):
     stats_error = None
     llm_runs = []
     llm_error = None
+    replacement_rows = []
+    replacement_error = None
     active_tab = tab or request.args.get("tab", "health")
 
     try:
@@ -37,6 +39,17 @@ def indexers_view(tab=None):
             except Exception as exc:
                 llm_error = str(exc)
 
+        # --- Replacement outcomes (ROADMAP item 27) ---
+        # Deliberately outside the Prowlarr block: this reads arr history,
+        # not indexer scoring, so it still has something to report on an
+        # install with Prowlarr disabled.
+        try:
+            state = current_app.config.get("STATE")
+            if state:
+                replacement_rows = state.get_replacement_stats()
+        except Exception as exc:
+            replacement_error = str(exc)
+
     except Exception:
         enabled = False
 
@@ -48,6 +61,8 @@ def indexers_view(tab=None):
         stats_error=stats_error,
         llm_runs=llm_runs,
         llm_error=llm_error,
+        replacement_rows=replacement_rows,
+        replacement_error=replacement_error,
     )
 
 
