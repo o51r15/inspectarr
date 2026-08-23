@@ -10,8 +10,13 @@ import os
 import sys
 import shutil
 import platform
-from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, render_template, current_app, jsonify
+
+# ROADMAP item 13: the checks live in core/ so the CLI can use them too.
+from core.connections import check_all, check_connection, SERVICE_NAMES
+
+# Kept so anything still referring to the old private name keeps working.
+_check_one = check_connection
 
 system_bp = Blueprint("system", __name__)
 
@@ -60,54 +65,6 @@ def system_status():
     return render_template("system_status.html", info=info, storage=storage)
 
 
-def _check_one(name: str, cfg) -> dict:
-    """Run a single connection test. Returns {name, configured, ok}."""
-    try:
-        if name == "Torrent Client":
-            from core.torrent_client import build_torrent_client
-            c = build_torrent_client(cfg)
-            return {"name": f"{name} ({cfg.torrent_client})", "configured": True, "ok": c.test_connection()}
-        if name == "Sonarr":
-            if not cfg.arrs.sonarr.enabled:
-                return {"name": name, "configured": False, "ok": False}
-            from core.arrs.sonarr import SonarrClient
-            c = SonarrClient(cfg.arrs.sonarr.url, cfg.arrs.sonarr.api_key)
-            return {"name": name, "configured": True, "ok": c.test_connection()}
-        if name == "Radarr":
-            if not cfg.arrs.radarr.enabled:
-                return {"name": name, "configured": False, "ok": False}
-            from core.arrs.radarr import RadarrClient
-            c = RadarrClient(cfg.arrs.radarr.url, cfg.arrs.radarr.api_key)
-            return {"name": name, "configured": True, "ok": c.test_connection()}
-        if name == "Lidarr":
-            if not cfg.arrs.lidarr.enabled:
-                return {"name": name, "configured": False, "ok": False}
-            from core.arrs.lidarr import LidarrClient
-            c = LidarrClient(cfg.arrs.lidarr.url, cfg.arrs.lidarr.api_key)
-            return {"name": name, "configured": True, "ok": c.test_connection()}
-        if name == "Prowlarr":
-            if not cfg.prowlarr.enabled:
-                return {"name": name, "configured": False, "ok": False}
-            from core.prowlarr import ProwlarrClient
-            c = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-            return {"name": name, "configured": True, "ok": c.test_connection()}
-        if name == "Ollama":
-            ocfg = cfg.prowlarr.ollama
-            url, model = ocfg.url, ocfg.model
-            if not ocfg.enabled:
-                # Distinct from unconfigured: the user switched AI off.
-                return {"name": f"{name} (disabled)", "configured": False,
-                        "ok": False}
-            if not url or not model:
-                return {"name": name, "configured": False, "ok": False}
-            import requests
-            resp = requests.get(f"{url}/api/tags", timeout=10)
-            return {"name": f"{name} ({model})", "configured": True, "ok": resp.status_code == 200}
-    except Exception:
-        return {"name": name, "configured": True, "ok": False}
-    return {"name": name, "configured": False, "ok": False}
-
-
 @system_bp.route("/system/status/data")
 def system_status_data():
     """
@@ -122,11 +79,7 @@ def system_status_data():
     except Exception as exc:
         return jsonify({"ok": False, "message": str(exc), "connections": []})
 
-    names = ["Torrent Client", "Sonarr", "Radarr", "Lidarr", "Prowlarr", "Ollama"]
-    with ThreadPoolExecutor(max_workers=len(names)) as pool:
-        results = list(pool.map(lambda n: _check_one(n, cfg), names))
-
-    return jsonify({"ok": True, "connections": results})
+    return jsonify({"ok": True, "connections": check_all(cfg)})
 
 
 @system_bp.route("/system/tasks")

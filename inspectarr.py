@@ -10,6 +10,7 @@ Usage:
   python inspectarr.py                     # single scan run (default)
   python inspectarr.py --config /path      # alternate config file
   python inspectarr.py --dry-run           # flag matches, take no action
+  python inspectarr.py --test              # test every configured connection and exit
 
 For the web UI with a built-in scheduler daemon, run web.py instead.
 """
@@ -31,7 +32,70 @@ def parse_args() -> argparse.Namespace:
                    help="Run as a headless daemon — continuous scan loop without the web UI")
     p.add_argument("--retry-now", action="store_true",
                    help="Force flush retry queue — bypasses timing and exhaustion cap, then scans")
+    p.add_argument("--test",      action="store_true",
+                   help="Test every configured connection and exit "
+                        "(exit 1 if any configured service is unreachable)")
     return p.parse_args()
+
+
+def _run_connection_test(args) -> int:
+    """
+    Test every configured connection and report. Returns a process exit code.
+
+    Uses the same checks as System -> Status (core/connections.py), so the
+    two can never disagree about whether something is reachable -- which is
+    the entire point of a CLI test: to answer that question the same way the
+    UI would, without needing the UI.
+
+    Exit code is the useful part. 0 only if every CONFIGURED service
+    answered; 1 if any did not. Services that are switched off are reported
+    as skipped and do not affect it -- a disabled Lidarr is not a failure,
+    and treating it as one would make the flag useless in a script.
+    """
+    from core.config import load_config
+    from core.connections import check_all
+
+    if not os.path.exists(args.config):
+        print(f"ERROR: Config file not found: {args.config}")
+        return 2
+
+    try:
+        config = load_config(args.config)
+    except Exception as exc:
+        # A config that will not load is a different failure from a service
+        # that will not answer, and deserves its own exit code.
+        print(f"ERROR: Failed to load config: {exc}")
+        return 2
+
+    print(f"Testing connections from {args.config}\n")
+
+    results = check_all(config)
+    width = max(len(r["name"]) for r in results)
+    failures = 0
+
+    for r in results:
+        if not r.get("configured"):
+            status = "skipped (not configured)"
+        elif r.get("ok"):
+            status = "OK"
+        else:
+            status = "FAILED"
+            failures += 1
+        print(f"  {r['name']:<{width}}  {status}")
+
+    configured = sum(1 for r in results if r.get("configured"))
+    print()
+    if failures:
+        print(f"{failures} of {configured} configured service(s) unreachable.")
+        return 1
+    if not configured:
+        # Nothing to test is not success. A fresh install reaching this
+        # would otherwise print a reassuring green message about having
+        # verified nothing at all.
+        print("No services are configured — nothing was tested.")
+        return 1
+    print(f"All {configured} configured service(s) reachable.")
+    return 0
 
 
 def _run_daemon(args):
@@ -92,6 +156,11 @@ def _run_daemon(args):
 
 def main():
     args = parse_args()
+
+    # Checked first: --test must be safe to run at any time, so it must not
+    # open the database, start a scheduler or touch a torrent.
+    if args.test:
+        sys.exit(_run_connection_test(args))
 
     if args.daemon:
         _run_daemon(args)
