@@ -31,7 +31,8 @@ Supports **qBittorrent**, **Transmission**, and **Deluge** — select your clien
 and Inspectarr handles the rest. Scans can be triggered by a polling schedule, incoming
 webhooks from your *arr apps, or both at the same time. Findings are graded by
 severity, so you can delete outright only what is genuinely dangerous and hold
-everything else on a review queue instead.
+everything else on a review queue instead — or run the whole thing in
+Monitor mode first and watch what it would have done before letting it act.
 
 It also scores your Prowlarr torrent indexers by health — response time, failure
 rate, malicious content, and grab success — then automatically reorders them so
@@ -47,6 +48,7 @@ with content-hash caching to minimize redundant calls.
 - **Multi-client support** — qBittorrent, Transmission (JSON-RPC), and Deluge (Web UI JSON-RPC) with config-driven selection and per-client Settings UI
 - **Bad torrent detection** — configurable rules per category: bad extensions, filename patterns, minimum file size
 - **Automatic remediation** — blocklist in the *arr, delete from qBit, retry on failure
+- **Operating modes** — one control for how far Inspectarr may act: **Monitor** (record findings, never act), **Quarantine** (hold for review, never delete), or **Automatic** (apply the thresholds). A banner on every page shows when the mode is holding the system back. It is a ceiling, not a preset — it never rewrites your thresholds and can only ever reduce an outcome
 - **Severity grading** — every finding is graded (executables CRITICAL, archives HIGH, undersized primary file HIGH, filename patterns MEDIUM) and aggregated with MAX, so a pile of minor findings cannot dilute one dangerous file
 - **Quarantine mode** — a middle band between "just record it" and "delete it": matching torrents are paused and held on a review queue until you decide. Optional timeout with a configurable action. Off by default — both thresholds ship at LOW, which reproduces the previous behaviour exactly
 - **Webhook + polling** — receive push events from Sonarr/Radarr/Lidarr or poll on a schedule, or both
@@ -125,7 +127,7 @@ Dark and light themes with toggle. Works on desktop and mobile.
 | **Indexers** | Health scores, rescore, reorder & sync, per-indexer ignore/reset |
 | **Quarantine** | Review queue for held torrents — release, keep paused, or delete + blocklist |
 | **Stats** | Grab attribution — total grabs, malicious hits, % malicious per indexer |
-| **Settings** | Connections, rules + remediation thresholds, indexers, AI (Ollama + model validation), notifications, general, advanced, backups |
+| **Settings** | Connections, rules + operating mode + remediation thresholds, indexers, AI (Ollama + model validation), notifications, general, advanced, backups |
 | **System** | Status, scheduled tasks, update checker, LLM logs |
 | **Events** | Paginated log viewer with level filter and JSON export |
 | **LLM Logs** | AI scoring report card with per-indexer reasoning, score trend charts, run history |

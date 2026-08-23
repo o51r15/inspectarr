@@ -7,9 +7,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-Work on `main` since v1.6.0, not yet tagged. Two themes: the **safety and
-inspection foundation** (ROADMAP Cluster 7) and **AI settings + model
-validation** (ROADMAP Cluster 8).
+Work on `main` since v1.6.0, not yet tagged. Three themes: **operating
+modes** (ROADMAP item 26), the **safety and inspection foundation**
+(ROADMAP Cluster 7) and **AI settings + model validation** (ROADMAP
+Cluster 8).
+
+### Added — Operating Modes
+
+- **Operating modes** (`remediation.operating_mode`) — a single control for how far Inspectarr may act, shown in Settings → Rules and on a banner across every page whenever it is not set to automatic.
+
+  | Mode | Behaviour |
+  |---|---|
+  | `monitor` | Findings are inspected, graded and recorded. Nothing is paused, blocklisted or deleted. |
+  | `quarantine` | Nothing is deleted automatically. Anything that would have been remediated is held for review instead. |
+  | `automatic` | The remediation thresholds are applied exactly as written. **Default** — existing installs are unchanged. |
+
+  There are three modes rather than the four originally planned: "Monitor" and "Dry Run" turned out to describe the same behaviour under two names. The `--dry-run` CLI flag remains the way to get it for a single run, and still takes precedence over the configured mode.
+
+  The mode is a **ceiling**, not a preset. It never rewrites `min_severity` or `remediate_at` — those keep the values you gave them, so switching to monitor and back is lossless. It can only ever reduce an outcome, never escalate one. That property is asserted directly rather than inferred, because a "safety" control that could raise a decision would be worse than no control at all.
+
+  Because both readings stay true at once, the settings page can be specific rather than vague: the band explainer says what the thresholds decide *and* what the mode does to that, including the case where the mode prevents any deletion at all.
+
+- **`inspections.operating_mode` is now populated.** The column has existed and been NULL since structured inspections landed. Every terminal path — deleted, dry-run, recorded, failed — now records the posture the scan ran under, so a historical row can answer "why was this not deleted".
+
+- **New log event `capped_by_operating_mode`**, carrying both `decision_before_mode` and `decision`. It is deliberately distinct from `below_severity_floor`: one means the thresholds said record, the other means the thresholds said more and the mode refused. Reporting the wrong one would send anyone debugging it to the wrong setting.
+
+### Fixed
+
+- **The remediation block was almost entirely unvalidated.** `min_severity`, `remediate_at`, `quarantine_timeout_action` and `quarantine_timeout_minutes` accepted any value; a bad one was silently absorbed by runtime fallbacks and the scan simply behaved differently than configured, with no error anywhere. All four are now validated at load and rejected by name, alongside the new `operating_mode`.
 
 ### Added — Safety & Inspection Foundation
 
