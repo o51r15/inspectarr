@@ -7,10 +7,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-Work on `main` since v1.6.0, not yet tagged. Three themes: **operating
-modes** (ROADMAP item 26), the **safety and inspection foundation**
-(ROADMAP Cluster 7) and **AI settings + model validation** (ROADMAP
-Cluster 8).
+Work on `main` since v1.6.0, not yet tagged. This closes **Cluster 7**
+(items 23—27) and **Cluster 8** in full: the safety and inspection
+foundation, operating modes, replacement outcome tracking, and AI
+settings with model validation.
+
+### Added — Replacement Outcome Tracking
+
+- **Replacement tracking** (`remediation.track_replacements`, default on) — after a release is deleted, Inspectarr watches the *arr to see whether a replacement arrives, which indexer served it, and whether that one survives inspection too. Results appear on **Indexers → Stats**, grouped by the indexer that served the *bad* release.
+
+  | Outcome | Meaning |
+  |---|---|
+  | `imported` | A replacement was grabbed and imported cleanly. |
+  | `rejected` | The replacement was itself flagged — the cycle repeated. |
+  | `abandoned` | The window closed without a conclusion. |
+
+  The useful distinction is one the health score cannot draw: an indexer whose bad releases are quickly replaced by good ones is a very different proposition from one whose bad releases are never replaced at all. Watches are opened at the moment of *rejection*, so "nothing ever arrived" is a recorded answer rather than merely an absence of data.
+
+  Purely observational — it never causes or prevents an action.
+
+- **Recovery rate per indexer**, counting settled cases only. Watches still open are excluded rather than counted as failures, so a fresh install shows a dash instead of a damning 0%.
+
+- **New config keys:** `remediation.track_replacements`, `remediation.replacement_window_hours` (default 72). **New table:** `replacements`. **New log events:** `replacement_grabbed`, `replacement_imported`, `replacement_rejected`, `replacement_abandoned`.
+
+- **Lidarr is excluded from replacement tracking** and says so explicitly rather than failing quietly. Detection, blocklisting, quarantine and everything else are unaffected. See below for why.
+
+### Notes — the *arr history API
+
+Finding a replacement means asking "what happened to this episode/movie", which needs history scoped to one media item — the global feed is 318,000 records on a real install.
+
+The endpoint that does this is **different per app, and the symmetric guess is wrong in both directions.** Measured against live Sonarr v4 and Radarr v3:
+
+| Call | Result |
+|---|---|
+| Sonarr `GET /history?episodeId=N` | Correctly scoped |
+| Sonarr `GET /history/series?episodeId=N` | **episodeId ignored** — returns the whole series |
+| Radarr `GET /history/movie?movieId=N` | Correctly scoped |
+| Radarr `GET /history?movieId=N` | **movieId ignored** — returns unfiltered global history |
+
+Both wrong forms return HTTP 200 with entirely plausible data; nothing in the response indicates the filter was dropped. So every response is verified to actually carry the id it was asked for, and rejected if not — a wrong answer here would be attributed to a real indexer as a real replacement. Lidarr stays off because it could not be verified against a live instance, and this is precisely the API where guessing has now been demonstrated wrong twice.
 
 ### Added — Operating Modes
 

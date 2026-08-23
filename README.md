@@ -55,6 +55,7 @@ with content-hash caching to minimize redundant calls.
 - **Prowlarr indexer health scoring** — weighted failure rates, logarithmic response time curve, malicious content tracking, grab success rate, historical trend analysis
 - **AI-powered scoring** — optional Ollama integration with a dedicated Settings → AI pane, in-UI model selector and content-hash LLM caching. Ships **disabled**; one master switch turns every AI path off at once
 - **Model validation** — before a model can be selected it is tested against the real scoring path for discrimination, schema compliance and context capacity at your actual indexer count. Results are kept per model so you can compare them
+- **Replacement tracking** — after deleting a bad release, watches whether the *arr finds a replacement, which indexer served it, and whether that one passes inspection too. Answers the question a health score cannot: does this indexer's rubbish get replaced by something good, or by nothing at all
 - **Grab attribution** — tracks which indexer served each torrent, increments malicious-hit counters automatically
 - **Auto-reorder** — demotes bad indexers, promotes good ones, syncs to all connected apps
 - **Auto-manage indexers** — automatically disable indexers that consistently score below a health threshold, re-enable after a configurable cooldown
