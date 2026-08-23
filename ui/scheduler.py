@@ -208,6 +208,7 @@ class Scheduler:
             # promptly rather than waiting a full extra cycle.
             try:
                 scanner.process_quarantine_timeouts()
+                scanner.process_replacement_watches()
             except Exception as exc:
                 # Never let timeout bookkeeping abort the scan itself.
                 print(f"Quarantine timeout sweep failed: {exc}",

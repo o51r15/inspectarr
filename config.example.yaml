@@ -201,6 +201,23 @@ remediation:
   # torrent was malicious.
   quarantine_timeout_action: release
 
+  # After deleting a release, watch to see whether the *arr finds a
+  # replacement, which indexer served it, and whether that one passes
+  # inspection too. Purely observational -- it never causes or prevents an
+  # action, it only records what happened afterwards.
+  #
+  # The point is the distinction it draws: an indexer whose bad releases are
+  # quickly replaced by good ones is a different proposition from one whose
+  # bad releases are never replaced at all, and the health score alone
+  # cannot tell you which you have.
+  #
+  # Costs a small number of extra *arr API calls, polled with a backoff that
+  # widens as a watch ages. Set false for none at all.
+  track_replacements: true
+
+  # How long to keep asking before recording a rejection as never replaced.
+  replacement_window_hours: 72
+
   # Reclassify specific extensions or signals. Extension keys (leading dot)
   # win over signal keys.
   severity_overrides: {}

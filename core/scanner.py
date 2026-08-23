@@ -344,6 +344,35 @@ class Scanner:
         file_count = len(files)
         total_size = sum(f.get("size", 0) or 0 for f in files)
 
+        # Was this torrent the replacement for something we rejected earlier?
+        # If so the cycle repeated, and that is worth recording regardless of
+        # what the mode lets us do about it now (ROADMAP item 27).
+        try:
+            watched = self.state.find_replacement_by_hash(h)
+            if watched:
+                self.state.update_replacement(
+                    watched["id"], status="rejected",
+                    outcome_detail=(
+                        f"replacement from {watched.get('replacement_indexer')} "
+                        f"was itself flagged by rule '{rule.name}'"),
+                    resolved_at=datetime.now(timezone.utc).isoformat())
+                self.log.warning(
+                    f"  Replacement for '{watched.get('original_name')}' is "
+                    f"ALSO bad — {watched.get('original_indexer')} -> "
+                    f"{watched.get('replacement_indexer')}")
+                self.state.write_log({
+                    "level": "WARNING", "event": "replacement_rejected",
+                    "inspection_id": inspection_id,
+                    "torrent_name": name, "hash": h,
+                    "original_name": watched.get("original_name"),
+                    "original_indexer": watched.get("original_indexer"),
+                    "replacement_indexer": watched.get("replacement_indexer"),
+                    "rule": rule.name,
+                })
+        except Exception as exc:
+            # Observational only -- must never break an evaluation.
+            self.log.debug(f"  Replacement lookup failed: {exc}")
+
         if raw_decision == sev.RECORD:
             # Flagged, but below the configured remediation floor. The
             # evidence is still recorded -- that is the whole point of having
@@ -588,6 +617,19 @@ class Scanner:
                 hash, name, rule.app
             )
 
+        # Step 0b — capture what identifies this release to the arr, so a
+        # replacement can be recognised later (ROADMAP item 27).
+        #
+        # Done here, before blocklisting, for the same reason attribution is:
+        # blocklisting appends new history events, and while episodeId/movieId
+        # do survive that, reading identity and indexer from the same snapshot
+        # keeps the two consistent. Independent of Prowlarr -- replacement
+        # tracking is useful without indexer scoring enabled.
+        watch = None
+        if getattr(self.config.remediation, "track_replacements", False):
+            watch = self._capture_replacement_identity(
+                arr_client, hash, name, rule, indexer_name)
+
         # Step 1 — blocklist in arr
         try:
             arr_success = arr_client.blocklist(hash)
@@ -685,6 +727,16 @@ class Scanner:
         self.notifier.notify_action(name, bad_files, arr_success, qbit_ok, rule.app)
         self.log.info(f"  DONE — deleted: {name}")
 
+        # Watch for a replacement. Opened only now, after the removal really
+        # happened: a failed remediation leaves the release in place, so
+        # there is nothing for the arr to replace and a watch would sit open
+        # until it timed out and reported a false "never replaced".
+        if watch:
+            self.state.open_replacement_watch(watch)
+            self.log.debug(
+                f"  Watching for a replacement ({watch['media_field']}="
+                f"{watch['media_id']}): {name}")
+
         # Step 4 — record malicious hit against the indexer
         # BUG-03: when attribution failed (indexer_id is None) emit a WARNING
         # rather than silently dropping the hit with no trace in the logs.
@@ -779,6 +831,209 @@ class Scanner:
                 "hash": hash, "torrent_name": name, "attempts": attempt_count,
             })
             self.notifier.notify_retry_exhausted(name, hash, attempt_count)
+
+    # ------------------------------------------------------------------
+    # Replacement tracking (ROADMAP item 27)
+    # ------------------------------------------------------------------
+
+    # A sweep must never become the slow part of a scan. Both caps are
+    # deliberate and are logged when they bite, so a truncated sweep is
+    # never mistaken for a complete one.
+    MAX_REPLACEMENT_CHECKS = 25
+
+    def _capture_replacement_identity(self, arr_client, hash: str, name: str,
+                                      rule, indexer_name: str = None) -> dict | None:
+        """
+        Build a watch record, or None if this release cannot be watched.
+
+        Returns None rather than raising for every "cannot": an arr that does
+        not support scoped history (Lidarr), a release the arr never knew
+        about (a manual client add), or an unreachable arr. None of those are
+        reasons to fail a remediation that is otherwise fine.
+        """
+        try:
+            if not getattr(arr_client, "MEDIA_HISTORY_VERIFIED", False):
+                return None
+            record = arr_client.find_in_history(hash)
+            if not record:
+                return None
+            media_id = arr_client.media_id_of(record)
+            if media_id in (None, ""):
+                return None
+            return {
+                "inspection_id":    None,
+                "original_hash":    (hash or "").upper(),
+                "original_name":    name,
+                "original_indexer": indexer_name or arr_client.get_grab_indexer(hash),
+                "arr_app":          rule.app,
+                "media_id":         media_id,
+                "media_field":      arr_client.MEDIA_ID_FIELD,
+                "rejected_at":      datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            self.log.debug(f"  Could not capture replacement identity: {exc}")
+            return None
+
+    @staticmethod
+    def _replacement_backoff_minutes(check_count: int) -> int:
+        """
+        How long to wait before re-checking a watch.
+
+        Replacements usually arrive quickly or not at all, so checking often
+        at first and rarely later costs very little and still catches the
+        slow ones: 10, 20, 40, 80, 160, 320 minutes, then capped at 6 hours.
+        A 72-hour window works out at roughly ten checks per rejection rather
+        than one per scan cycle, which at a 15-minute poll would be ~288.
+        """
+        return min(10 * (2 ** max(0, check_count)), 360)
+
+    def process_replacement_watches(self) -> int:
+        """
+        Advance open replacement watches. Returns how many were resolved.
+
+        Purely observational: this never pauses, deletes or blocklists
+        anything. The worst a bug in here can do is record a wrong
+        statistic, which is why every arr call is wrapped per-entry -- one
+        unreachable arr must not stop the rest of the queue, matching the
+        per-torrent isolation in run_scan (BUG-01).
+        """
+        rem = getattr(self.config, "remediation", None)
+        if not getattr(rem, "track_replacements", False):
+            return 0
+
+        watches = self.state.get_open_replacements()
+        if not watches:
+            return 0
+
+        window_hours = int(getattr(rem, "replacement_window_hours", 72) or 72)
+        now = datetime.now(timezone.utc)
+        resolved = 0
+        checked = 0
+
+        for w in watches:
+            if checked >= self.MAX_REPLACEMENT_CHECKS:
+                self.log.info(
+                    f"Replacements: stopping at {self.MAX_REPLACEMENT_CHECKS} "
+                    f"checks this pass; {len(watches) - checked} watch(es) "
+                    f"deferred to the next scan")
+                break
+            try:
+                if self._advance_replacement_watch(w, now, window_hours):
+                    resolved += 1
+                checked += 1
+            except Exception as exc:
+                self.log.warning(
+                    f"Replacement watch {w.get('id')} failed: {exc}")
+                self.state.update_replacement(
+                    w["id"], last_checked=now.isoformat(),
+                    check_count=int(w.get("check_count") or 0) + 1)
+
+        return resolved
+
+    def _advance_replacement_watch(self, w: dict, now, window_hours: int) -> bool:
+        """One watch. Returns True if it reached a final state."""
+        rejected_at = w.get("rejected_at") or ""
+        count = int(w.get("check_count") or 0)
+
+        # Backoff -- not due yet.
+        last = w.get("last_checked")
+        if last:
+            try:
+                elapsed = (now - datetime.fromisoformat(last)).total_seconds() / 60
+                if elapsed < self._replacement_backoff_minutes(count):
+                    return False
+            except Exception:
+                pass   # unparseable timestamp: check it now and overwrite
+
+        # Window expired.
+        try:
+            age_h = (now - datetime.fromisoformat(rejected_at)).total_seconds() / 3600
+        except Exception:
+            age_h = 0
+        if age_h > window_hours:
+            if w.get("status") == "grabbed":
+                # Something was grabbed but never imported and we never
+                # flagged it. Unknown is not the same as never replaced, and
+                # recording it as the latter would understate the indexer.
+                detail = "replacement grabbed but never imported within the window"
+                status = "abandoned"
+            else:
+                detail = f"no replacement grabbed within {window_hours}h"
+                status = "abandoned"
+            self.state.update_replacement(
+                w["id"], status=status, outcome_detail=detail,
+                resolved_at=now.isoformat(), last_checked=now.isoformat(),
+                check_count=count + 1)
+            self.state.write_log({
+                "level": "INFO", "event": "replacement_abandoned",
+                "torrent_name": w.get("original_name"),
+                "hash": w.get("original_hash"),
+                "indexer": w.get("original_indexer"),
+                "arr": w.get("arr_app"), "reason": detail,
+            })
+            return True
+
+        arr_client = _build_arr_client(w["arr_app"], self.config)
+        media_id = w.get("media_id")
+
+        if w.get("status") == "pending":
+            found = arr_client.find_replacement_grab(
+                media_id, rejected_at, exclude_hash=w.get("original_hash"))
+            if not found:
+                self.state.update_replacement(
+                    w["id"], last_checked=now.isoformat(), check_count=count + 1)
+                return False
+            self.state.update_replacement(
+                w["id"], status="grabbed",
+                replacement_hash=found.get("hash"),
+                replacement_name=found.get("title"),
+                replacement_indexer=found.get("indexer"),
+                grabbed_at=found.get("grabbed_at"),
+                last_checked=now.isoformat(), check_count=count + 1)
+            self.log.info(
+                f"Replacement grabbed for {w.get('original_name')} "
+                f"from {found.get('indexer')}")
+            self.state.write_log({
+                "level": "INFO", "event": "replacement_grabbed",
+                "torrent_name": w.get("original_name"),
+                "hash": w.get("original_hash"),
+                "original_indexer": w.get("original_indexer"),
+                "replacement_indexer": found.get("indexer"),
+                "replacement_name": found.get("title"),
+                "arr": w.get("arr_app"),
+            })
+            w = dict(w, status="grabbed", grabbed_at=found.get("grabbed_at"),
+                     replacement_hash=found.get("hash"),
+                     replacement_indexer=found.get("indexer"))
+            count += 1
+
+        if w.get("status") == "grabbed":
+            # Success is the arr importing it. Inspectarr only records
+            # inspections for FLAGGED releases, so a clean replacement leaves
+            # no evidence of its own -- the import is the observable proof it
+            # downloaded and passed. The rejected case is handled elsewhere,
+            # at the moment we flag it.
+            if arr_client.was_imported(media_id, w.get("grabbed_at") or rejected_at,
+                                       w.get("replacement_hash")):
+                self.state.update_replacement(
+                    w["id"], status="imported",
+                    outcome_detail=f"replacement from "
+                                   f"{w.get('replacement_indexer')} imported cleanly",
+                    resolved_at=now.isoformat(), last_checked=now.isoformat(),
+                    check_count=count + 1)
+                self.state.write_log({
+                    "level": "INFO", "event": "replacement_imported",
+                    "torrent_name": w.get("original_name"),
+                    "hash": w.get("original_hash"),
+                    "original_indexer": w.get("original_indexer"),
+                    "replacement_indexer": w.get("replacement_indexer"),
+                    "arr": w.get("arr_app"),
+                })
+                return True
+            self.state.update_replacement(
+                w["id"], last_checked=now.isoformat(), check_count=count + 1)
+
+        return False
 
     def _record_grab_attribution(
         self, torrent_hash: str, name: str, app: str

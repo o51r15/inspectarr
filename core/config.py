@@ -254,6 +254,27 @@ class RemediationConfig:
     # default would silently stop remediating on upgrade.
     operating_mode: str = "automatic"
 
+    # Replacement outcome tracking (ROADMAP item 27).
+    #
+    # After a rejection, watch the arr to see whether a replacement arrives,
+    # from which indexer, and whether it survives inspection. Purely
+    # observational -- it never causes or prevents an action.
+    #
+    # Defaults ON because the resulting statistic is the point: "this
+    # indexer's bad releases are replaced cleanly 80% of the time" is a very
+    # different judgement from "this indexer's bad releases are never
+    # replaced at all", and neither is visible without it.
+    #
+    # Cost is bounded rather than free: watches are polled with an
+    # exponential backoff, capped per sweep, and abandoned after the window
+    # below. Set false to make no extra arr calls at all.
+    track_replacements: bool = True
+
+    # How long to keep asking before giving up and recording the rejection
+    # as never replaced. 72h covers a weekend, which is roughly how long an
+    # arr may keep searching before anything else becomes available.
+    replacement_window_hours: int = 72
+
 
 @dataclass
 class AppConfig:
@@ -517,6 +538,11 @@ def _parse_config(raw: dict) -> AppConfig:
         # where a bare default would not. Same class of bug as B-07.
         operating_mode=str(
             rem_raw.get("operating_mode") or "automatic").lower().strip(),
+        track_replacements=bool(
+            True if rem_raw.get("track_replacements") is None
+            else rem_raw.get("track_replacements")),
+        replacement_window_hours=int(
+            rem_raw.get("replacement_window_hours") or 72),
     )
 
     return AppConfig(
@@ -596,6 +622,19 @@ def _validate(raw: dict, rules: list[Rule], arrs: ArrsConfig) -> None:
             errors.append(
                 f"remediation.quarantine_timeout_action must be "
                 f"'release' or 'remediate' (got '{_tta}')")
+
+    _rwh = _rem.get("replacement_window_hours")
+    if _rwh is not None and str(_rwh).strip():
+        try:
+            if int(_rwh) <= 0:
+                errors.append(
+                    f"remediation.replacement_window_hours must be positive "
+                    f"(got {_rwh}); set track_replacements: false to disable "
+                    f"tracking instead")
+        except (TypeError, ValueError):
+            errors.append(
+                f"remediation.replacement_window_hours must be a whole number "
+                f"of hours (got '{_rwh}')")
 
     _qtm = _rem.get("quarantine_timeout_minutes")
     if _qtm is not None and str(_qtm).strip():
