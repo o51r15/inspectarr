@@ -87,6 +87,19 @@
         <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme" id="theme-btn" title="Toggle light/dark theme">🌙</button>
       </div>
     </div>
+    {% if operating_mode == 'monitor' %}
+      <div class="mode-banner mode-banner-monitor" role="status">
+        <strong>Monitor mode</strong> — findings are inspected and recorded,
+        but nothing is paused, blocklisted or deleted.
+        <a href="/config#rules">Change in Settings &rarr; Rules</a>
+      </div>
+    {% elif operating_mode == 'quarantine' %}
+      <div class="mode-banner mode-banner-quarantine" role="status">
+        <strong>Quarantine mode</strong> — nothing is deleted automatically.
+        Matches are held on the <a href="/quarantine">Quarantine</a> page for
+        review. <a href="/config#rules">Change in Settings &rarr; Rules</a>
+      </div>
+    {% endif %}
     <div class="page">
       {% block content %}{% endblock %}
     </div>

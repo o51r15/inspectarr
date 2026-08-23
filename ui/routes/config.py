@@ -397,6 +397,12 @@ def _form_to_config(form, existing: dict) -> dict:
                 _int(form.get("remediation_quarantine_timeout"), 0),
             "quarantine_timeout_action":
                 form.get("remediation_timeout_action", "release").lower(),
+            # Falls back to the stored value rather than to "automatic": a
+            # POST that somehow omits the field must not silently promote a
+            # monitor-mode install to full automatic deletion.
+            "operating_mode":
+                form.get("remediation_operating_mode",
+                         remediation_block.get("operating_mode", "automatic")).lower(),
         })
 
     return {

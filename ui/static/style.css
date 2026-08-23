@@ -296,6 +296,38 @@ a:hover { text-decoration: underline; }
 .badge-debug   { background: rgba(74,82,96,0.1);    color: #8a9099; border-color: rgba(74,82,96,0.2); }
 .badge-warning { background: rgba(212,134,58,0.12); color: #d4863a; border-color: rgba(212,134,58,0.25); }
 
+/* ---- Operating mode banner (ROADMAP item 26) -------------------------
+   Shown only when the mode is NOT automatic. The point is that a box which
+   has been told to hold back should never be mistaken for one that is
+   actively protecting you -- that mistake is silent, and you only discover
+   it when something you expected to be deleted is still sitting there. */
+.mode-banner {
+  margin: 0 0 1rem;
+  padding: 10px 14px;
+  border: 1px solid;
+  border-left-width: 3px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.mode-banner a { text-decoration: underline; }
+.mode-banner-monitor {
+  background: rgba(96,165,250,0.10);
+  color: #60a5fa;
+  border-color: rgba(96,165,250,0.30);
+}
+.mode-banner-quarantine {
+  background: rgba(212,134,58,0.10);
+  color: #d4863a;
+  border-color: rgba(212,134,58,0.30);
+}
+[data-theme="light"] .mode-banner-monitor {
+  background: rgba(96,165,250,0.08); color: #2563eb;
+}
+[data-theme="light"] .mode-banner-quarantine {
+  background: rgba(212,134,58,0.08); color: #b45309;
+}
+
 /* Torrent state badges */
 .badge-blue   { background: rgba(96,165,250,0.12);  color: #60a5fa; border-color: rgba(96,165,250,0.2); }
 .badge-green  { background: rgba(74,222,128,0.10);  color: #4ade80; border-color: rgba(74,222,128,0.2); }

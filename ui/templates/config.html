@@ -284,6 +284,29 @@
 
         <div class="form-section">
           <div class="form-section-title">Remediation &amp; Severity</div>
+
+          <div class="form-group" style="margin-bottom:1rem">
+            <label for="remediation_operating_mode">Operating mode</label>
+            <select name="remediation_operating_mode" id="remediation_operating_mode"
+                    onchange="describeBands()">
+              {% set om = cfg.get('remediation',{}).get('operating_mode','automatic') %}
+              <option value="monitor" {{ 'selected' if om == 'monitor' else '' }}>
+                Monitor — record findings, never act
+              </option>
+              <option value="quarantine" {{ 'selected' if om == 'quarantine' else '' }}>
+                Quarantine — hold for review, never delete
+              </option>
+              <option value="automatic" {{ 'selected' if om not in ['monitor','quarantine'] else '' }}>
+                Automatic — apply the thresholds below
+              </option>
+            </select>
+            <span class="hint">
+              A ceiling on how far Inspectarr may act. It only ever reduces
+              what happens — it never makes the thresholds below more
+              aggressive, and it never changes their stored values.
+            </span>
+          </div>
+
           <p class="hint" style="margin-bottom:0.75rem">
             What happens when a rule matches. Every finding is graded
             (executables CRITICAL, archives HIGH, undersized primary file
@@ -1559,16 +1582,47 @@
     // it, so describe what will actually happen rather than what was picked.
     const clamped = ri < mi;
     if (clamped) ri = mi;
+
+    // The operating mode is a ceiling applied AFTER these bands. Describing
+    // the bands without it would say "Deleted: CRITICAL" on a box that is
+    // configured never to delete anything, which is the most misleading
+    // thing this page could tell you.
+    const modeEl = document.getElementById('remediation_operating_mode');
+    const mode = modeEl ? modeEl.value : 'automatic';
+
+    let recorded = order.slice(0, mi);
+    let held = order.slice(mi, ri);
+    let deleted = order.slice(ri);
+    let capNote = '';
+
+    if (mode === 'monitor') {
+      recorded = order.slice();
+      held = [];
+      deleted = [];
+      capNote = '<br><em>Operating mode is <strong>Monitor</strong>: nothing ' +
+                'is paused or deleted, whatever the thresholds say. The ' +
+                'thresholds are kept and take effect again when you switch ' +
+                'back.</em>';
+    } else if (mode === 'quarantine') {
+      held = held.concat(deleted);
+      deleted = [];
+      capNote = '<br><em>Operating mode is <strong>Quarantine</strong>: ' +
+                'nothing is deleted automatically. Anything at or above ' +
+                (clamped ? order[mi] : remEl.value) +
+                ' is held for review instead.</em>';
+    }
+
     const fmt = a => a.length ? a.join(', ') : 'nothing';
     el.innerHTML =
-      '<strong>Recorded only:</strong> ' + fmt(order.slice(0, mi)) +
-      ' &nbsp;|&nbsp; <strong>Quarantined:</strong> ' + fmt(order.slice(mi, ri)) +
-      ' &nbsp;|&nbsp; <strong>Deleted:</strong> ' + fmt(order.slice(ri)) +
+      '<strong>Recorded only:</strong> ' + fmt(recorded) +
+      ' &nbsp;|&nbsp; <strong>Quarantined:</strong> ' + fmt(held) +
+      ' &nbsp;|&nbsp; <strong>Deleted:</strong> ' + fmt(deleted) +
       (clamped ? '<br><em>Delete threshold is below the act threshold - ' +
                  'treating both as ' + order[mi] + '.</em>' : '') +
-      (order.slice(mi, ri).length ? '' :
+      (mode === 'automatic' && !order.slice(mi, ri).length ?
         '<br><em>No quarantine band - every catch that is acted on is ' +
-        'deleted immediately.</em>');
+        'deleted immediately.</em>' : '') +
+      capNote;
   }
 
   // ---- Model validation ---------------------------------------------------

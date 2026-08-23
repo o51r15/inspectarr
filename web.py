@@ -74,6 +74,34 @@ def create_app(config_path: str) -> Flask:
     if app.config["STATE"]:
         atexit.register(app.config["STATE"].close)
 
+    def _read_operating_mode() -> str:
+        """
+        Current operating mode, for the persistent banner.
+
+        Reads the file rather than the parsed config because Settings saves
+        take effect on the next scan without a restart, and a banner that
+        lagged a restart behind reality would be worse than no banner.
+
+        Fails to "automatic" on any error: that is the state in which the
+        banner is hidden, so a transient read failure shows nothing rather
+        than flashing a false "Monitor" claim on every page.
+
+        NOTE: this is a second YAML parse per render, alongside
+        read_auth_block(). ROADMAP item 14 (cache config.yaml in memory)
+        subsumes both -- it is called out here so the cost is deliberate
+        and findable rather than discovered later.
+        """
+        try:
+            import yaml
+            with open(config_path, "r", encoding="utf-8") as fh:
+                raw = yaml.safe_load(fh) or {}
+            mode = str((raw.get("remediation") or {}).get(
+                "operating_mode") or "automatic").lower().strip()
+            from core import severity as _sev
+            return mode if _sev.is_valid_mode(mode) else "automatic"
+        except Exception:
+            return "automatic"
+
     @app.context_processor
     def inject_globals():
         from core import __version__
@@ -81,6 +109,7 @@ def create_app(config_path: str) -> Flask:
         return {
             "auth_enabled": auth.get("enabled", False),
             "app_version": __version__,
+            "operating_mode": _read_operating_mode(),
         }
 
     @app.template_filter("datetimeformat")
