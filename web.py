@@ -86,15 +86,13 @@ def create_app(config_path: str) -> Flask:
         banner is hidden, so a transient read failure shows nothing rather
         than flashing a false "Monitor" claim on every page.
 
-        NOTE: this is a second YAML parse per render, alongside
-        read_auth_block(). ROADMAP item 14 (cache config.yaml in memory)
-        subsumes both -- it is called out here so the cost is deliberate
-        and findable rather than discovered later.
+        Reads through the config parse cache (ROADMAP item 14), so this is
+        a dictionary lookup and a stat rather than the second full YAML parse
+        per render it used to be.
         """
         try:
-            import yaml
-            with open(config_path, "r", encoding="utf-8") as fh:
-                raw = yaml.safe_load(fh) or {}
+            from core.config import load_raw_config
+            raw = load_raw_config(config_path) or {}
             mode = str((raw.get("remediation") or {}).get(
                 "operating_mode") or "automatic").lower().strip()
             from core import severity as _sev

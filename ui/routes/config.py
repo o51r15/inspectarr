@@ -71,6 +71,18 @@ def _save_raw(config_path: str, data: dict):
     except OSError:
         pass  # Windows / container without chown support
 
+    # ROADMAP item 14: drop the cached parse for this file.
+    #
+    # The cache also revalidates against (mtime_ns, size, inode) on every
+    # read, so this is belt-and-braces rather than the only guard -- but an
+    # in-app save must be visible on the very next read regardless of
+    # filesystem timestamp granularity, and this makes that unconditional.
+    try:
+        from core.config import invalidate_config_cache
+        invalidate_config_cache(config_path)
+    except Exception:
+        pass  # a cache miss is harmless; failing a save over it is not
+
 
 def _get_state(cfg):
     """

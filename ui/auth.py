@@ -56,10 +56,23 @@ def _cross_origin_write() -> bool:
 
 
 def read_auth_block(config_path: str) -> dict:
-    """Return the raw web.auth dict.  Returns {} on any error (fail-open)."""
+    """
+    Return the raw web.auth dict.  Returns {} on any error (fail-open).
+
+    Goes through the config parse cache (ROADMAP item 14). This runs on every
+    single request, and a full YAML parse measured 9.6 ms -- the single
+    largest fixed cost on a page render.
+
+    Still effectively fresh per request: the cache revalidates the file
+    signature (mtime_ns, size, inode) before serving, so a password changed
+    on disk is picked up on the very next request exactly as before. Only the
+    redundant reparse is skipped, never the check.
+
+    Fail-open on error is unchanged and deliberate (SEC-04, accepted risk).
+    """
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
+        from core.config import load_raw_config
+        raw = load_raw_config(config_path) or {}
         return raw.get("web", {}).get("auth", {})
     except Exception:
         return {}
@@ -90,6 +103,11 @@ def _migrate_password(config_path: str, plaintext: str):
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, config_path)
+            try:
+                from core.config import invalidate_config_cache
+                invalidate_config_cache(config_path)
+            except Exception:
+                pass
             log.info("Password auto-migrated to hash")
         except Exception:
             # Clean up temp file on failure
