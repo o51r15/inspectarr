@@ -47,6 +47,126 @@ class StateManager:
     # inspections
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Replacement tracking (ROADMAP item 27)
+    # ------------------------------------------------------------------
+
+    def open_replacement_watch(self, record: dict) -> bool:
+        """
+        Start watching for a replacement after a rejection.
+
+        Idempotent on original_hash: re-scanning or retrying a rejection must
+        refresh one watch rather than create a second row that would then be
+        resolved twice and double-count in indexer reputation.
+
+        Never raises. Failing to open a watch loses a statistic; letting it
+        propagate would fail a remediation that already succeeded.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                cur = conn.execute(
+                    "SELECT id FROM replacements WHERE original_hash = ? "
+                    "AND status IN ('pending','grabbed')",
+                    (record.get("original_hash"),))
+                if cur.fetchone():
+                    return True
+                conn.execute(
+                    "INSERT INTO replacements (inspection_id, original_hash, "
+                    "original_name, original_indexer, arr_app, media_id, "
+                    "media_field, rejected_at, status) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+                    (record.get("inspection_id"), record.get("original_hash"),
+                     record.get("original_name"), record.get("original_indexer"),
+                     record.get("arr_app"), record.get("media_id"),
+                     record.get("media_field"), record.get("rejected_at") or _now_iso()))
+            return True
+        except Exception as exc:
+            log.warning(f"open_replacement_watch failed: {exc}")
+            return False
+
+    def get_open_replacements(self, limit: int = 200) -> list[dict]:
+        """Watches still awaiting an answer, oldest rejection first."""
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM replacements WHERE status IN "
+                    "('pending','grabbed') ORDER BY rejected_at ASC LIMIT ?",
+                    (limit,)).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            log.warning(f"get_open_replacements failed: {exc}")
+            return []
+
+    def update_replacement(self, row_id: int, **fields) -> bool:
+        """
+        Update one watch. Unknown keys are ignored rather than raising, so a
+        caller added by a later change needs no migration here.
+        """
+        allowed = {
+            "replacement_hash", "replacement_name", "replacement_indexer",
+            "grabbed_at", "status", "outcome_detail", "last_checked",
+            "check_count", "resolved_at",
+        }
+        sets = {k: v for k, v in fields.items() if k in allowed}
+        if not sets:
+            return False
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "UPDATE replacements SET %s WHERE id = ?"
+                    % ", ".join(f"{k} = ?" for k in sets),
+                    tuple(sets.values()) + (row_id,))
+            return True
+        except Exception as exc:
+            log.warning(f"update_replacement failed: {exc}")
+            return False
+
+    def find_replacement_by_hash(self, infohash: str) -> dict | None:
+        """
+        The open watch whose REPLACEMENT is this hash.
+
+        Used when inspectarr flags a torrent: if it is something we were
+        watching as a replacement, the rejection cycle repeated and that is
+        the single most interesting fact this table can record.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM replacements WHERE replacement_hash = ? "
+                    "AND status = 'grabbed' LIMIT 1",
+                    ((infohash or "").upper(),)).fetchone()
+            return dict(row) if row else None
+        except Exception as exc:
+            log.warning(f"find_replacement_by_hash failed: {exc}")
+            return None
+
+    def get_replacement_stats(self) -> list[dict]:
+        """
+        Per-indexer replacement outcomes, for indexer reputation.
+
+        Grouped by the ORIGINAL indexer -- the question is "when this indexer
+        serves something bad, does a good replacement follow", which is a
+        property of the indexer that failed, not of the one that rescued it.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute("""
+                    SELECT original_indexer AS indexer,
+                           COUNT(*)                                        AS rejections,
+                           SUM(status = 'imported')                        AS replaced_ok,
+                           SUM(status = 'rejected')                        AS replaced_bad,
+                           SUM(status = 'abandoned')                       AS never_replaced,
+                           SUM(status IN ('pending','grabbed'))            AS open
+                      FROM replacements
+                     WHERE original_indexer IS NOT NULL
+                  GROUP BY original_indexer
+                  ORDER BY rejections DESC
+                """).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            log.warning(f"get_replacement_stats failed: {exc}")
+            return []
+
     def record_inspection(self, record: dict, reasons: list[dict]) -> bool:
         """
         Persist one inspection and its reasons in a single transaction.
@@ -585,6 +705,55 @@ class StateManager:
                     model_digest    TEXT,
                     results_json    TEXT
                 )
+            """)
+            # replacements -- did the thing we rejected get replaced, and
+            # was the replacement any good? (ROADMAP item 27)
+            #
+            # One row per REJECTION, created the moment we remediate, not
+            # when a replacement appears. A row with replacement_hash NULL
+            # is an open question ("we rejected this, nothing has arrived
+            # yet"), which is itself the answer worth reporting: an indexer
+            # whose bad releases are never replaced is a different problem
+            # from one whose replacements are fine.
+            #
+            # status:  pending   -- watching, nothing grabbed yet
+            #          grabbed   -- a replacement was grabbed, outcome unknown
+            #          imported  -- the replacement completed and was imported
+            #          rejected  -- the replacement was itself flagged by us
+            #          abandoned -- watch window expired with no replacement
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS replacements (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    inspection_id       TEXT,
+                    original_hash       TEXT NOT NULL,
+                    original_name       TEXT,
+                    original_indexer    TEXT,
+                    arr_app             TEXT,
+                    media_id            INTEGER,
+                    media_field         TEXT,
+                    rejected_at         TEXT NOT NULL,
+                    replacement_hash    TEXT,
+                    replacement_name    TEXT,
+                    replacement_indexer TEXT,
+                    grabbed_at          TEXT,
+                    status              TEXT NOT NULL DEFAULT 'pending',
+                    outcome_detail      TEXT,
+                    last_checked        TEXT,
+                    check_count         INTEGER NOT NULL DEFAULT 0,
+                    resolved_at         TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_repl_status
+                ON replacements (status, rejected_at DESC)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_repl_orig
+                ON replacements (original_hash)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_repl_replacement
+                ON replacements (replacement_hash)
             """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS inspection_reasons (

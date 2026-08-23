@@ -16,3 +16,22 @@ class SonarrClient(AbstractArrClient):
     APP_NAME = "sonarr"
     API_PREFIX = "/api/v3"
     QUEUE_UNKNOWN_PARAM = "includeUnknownSeriesItems"
+
+    # ROADMAP item 27. Verified against live Sonarr v4 on 2026-08-23.
+    MEDIA_ID_FIELD = "episodeId"
+    MEDIA_HISTORY_VERIFIED = True
+
+    def _fetch_media_history(self, media_id) -> list[dict]:
+        """
+        NOT /history/series -- that endpoint accepts an episodeId parameter
+        and silently ignores it, returning every record for the whole series
+        (185 records across 57 episodes when measured). The paged /history
+        endpoint honours episodeId correctly.
+        """
+        data = self._get("/history", params={
+            "pageSize": 200,
+            "sortKey": "date",
+            "sortDir": "desc",
+            "episodeId": media_id,
+        })
+        return data.get("records", [])
