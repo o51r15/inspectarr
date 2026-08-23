@@ -156,6 +156,7 @@ Settings are saved to `config.yaml` and take effect on the next scan cycle — n
 
 ```bash
 python3 inspectarr.py                    # single scan
+python3 inspectarr.py --test             # test every configured connection, then exit
 python3 inspectarr.py --dry-run          # log matches, take no action
 python3 inspectarr.py --retry-now        # flush retry queue, then scan
 python3 inspectarr.py --daemon           # continuous loop with graceful shutdown

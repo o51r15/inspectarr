@@ -12,6 +12,33 @@ Work on `main` since v1.6.0, not yet tagged. This closes **Cluster 7**
 foundation, operating modes, replacement outcome tracking, and AI
 settings with model validation.
 
+### Added — CLI Connection Test
+
+- **`inspectarr.py --test`** — tests every configured connection and exits, using the same checks as **System → Status** so the two can never disagree.
+
+  ```
+  Torrent Client (qbittorrent)  OK
+  Sonarr                        OK
+  Lidarr                        skipped (not configured)
+  Prowlarr                      OK
+  ```
+
+  Three exit codes, because they mean different things: **0** everything configured is reachable, **1** something configured is not, **2** the config could not be loaded or failed validation. A disabled service reports as skipped and does not fail the run; a config with nothing configured at all exits 1 rather than reporting success at having verified nothing.
+
+  Safe to run at any time against a live install: it is dispatched before anything opens the database or starts a scan.
+
+- **`core/connections.py`** — the connection checks moved out of the web layer. They never contained any Flask, and a command-line test should not import a Flask blueprint to reach them.
+
+### Performance
+
+- **The config file is no longer reparsed several times per request.** Measured first: a parse costs 9.61 ms, of which 99.5% is `yaml.safe_load`. A single page render did **four parses of the same unchanged file** — about 38 ms, which was 52% of the dashboard's total time and 70% of the quarantine page's.
+
+  The **parse** is cached, not the config object — callers legitimately mutate what they get back, so a shared instance would leak one request's changes into the next. Rebuilding the dataclasses costs 0.12 ms and keeps every caller's copy private.
+
+  The cache revalidates against the file's `(mtime_ns, size, inode)` on every read, at 0.002 ms — so **editing `config.yaml` by hand still takes effect immediately**, exactly as before. A cache that only noticed the app's own saves would have turned that documented behaviour into a baffling bug. Saves invalidate explicitly as well.
+
+  Result: `/` went 74 ms → 3.7 ms and `/quarantine` 41 ms → 2.4 ms. Pages dominated by outbound API calls, such as Indexers, are unchanged — config was never their bottleneck.
+
 ### Added — Replacement Outcome Tracking
 
 - **Replacement tracking** (`remediation.track_replacements`, default on) — after a release is deleted, Inspectarr watches the *arr to see whether a replacement arrives, which indexer served it, and whether that one survives inspection too. Results appear on **Indexers → Stats**, grouped by the indexer that served the *bad* release.
