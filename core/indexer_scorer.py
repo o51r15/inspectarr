@@ -105,14 +105,55 @@ class IndexerScorer:
         scored = [self._score_one(idx, backoff_map, stats_by_id, prowlarr_stats) for idx in indexers]
         if not skip_ai:
             scored = self._apply_ai_scoring(scored, prowlarr_stats)
-        # Persist scores and record history for trend analysis
+
+        # Persist scores and record history for trend analysis.
+        #
+        # BUG-21: a deterministic-only pass must never overwrite a stored AI
+        # verdict. This path runs after EVERY scan cycle (auto-manage), while
+        # the AI pass runs only once per reorder_interval_hours. Persisting
+        # deterministic values unconditionally meant an AI score and its
+        # reasoning survived at most one scan before being blanked, so the
+        # Indexers page showed empty reasoning for nearly every indexer.
+        #
+        # The only AI text that survived belonged to indexers with no data at
+        # all: their deterministic health_score is None, so the old
+        # "is not None" guard skipped the write and froze their reasoning
+        # forever. That is why the surviving summaries all read like
+        # "No data available" -- the bug preserved exactly the least useful
+        # verdicts and destroyed all the others.
+        #
+        # The three AI fields are written as a SET or not at all. A
+        # health_score from one source carrying reasoning from another is
+        # worse than either alone, because it reads as an explanation of a
+        # number it does not explain.
+        prior = self.state.get_cached_scores()
+
         for s in scored:
-            if s["health_score"] is not None:
-                self.state.save_cached_score(
-                    s["id"], s["name"], s["health_score"],
-                    s.get("ai_scored", False), s.get("ai_reasoning", ""),
-                )
-                self.state.record_score_history(s["id"], s["health_score"])
+            existing = prior.get(s["id"])
+            ai_held  = bool(existing and existing["ai_scored"])
+
+            if skip_ai and ai_held:
+                # Keep the AI verdict whole, and reflect it back to the caller
+                # so auto_manage and the UI act on the same number the DB holds.
+                s["health_score"] = existing["health_score"]
+                s["ai_scored"]    = True
+                s["ai_reasoning"] = existing["ai_reasoning"]
+                continue
+
+            if s["health_score"] is None:
+                # Not enough data to score. Only an AI pass may clear a stored
+                # AI verdict: reaching here with not-skip_ai means the model
+                # ran and declined to score this indexer, so the old verdict no
+                # longer stands and must not be displayed as if it were fresh.
+                if ai_held:
+                    self.state.save_cached_score(s["id"], s["name"], None, False, "")
+                continue
+
+            self.state.save_cached_score(
+                s["id"], s["name"], s["health_score"],
+                s.get("ai_scored", False), s.get("ai_reasoning", ""),
+            )
+            self.state.record_score_history(s["id"], s["health_score"])
         return scored
 
     def reorder(self) -> int:
