@@ -2,9 +2,10 @@ name: Mirror to Gitea
 
 on:
   push:
-  delete:
   create:
   workflow_dispatch:
+  # `delete:` removed: this job no longer propagates deletions,
+  # so firing on one spends a run to do nothing.
 
 jobs:
   mirror:
@@ -16,5 +17,19 @@ jobs:
 
       - name: Push mirror to Gitea
         run: |
+          # NOT `git push --mirror`. That makes the remote match local refs
+          # exactly, deletions included -- and on a tag push the checkout is
+          # the tag, so refs/heads/main is not a local branch and --mirror
+          # tries to DELETE main on the mirror. Gitea refused (it is the
+          # default branch there) and failed the whole push, tag included.
+          #
+          # The refusal was luck, not design: on a mirror where main was not
+          # the default branch, that delete would have succeeded. A CI job
+          # with the standing ability to remove the default branch is not
+          # something to keep just because it usually does not fire.
+          #
+          # --all + --tags replicates every branch and tag and never deletes.
+          git fetch --no-tags --prune origin '+refs/heads/*:refs/heads/*' || true
           git remote add gitea https://o51r15:${{ secrets.GITEA_TOKEN }}@git.sickbot.org/o51r15/${{ github.event.repository.name }}.git
-          git push --mirror gitea
+          git push gitea --all
+          git push gitea --tags
