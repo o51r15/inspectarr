@@ -593,10 +593,23 @@
                   title="A newer version of this model is available">Update available</span>
           </div>
           <div id="ollama-update-info" class="hint" style="display:none;margin-bottom:0.5rem;padding:8px;background:var(--bg-hover);border-radius:6px">
-            ⬆ A newer version of your Ollama model is available. Open your Ollama host and run
-            <code>ollama pull &lt;model&gt;</code> to update.
-            <button type="button" class="btn btn-ghost btn-sm" style="margin-left:8px"
-                    onclick="this.parentElement.style.display='none'">Dismiss</button>
+            ⬆ A newer build of this model is published upstream. Pulling it replaces
+            the installed copy — it can be several gigabytes, and scoring keeps using
+            the current build until it finishes.
+            <br>
+            <strong>The new build is not validated.</strong> A different build of the
+            same name can score differently, so re-run validation afterwards before
+            relying on it.
+            <div class="flex gap-8 items-center" style="margin-top:8px">
+              <button type="button" class="btn btn-sm" id="ollama-pull-btn"
+                      style="display:none" onclick="pullModel()">Pull the new build</button>
+              <button type="button" class="btn btn-ghost btn-sm"
+                      onclick="this.closest('#ollama-update-info').style.display='none'">Dismiss</button>
+            </div>
+            <div id="pull-progress" style="display:none;margin-top:10px">
+              <div class="progress-track"><div class="progress-bar" id="pull-bar"></div></div>
+              <span class="hint" id="pull-status" style="display:block;margin-top:4px"></span>
+            </div>
           </div>
           <p class="hint" style="margin-bottom:0.75rem">
             Select which Ollama model to use for AI-powered indexer scoring and analysis.
@@ -1922,20 +1935,110 @@
       .then(r => r.json())
       .then(d => {
         const badge = document.getElementById('ollama-update-badge');
-        if (d.ok && d.update_available) {
+        if (!(d.ok && d.update_available)) return;
+        if (badge) {
+          // Two different findings, two different reactions. "Your local
+          // model was replaced since validation" means re-validate; "upstream
+          // published a newer build" means pull. A single generic badge
+          // would leave the user guessing which.
           badge.style.display = '';
-          // Also update the sidebar nav item
-          const navItem = document.querySelector('#settings-group [data-pane="ai"]');
-          if (navItem && !navItem.querySelector('.update-dot')) {
-            const dot = document.createElement('span');
-            dot.className = 'update-dot';
-            dot.title = 'Ollama model update available';
-            dot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warning, #f59e0b);margin-left:6px';
-            navItem.appendChild(dot);
-          }
+          badge.textContent = d.reason === 'upstream'
+            ? 'Newer build available upstream'
+            : 'Model changed since validation';
+          badge.title = d.message || '';
+        }
+        // Only offer the button for the case a pull actually fixes.
+        const btn = document.getElementById('ollama-pull-btn');
+        if (btn && d.reason === 'upstream') btn.style.display = '';
+
+        const navItem = document.querySelector('#settings-group [data-pane="ai"]');
+        if (navItem && !navItem.querySelector('.update-dot')) {
+          const dot = document.createElement('span');
+          dot.className = 'update-dot';
+          dot.title = d.message || 'Ollama model update available';
+          dot.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--warning, #f59e0b);margin-left:6px';
+          navItem.appendChild(dot);
         }
       })
       .catch(() => {}); // silently ignore if Ollama is not configured
+  }
+
+  // ---- Pull the newer build (ROADMAP item 17) ----
+  let _pullPoll = null;
+
+  function pullModel() {
+    const sel = document.getElementById('ollama-model-select');
+    const model = sel ? sel.value : '';
+    if (!confirm('Download the newer build of ' + (model || 'this model') +
+                 '?\n\nThis can be several gigabytes and will replace the ' +
+                 'installed copy. Scoring keeps using the current build until ' +
+                 'it finishes.')) return;
+
+    setPullUI('Starting…', 0, true);
+    fetch('/config/ollama/pull', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model: model})
+    })
+      .then(r => r.json().then(d => ({status: r.status, d: d})))
+      .then(res => {
+        // 409 means one is already running -- follow it rather than
+        // reporting an error, the same reasoning as the validation UI.
+        if (res.status === 409) setPullUI(res.d.message, 0, true);
+        else if (!res.d.ok) { setPullUI(res.d.message, 0, false); return; }
+        pollPull();
+      })
+      .catch(e => setPullUI('Could not start: ' + e, 0, false));
+  }
+
+  function setPullUI(text, percent, running) {
+    const row = document.getElementById('pull-progress');
+    const label = document.getElementById('pull-status');
+    const bar = document.getElementById('pull-bar');
+    const btn = document.getElementById('ollama-pull-btn');
+    if (row) row.style.display = running || text ? '' : 'none';
+    if (label) label.textContent = text || '';
+    if (bar) bar.style.width = (percent || 0) + '%';
+    if (btn) btn.disabled = !!running;
+  }
+
+  function pollPull() {
+    if (_pullPoll) clearInterval(_pullPoll);
+    _pullPoll = setInterval(function () {
+      fetch('/config/ollama/pull/status')
+        .then(r => r.json())
+        .then(s => {
+          if (s.error) {
+            clearInterval(_pullPoll); _pullPoll = null;
+            setPullUI('Failed: ' + s.error, 0, false);
+            return;
+          }
+          if (s.done) {
+            clearInterval(_pullPoll); _pullPoll = null;
+            setPullUI('Done. Re-validate before relying on it.', 100, false);
+            const badge = document.getElementById('ollama-update-badge');
+            if (badge) badge.style.display = 'none';
+            const btn = document.getElementById('ollama-pull-btn');
+            if (btn) btn.style.display = 'none';
+            // The pulled build is NOT the validated one. Refresh the table so
+            // that is visible rather than implied.
+            if (typeof loadValidations === 'function') loadValidations();
+            return;
+          }
+          const mb = s.total ? ' (' + Math.round(s.completed / 1048576) + ' / ' +
+                               Math.round(s.total / 1048576) + ' MB)' : '';
+          setPullUI((s.status || 'Working') + mb, s.percent, true);
+        })
+        .catch(() => {});
+    }, 1000);
+  }
+
+  // Rejoin a pull already in flight, so a reload does not hide it.
+  function resumePullIfRunning() {
+    fetch('/config/ollama/pull/status')
+      .then(r => r.json())
+      .then(s => { if (s && s.running) { setPullUI(s.status || 'Working', s.percent, true); pollPull(); } })
+      .catch(() => {});
   }
 
   // Re-fire deferred hooks for the initial pane (wrapper + functions defined above)
@@ -1943,5 +2046,6 @@
   if (_initialPane === 'ai') { loadOllamaModels(); loadSystemPrompt(); }
   // Always check for Ollama updates on Settings page load
   checkOllamaUpdate();
+  resumePullIfRunning();
 </script>
 {% endblock %}

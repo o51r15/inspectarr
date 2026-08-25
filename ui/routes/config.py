@@ -1078,20 +1078,53 @@ def ollama_update_check():
         result = {
             "ok": True, "update_available": False, "model": model,
             "digest": current[:12],
+            "reason": None,
             "message": ("Not validated yet" if not record
                         else "Validated before digests were recorded"),
         }
     elif known == current:
         result = {"ok": True, "update_available": False, "model": model,
-                  "digest": current[:12], "message": "Model unchanged since validation"}
+                  "digest": current[:12], "reason": None,
+                  "message": "Model unchanged since validation"}
+
     else:
         result = {
             "ok": True, "update_available": True, "model": model,
+            "reason": "local",
             "digest": current[:12], "validated_digest": known[:12],
             "message": (f"{model} has changed since it was validated "
                         f"({known[:12]} -> {current[:12]}). Re-validate to "
                         f"confirm it still scores correctly."),
         }
+
+    # The SEPARATE question: is a newer build published upstream?
+    #
+    # Asked regardless of what the local check concluded, because the two are
+    # independent. A model that was never validated, or validated before
+    # digests were recorded, can still be out of date -- and nesting this
+    # inside the "unchanged since validation" branch meant it never ran for
+    # either, which is most models on an existing install.
+    #
+    # Opt-out: this leaves the network the machine is on, and a self-hosted
+    # tool should not phone anywhere the user did not agree to.
+    if ollama.get("auto_update_check", True):
+        try:
+            up = _ollama_check_update(url, model)
+            if up.get("known") and up.get("update_available"):
+                result.update({
+                    "update_available": True,
+                    "reason": "upstream",
+                    "remote_digest": (up.get("remote") or "")[:12],
+                    "message": "A newer build of this model is published upstream",
+                })
+            elif not up.get("known"):
+                # "Could not reach the registry" must never read as a verdict.
+                result["registry"] = "unavailable"
+            else:
+                result["registry"] = "current"
+        except Exception as exc:
+            log.debug(f"Registry update check failed: {exc}")
+            result["registry"] = "unavailable"
 
     if state:
         try:
@@ -1102,6 +1135,113 @@ def ollama_update_check():
         except Exception as exc:
             log.debug(f"Could not stamp update check: {exc}")
     return jsonify(result)
+
+
+# ---------------------------------------------------------------------
+# Model pull (ROADMAP item 17)
+# ---------------------------------------------------------------------
+#
+# In a background thread with polled progress, exactly like validation, and
+# for a stronger reason: a model pull is gigabytes. Doing it in-request would
+# hold a waitress worker for minutes and then time out anyway -- which is
+# precisely the shape of B-06, where a pull was fired from a page load and
+# abandoned half-finished at the 30s mark.
+#
+# Ollama's /api/pull streams NDJSON progress. Streaming it is what makes this
+# honest: a multi-gigabyte download with no progress is indistinguishable
+# from a hang, and the user's only recourse would be to refresh, which starts
+# a second one.
+
+_pull_lock = threading.Lock()
+_pull_state = {"running": False, "model": None, "status": None,
+               "completed": 0, "total": 0, "error": None, "done": False}
+
+
+def _pull_worker(url, model):
+    """Stream a pull, recording progress. Never raises out of the thread."""
+    import requests as req
+    try:
+        with req.post(f"{url.rstrip('/')}/api/pull",
+                      json={"model": model, "stream": True},
+                      stream=True, timeout=(10, 600)) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                try:
+                    import json as _j
+                    ev = _j.loads(line)
+                except Exception:
+                    continue
+                if ev.get("error"):
+                    with _pull_lock:
+                        _pull_state.update(error=ev["error"], running=False,
+                                           done=True)
+                    return
+                with _pull_lock:
+                    _pull_state.update(
+                        status=ev.get("status") or _pull_state["status"],
+                        completed=int(ev.get("completed") or 0),
+                        total=int(ev.get("total") or 0))
+        with _pull_lock:
+            _pull_state.update(running=False, done=True, status="Complete")
+    except Exception as exc:
+        with _pull_lock:
+            _pull_state.update(running=False, done=True, error=str(exc))
+
+
+@config_bp.route("/config/ollama/pull", methods=["POST"])
+def ollama_pull():
+    """Start pulling the configured model. One at a time."""
+    config_path = current_app.config["CONFIG_PATH"]
+    raw = _load_raw(config_path)
+    ollama = (raw.get("prowlarr", {}) or {}).get("ollama", {}) or {}
+    url = (ollama.get("url") or "").strip()
+    model = ((request.get_json(silent=True) or {}).get("model")
+             or ollama.get("model") or "").strip()
+
+    if not ollama.get("enabled", bool(url)):
+        return jsonify({"ok": False, "message": "AI features are disabled"}), 400
+    if not url or not model:
+        return jsonify({"ok": False, "message": "Ollama is not configured"}), 400
+
+    with _pull_lock:
+        if _pull_state["running"]:
+            # Concurrent pulls of the same model race on the same blobs and
+            # make both slower; of different models they saturate the link.
+            return jsonify({"ok": False,
+                            "message": f"Already pulling {_pull_state['model']}"}), 409
+        _pull_state.update(running=True, model=model, status="Starting",
+                           completed=0, total=0, error=None, done=False)
+
+    threading.Thread(target=_pull_worker, args=(url, model), daemon=True,
+                     name=f"inspectarr-pull-{model}").start()
+    return jsonify({"ok": True, "message": f"Pulling {model}"})
+
+
+@config_bp.route("/config/ollama/pull/status", methods=["GET"])
+def ollama_pull_status():
+    """Progress for the in-flight pull, if any."""
+    with _pull_lock:
+        s = dict(_pull_state)
+    pct = 0
+    if s["total"]:
+        pct = min(100, int(s["completed"] * 100 / s["total"]))
+    s["percent"] = pct
+    s["ok"] = True
+
+    # A finished pull replaces the local build, so the stored update verdict
+    # and the validation record both describe a model that no longer exists.
+    # Clearing the cached verdict here means the badge re-evaluates rather
+    # than insisting an update is still available after it was installed.
+    if s["done"] and not s["error"]:
+        state = current_app.config.get("STATE")
+        if state:
+            try:
+                state.set_app_state("ollama_update_check", "")
+            except Exception:
+                pass
+    return jsonify(s)
 
 
 @config_bp.route("/config/prowlarr/toggle-indexer", methods=["POST"])

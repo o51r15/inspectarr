@@ -305,6 +305,27 @@ a:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
+/* Determinate progress bar (model pull). Deliberately not animated when
+   idle: a bar that moves on its own cannot be told apart from one that is
+   stuck, which is the whole thing a progress bar exists to distinguish. */
+.progress-track {
+  width: 100%;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar { transition: none; }
+}
+
 /* ---- Operating mode banner (ROADMAP item 26) -------------------------
    Shown only when the mode is NOT automatic. The point is that a box which
    has been told to hold back should never be mistaken for one that is
