@@ -12,6 +12,28 @@ Work on `main` since v1.6.0, not yet tagged. This closes **Cluster 7**
 foundation, operating modes, replacement outcome tracking, and AI
 settings with model validation.
 
+### Fixed — Audit of the Above
+
+An adversarial review of this release found ten bugs in it. They shared
+one shape: **every one lived in a code path that was not the scan path.**
+The tests shipped alongside each feature all passed, because they were
+written alongside that feature and looked where it was written.
+
+- **The operating-mode ceiling was applied in one of three paths that delete torrents.** `operating_mode: quarantine` combined with a quarantine timeout set to `remediate` **deleted torrents on a timer** — in the one mode documented as never deleting anything. The retry queue had the same gap: a failure queued while in `automatic` still deleted after switching to `monitor`, which is exactly when someone reaches for that switch. Both now consult the ceiling.
+
+  A person clicking **Delete** on the review page is deliberately still not capped. The mode governs *automatic* action; capping a deliberate human decision would make quarantine mode a queue you cannot empty.
+
+- **Replacement tracking and indexer malicious-hit attribution were dead in quarantine mode.** Watches were opened only on the scan path, but in quarantine mode every remediation goes through the manual Delete button, which did neither. Turning on the new safety mode silently disabled both, and the Indexers tab would have shown nothing — indistinguishable from having found no bad releases. All three rejection paths now share one entry point.
+
+- **Quarantine events vanished from the plain notification digest** — a scan that only quarantined sent "Scan complete — no events." The AI-narrated digest did see them, so the two paths disagreed. Held torrents now lead the digest, and one that could not be paused is flagged.
+
+- **The Settings form silently stripped `quarantine` from `notify_on`.** The checkbox list omitted it while the save wrote the form values verbatim, so anyone who followed the docs and added it by hand lost it on their next save, with no error.
+
+- **One-shot CLI runs never advanced the quarantine or replacement sweeps** — and that is the documented cron deployment, so a cron install accumulated watches it never resolved and never fired a timeout.
+
+- **`was_imported()` credited imports it could not attribute**, so a hand-import or an unrelated release completing for the same episode was recorded as a clean replacement and fed to indexer reputation. Also fixed: two ISO timestamp dialects were compared as strings.
+
+- Smaller: the replacement sweep's per-pass cap counted list positions rather than checks (starving due watches) and did not count failures at all (making an unreachable *arr unbounded); `/api/health?deps=1` kept a duplicate service list; a bare `remediation:` key in YAML returned HTTP 500 for the whole Settings page.
 ### Added — CLI Connection Test
 
 - **`inspectarr.py --test`** — tests every configured connection and exits, using the same checks as **System → Status** so the two can never disagree.
@@ -81,7 +103,7 @@ Both wrong forms return HTTP 200 with entirely plausible data; nothing in the re
   | Mode | Behaviour |
   |---|---|
   | `monitor` | Findings are inspected, graded and recorded. Nothing is paused, blocklisted or deleted. |
-  | `quarantine` | Nothing is deleted automatically. Anything that would have been remediated is held for review instead. |
+  | `quarantine` | Nothing is deleted automatically — including by a quarantine timeout. Anything that would have been remediated is held for review. You can still delete deliberately from the review page. |
   | `automatic` | The remediation thresholds are applied exactly as written. **Default** — existing installs are unchanged. |
 
   There are three modes rather than the four originally planned: "Monitor" and "Dry Run" turned out to describe the same behaviour under two names. The `--dry-run` CLI flag remains the way to get it for a single run, and still takes precedence over the configured mode.
