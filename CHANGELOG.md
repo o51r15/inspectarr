@@ -45,6 +45,18 @@ So batching is capped by item count as well as tokens, and the two limits are no
 
 The same 37 indexers that scored **0 of 37** at 4k now score **37 of 37**.
 
+### Fixed — AI Reasoning Vanishing From the Indexers Page
+
+If AI scoring was on, almost every indexer showed a health score with **no reasoning at all** — and the handful that did show reasoning all said some variation of "No data available."
+
+Two passes write scores. The deterministic one runs after **every** scan cycle; the AI one runs once per `reorder_interval_hours`. The deterministic pass was overwriting the score, the AI flag and the reasoning unconditionally, so an AI verdict survived at most one scan before being blanked.
+
+The exception is what made it confusing. An indexer with no data at all has no deterministic score, so the old guard skipped writing that row entirely — and froze its stored reasoning permanently. The bug therefore destroyed every informative AI summary and preserved only the useless ones, which is precisely the opposite of what you want, and why the symptom looked like a model problem rather than a persistence one.
+
+A deterministic pass now leaves a stored AI verdict alone. Only an AI pass may replace or retire one, and when it does it writes the score, the flag and the reasoning together — a score from one source carrying an explanation from another is worse than either on its own.
+
+Nothing to configure, and no database change. The next AI pass repopulates reasoning for every indexer, and it now stays there.
+
 ---
 
 ## [v2.0.0] — 2026-08-25
