@@ -29,7 +29,15 @@ jobs:
           # something to keep just because it usually does not fire.
           #
           # --all + --tags replicates every branch and tag and never deletes.
-          git fetch --no-tags --prune origin '+refs/heads/*:refs/heads/*' || true
+          # On a tag checkout --all pushes no branches, which is right: main
+          # is mirrored by its own push event.
           git remote add gitea https://o51r15:${{ secrets.GITEA_TOKEN }}@git.sickbot.org/o51r15/${{ github.event.repository.name }}.git
           git push gitea --all
           git push gitea --tags
+
+          # Say what actually landed. "Everything up-to-date" is not evidence
+          # that a particular tag arrived unless you already know the runner
+          # had it -- and a mirror that does not report what it mirrored is
+          # how a broken mirror goes unnoticed for months.
+          echo "--- tags on the mirror ---"
+          git ls-remote --tags gitea | sed 's/.*refs\/tags\///' | grep -v '\^{}' | sort -V | tail -10
