@@ -57,6 +57,8 @@ A deterministic pass now leaves a stored AI verdict alone. Only an AI pass may r
 
 Nothing to configure, and no database change. The next AI pass repopulates reasoning for every indexer, and it now stays there.
 
+A follow-up guard came with it. `auto_manage` decides whether to disable an underperforming indexer, and it was relying on the same `None` to skip indexers with too little data to judge. Carrying a stored AI verdict into that decision filled the field in and removed the guard by accident, so indexers were briefly disabled on scores the model had derived from missing data. The check is now explicit: an indexer below `min_grabs_before_scoring` is never auto-disabled. Disabling on absent evidence is self-sealing anyway — a disabled indexer runs no queries, so it can never gather the data that would clear it.
+
 ---
 
 ## [v2.0.0] — 2026-08-25

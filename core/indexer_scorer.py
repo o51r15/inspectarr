@@ -255,6 +255,24 @@ class IndexerScorer:
             if s["health_score"] is None or s.get("ignored"):
                 continue
 
+            # BUG-22: never auto-disable an indexer we have no data about.
+            #
+            # This guard used to be implicit and accidental. An indexer below
+            # min_grabs_before_scoring gets health_score = None from
+            # _score_one, so the check above skipped it. BUG-21 changed
+            # score_all to carry a stored AI verdict into the returned dict,
+            # which filled that field in and silently removed the guard --
+            # three indexers were auto-disabled on the next scan for scores
+            # the model had derived from missing data ("invalid performance
+            # data", "no data to evaluate").
+            #
+            # Disabling on absent evidence is self-sealing: a disabled indexer
+            # runs no queries, so it can never accumulate the data that would
+            # clear it. The threshold is meant to catch indexers that perform
+            # badly, not ones we have not measured yet.
+            if not s.get("has_enough_data", True):
+                continue
+
             iid = s["id"]
             ams = self.state.get_auto_manage_state(iid)
 
