@@ -672,7 +672,7 @@ _validation_state = {"running": False, "model": None, "stage": None,
                      "started_at": None}
 
 
-def _validation_worker(app, config_path, url, model, timeout,
+def _validation_worker(app, config_path, url, model, timeout, context_window,
                        indexer_count, system_prompt):
     from core.model_validator import validate_model
 
@@ -684,7 +684,8 @@ def _validation_worker(app, config_path, url, model, timeout,
         result = validate_model(url, model, timeout=timeout,
                                 indexer_count=indexer_count,
                                 system_prompt=system_prompt,
-                                progress_cb=progress)
+                                progress_cb=progress,
+                                context_window=context_window)
         digest = _ollama_digest(url, model)
         state = app.config.get("STATE")
         if state:
@@ -825,7 +826,12 @@ def ai_validate():
         t = threading.Thread(
             target=_validation_worker,
             args=(current_app._get_current_object(), config_path, url, model,
-                  _int(ollama.get("timeout"), 300), indexer_count,
+                  _int(ollama.get("timeout"), 300),
+                  # Validate against the window this deployment configures --
+                  # a pass at Ollama's default says nothing about a host set
+                  # to 8k, and vice versa.
+                  _int(ollama.get("context_window"), 4096),
+                  indexer_count,
                   ollama.get("system_prompt") or ""),
             daemon=True, name=f"inspectarr-validate-{model}")
         t.start()

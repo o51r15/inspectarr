@@ -21,7 +21,8 @@ import json
 import logging
 import time
 
-from .llm_client import ollama_score_indexers
+from .llm_client import (ollama_score_indexers,
+                         DEFAULT_CONTEXT_WINDOW)
 
 log = logging.getLogger("inspectarr")
 
@@ -207,7 +208,8 @@ def _test_discrimination_and_schema(url, model, timeout, prompt):
     return disc, schema, ms
 
 
-def _test_context(url, model, timeout, prompt, indexer_count):
+def _test_context(url, model, timeout, prompt, indexer_count,
+                  context_window=DEFAULT_CONTEXT_WINDOW):
     """
     Test 3: can the model handle a prompt the size of a real scoring run?
 
@@ -220,8 +222,12 @@ def _test_context(url, model, timeout, prompt, indexer_count):
     approx_tokens = len(json.dumps(data)) // 4
 
     t0 = time.time()
+    # Budget against the window the deployment actually configures, so a
+    # pass here means "works on this setup" rather than "works at Ollama's
+    # default". That is the entire premise of this test.
     result = ollama_score_indexers(data, url, model, timeout,
-                                   custom_prompt=prompt)
+                                   custom_prompt=prompt,
+                                   context_window=context_window)
     ms = round((time.time() - t0) * 1000)
 
     out = {"name": f"Context capacity ({indexer_count} indexers)",
@@ -269,7 +275,8 @@ def _test_context(url, model, timeout, prompt, indexer_count):
 
 def validate_model(ollama_url: str, model: str, timeout: int = 300,
                    indexer_count: int = 20, system_prompt: str = "",
-                   progress_cb=None) -> dict:
+                   progress_cb=None,
+                   context_window: int = DEFAULT_CONTEXT_WINDOW) -> dict:
     """
     Run the full validation suite. Never raises -- a validation run must not
     be able to take down the caller, and every failure mode is a result the
@@ -282,6 +289,7 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
     """
     started = time.time()
     out = {"model": model, "indexer_count": indexer_count,
+           "context_window": context_window,
            "tests": [], "passed": False, "avg_response_ms": 0}
 
     if not ollama_url or not model:
@@ -304,7 +312,8 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
         if progress_cb:
             progress_cb("Context capacity", 2, 3)
         ctx, ms2 = _test_context(ollama_url, model, timeout,
-                                 system_prompt, indexer_count)
+                                 system_prompt, indexer_count,
+                                 context_window=context_window)
 
         if progress_cb:
             progress_cb("Done", 3, 3)

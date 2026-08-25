@@ -301,6 +301,45 @@ prowlarr:
     # never sends anything about your setup. Set false if the machine is
     # air-gapped or you would simply rather it did not.
     auto_update_check: true
+
+    # The context window to budget the scoring prompt against, and the value
+    # sent to Ollama as num_ctx.
+    #
+    # 4096 matches Ollama's own default for most models. Budgeting for more
+    # than Ollama actually applies is worse than useless: it truncates at its
+    # default and the model loses the scoring instructions, then answers with
+    # confident invented numbers instead of an error.
+    #
+    # Measured on a real 37-indexer payload: the prompt is ~5,500 tokens in
+    # the old pretty-printed format, ~3,000 with the compact short-keyed one
+    # used now. Above roughly 40 indexers Inspectarr splits the scoring into
+    # several calls automatically and merges the results -- you do not need
+    # to do anything, it just takes a little longer.
+    #
+    # Raise this if your model genuinely supports more (8192 and 16384 are
+    # common) and everything fits in one call again.
+    context_window: 4096
+
+    # Hard cap on how many indexers go in one scoring call, separate from
+    # the token budget above.
+    #
+    # These are different limits and the second is much lower. Measured on
+    # qwen2.5-coder:7b:
+    #
+    #   25 indexers  -> all 25 scored correctly
+    #   30 indexers  -> echoes the input back instead of scoring, in 3
+    #                   seconds, with the window barely half full
+    #   37 indexers  -> in a window twice as large, returns perfectly
+    #                   well-formed JSON that silently omits five of them
+    #
+    # That last one is why this exists. It looks exactly like success:
+    # nothing errors, the JSON parses, and the missing indexers quietly keep
+    # their deterministic score.
+    #
+    # This is a property of your MODEL, not of Inspectarr. A larger model
+    # handles more. Raise it and re-run validation on the AI settings page
+    # to find out whether yours copes.
+    max_indexers_per_call: 25
   # Automated indexer management
   # When enabled, indexers that drop below disable_threshold for consecutive_runs
   # scoring cycles are automatically disabled in Prowlarr, then re-enabled after

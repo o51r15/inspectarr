@@ -343,6 +343,9 @@ class IndexerScorer:
             ai_results_raw = ollama_score_indexers(
                 payload, ocfg.url, ocfg.model, ocfg.timeout,
                 custom_prompt=ocfg.system_prompt,
+                context_window=getattr(ocfg, "context_window", 4096),
+                max_indexers_per_call=getattr(
+                    ocfg, "max_indexers_per_call", 25),
             )
             if not ai_results_raw:
                 log.info("AI scoring unavailable — using deterministic scores")

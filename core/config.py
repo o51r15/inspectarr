@@ -138,7 +138,32 @@ class OllamaConfig:
     # anywhere the user did not agree to.
     #
     # It never pulls. One unauthenticated GET of a manifest, hashed locally.
-    auto_update_check: bool = True    # 0 = disable update checks
+    auto_update_check: bool = True
+
+    # The context window to budget the scoring prompt against, and the value
+    # sent to Ollama as num_ctx (ROADMAP item 19).
+    #
+    # 4096 by default because that is Ollama's own default for most models.
+    # Budgeting for more than Ollama actually applies is worse than useless:
+    # it silently truncates at its default and the model loses the scoring
+    # instructions, then answers with confident, invented numbers rather
+    # than an error.
+    #
+    # Raise it if the model genuinely supports more -- 8192 or 16384 are
+    # common -- and the prompt will be sent in one call instead of several.
+    context_window: int = 4096
+
+    # Hard cap on indexers per scoring call, independent of the token budget.
+    #
+    # Measured: qwen2.5-coder:7b scores 25 correctly, echoes the input at 30,
+    # and at 37 (in a window twice as large) returns well-formed JSON that
+    # silently omits five. The last is the dangerous one -- it looks like
+    # success. So how many items the model will reason about is a separate
+    # limit from how many fit, and much lower.
+    #
+    # A property of the model. Raise it if yours copes; the AI settings
+    # page's validation run is how to find out.
+    max_indexers_per_call: int = 25    # 0 = disable update checks
 
     def is_active(self) -> bool:
         """
@@ -387,6 +412,9 @@ def _parse_ollama(o_raw: dict) -> "OllamaConfig":
         auto_update_check=bool(
             True if o_raw.get("auto_update_check") is None
             else o_raw.get("auto_update_check")),
+        context_window=_as_int(o_raw.get("context_window"), 4096),
+        max_indexers_per_call=_as_int(
+            o_raw.get("max_indexers_per_call"), 25),
     )
 
 
