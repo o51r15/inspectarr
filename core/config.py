@@ -308,6 +308,23 @@ class AppConfig:
 # Loader
 # ---------------------------------------------------------------------------
 
+def _as_int(value, default: int) -> int:
+    """
+    int() that never raises.
+
+    _parse_config runs BEFORE _validate, so a bare int() on a user-supplied
+    value surfaces as an unhandled ValueError from deep in the parser rather
+    than as the friendly, field-named message _validate is there to produce.
+    Parsing stays permissive; _validate stays the place that says no.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _as_list(value, default=None):
     """
     Coerce a YAML value to a list.
@@ -419,7 +436,15 @@ def invalidate_config_cache(path: str = None) -> None:
 
 
 def config_cache_stats() -> dict:
-    """Hit/miss counters, for diagnostics and tests."""
+    """
+    Hit/miss/reload counters for the parse cache.
+
+    Deliberately not called by application code -- it exists so a test can
+    assert the cache is actually caching (a cache that silently stopped
+    working would otherwise look identical to one that works), and so the
+    numbers are reachable from a REPL when diagnosing. Left in place rather
+    than deleted for that reason; it is not abandoned code.
+    """
     with _CONFIG_CACHE_LOCK:
         return dict(_CACHE_COUNTERS)
 
@@ -647,8 +672,8 @@ def _parse_config(raw: dict) -> AppConfig:
             for k, v in (rem_raw.get("severity_overrides", {}) or {}).items()
         },
         remediate_at=str(rem_raw.get("remediate_at", "LOW")).upper(),
-        quarantine_timeout_minutes=int(
-            rem_raw.get("quarantine_timeout_minutes") or 0),
+        quarantine_timeout_minutes=_as_int(
+            rem_raw.get("quarantine_timeout_minutes"), 0),
         quarantine_timeout_action=str(
             rem_raw.get("quarantine_timeout_action", "release")).lower(),
         # Not defaulted through .get() alone: an explicitly empty
@@ -659,8 +684,8 @@ def _parse_config(raw: dict) -> AppConfig:
         track_replacements=bool(
             True if rem_raw.get("track_replacements") is None
             else rem_raw.get("track_replacements")),
-        replacement_window_hours=int(
-            rem_raw.get("replacement_window_hours") or 72),
+        replacement_window_hours=_as_int(
+            rem_raw.get("replacement_window_hours"), 72),
     )
 
     return AppConfig(

@@ -75,6 +75,3 @@ def check_all(cfg, names=None) -> list[dict]:
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
         return list(pool.map(lambda n: check_connection(n, cfg), names))
 
-
-# Backwards-compatible alias for the original private name.
-_check_one = check_connection

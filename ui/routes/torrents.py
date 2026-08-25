@@ -9,7 +9,7 @@ import re
 
 from flask import Blueprint, render_template, request, jsonify, current_app, abort
 from core.config import load_config
-from core.torrent_client import build_torrent_client, AbstractTorrentClient, TorrentClientError
+from core.torrent_client import build_torrent_client, AbstractTorrentClient
 
 _HASH_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 

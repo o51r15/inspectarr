@@ -77,10 +77,14 @@ class Scanner:
         Used by the CLI and once by the daemon when it launches."""
         self.log.info("inspectarr starting up")
         self.prepare()
+        mode = getattr(self.config.remediation, "operating_mode",
+                       sev.DEFAULT_MODE) or sev.DEFAULT_MODE
+        self.log.info(f"Operating mode: {sev.describe_mode(mode)}")
         self.state.write_log({
             "level": "INFO",
             "event": "startup",
             "dry_run": self.config.dry_run,
+            "operating_mode": mode,
             "rules_loaded": len(self.config.rules),
         })
         self.notifier.notify_startup(len(self.config.rules), self.config.dry_run)

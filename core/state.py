@@ -110,12 +110,34 @@ class StateManager:
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:
             return False
+
+        # A watch that has already reached a verdict must not be reopened or
+        # overwritten. Three different paths write to this table -- the sweep
+        # (from two entry points) and _evaluate_torrent marking a replacement
+        # 'rejected' -- so "only one writer" is not a property to rely on.
+        #
+        # The guard applies only when the status itself is being changed.
+        # Bookkeeping columns (last_checked, check_count) stay writable, so a
+        # late arrival still records that it looked.
+        where = "id = ?"
+        params = tuple(sets.values()) + (row_id,)
+        if "status" in sets:
+            where += " AND status NOT IN ('imported', 'rejected', 'abandoned')"
+
         try:
             with self._lock, self._conn() as conn:
-                conn.execute(
-                    "UPDATE replacements SET %s WHERE id = ?"
-                    % ", ".join(f"{k} = ?" for k in sets),
-                    tuple(sets.values()) + (row_id,))
+                cur = conn.execute(
+                    "UPDATE replacements SET %s WHERE %s"
+                    % (", ".join(f"{k} = ?" for k in sets), where),
+                    params)
+                changed = cur.rowcount
+            if not changed and "status" in sets:
+                # Not an error, but never silent: two paths concluding the
+                # same watch differently is worth being able to find later.
+                log.info(
+                    f"update_replacement: watch {row_id} already resolved; "
+                    f"refused to overwrite it with {sets['status']!r}")
+                return False
             return True
         except Exception as exc:
             log.warning(f"update_replacement failed: {exc}")

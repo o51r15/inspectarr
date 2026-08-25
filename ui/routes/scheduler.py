@@ -21,7 +21,7 @@ def scheduler_view():
         cfg = _lc(current_app.config["CONFIG_PATH"])
         if cfg.prowlarr.enabled:
             from ui.routes.config import _get_state
-            from datetime import datetime, timezone, timedelta
+            from datetime import datetime, timedelta
             state = _get_state(cfg)
             last_iso = state.get_app_state("last_prowlarr_reorder")
             last_reorder = None

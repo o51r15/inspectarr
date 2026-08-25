@@ -1,9 +1,7 @@
 """
 ui/routes/stats.py — Indexer grab and malicious hit statistics
 """
-from flask import Blueprint, render_template, redirect, current_app
-from core.config import load_config
-from ui.routes._utils import safe_error
+from flask import Blueprint, redirect, current_app
 
 stats_bp = Blueprint("stats", __name__)
 

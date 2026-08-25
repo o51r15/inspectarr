@@ -4,7 +4,7 @@ ui/routes/llm_logs.py — System → LLM Logs
 Shows AI scoring report (current run reasoning per indexer) and
 historical score trend data.
 """
-from flask import Blueprint, redirect, url_for, current_app, jsonify
+from flask import Blueprint, redirect, current_app, jsonify
 
 llm_logs_bp = Blueprint("llm_logs", __name__)
 

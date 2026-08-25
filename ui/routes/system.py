@@ -12,10 +12,7 @@ import platform
 from flask import Blueprint, render_template, current_app, jsonify
 
 # ROADMAP item 13: the checks live in core/ so the CLI can use them too.
-from core.connections import check_all, check_connection
-
-# Kept so anything still referring to the old private name keeps working.
-_check_one = check_connection
+from core.connections import check_all
 
 system_bp = Blueprint("system", __name__)
 
