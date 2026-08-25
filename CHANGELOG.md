@@ -5,14 +5,170 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
-## [Unreleased]
+## [v2.0.0] — 2026-08-25
 
-Work on `main` since v1.6.0, not yet tagged. This closes **Cluster 7**
-(items 23—27) and **Cluster 8** in full: the safety and inspection
-foundation, operating modes, replacement outcome tracking, and AI
-settings with model validation.
+The release the safety work was building toward. Inspectarr stops being a
+tool that detects bad releases and deletes them, and becomes one that grades
+what it finds, holds what it is unsure about, and records what happened next.
+
+**Nothing breaks.** Every default reproduces v1.6.0 behaviour exactly:
+severity thresholds ship at `LOW` (which collapses the quarantine band to
+nothing), `operating_mode` ships at `automatic`, and AI ships **off** but
+stays on for any install that already had it configured. Upgrading changes
+what Inspectarr can do, not what it does.
+
+The three things worth turning on deliberately:
+
+| Set this | To get |
+|---|---|
+| `remediation.remediate_at: CRITICAL` | Archives and filename matches held for review; executables still deleted on sight |
+| `remediation.operating_mode: monitor` | Watch what your rules would do before letting them do it |
+| `prowlarr.ollama.enabled: true` | AI indexer scoring, once a model has passed validation |
+
+New: 5 database tables, 8 config keys, a Quarantine page, an AI settings
+pane, a `--test` CLI flag, and `GET /api/health`. All created automatically
+on first run — there is no migration step.
+
+### Added — Safety & Inspection Foundation
+
+
+- **Structured inspection records** — every flagged release now writes a durable `inspections` row plus one `inspection_reasons` row per finding (signal, detail, file path, file size, severity). Deliberately one row per *flagged* release rather than per torrent per scan; the literal reading would write thousands of "still clean" rows a day at a 15-minute poll.
+- **Structured findings** — `evaluate_rule()` returns `list[Finding]` (signal, detail, file_path, file_size) instead of a flat list of filenames, so the reason a file was flagged travels with the file.
+- **Correlation IDs** — a `scan_id` per run and an `inspection_id` per flagged release thread through the arr call, the torrent-client call, and every structured log event, so one release can be followed end to end.
+- **Severity engine** (`core/severity.py`) — assigns a severity per *finding* (executables CRITICAL, archives HIGH, undersized primary file HIGH, filename pattern MEDIUM) and aggregates with **MAX**, never an average, so a pile of minor findings cannot dilute one dangerous one. Per-extension overrides via `remediation.severity_overrides`.
+- **Quarantine mode** — a third outcome between "record it" and "delete it". Three bands: below `min_severity` is recorded only; between `min_severity` and `remediate_at` is **quarantined** (paused and held for review); at or above `remediate_at` is blocklisted and deleted. Both thresholds default to `LOW`, which collapses the quarantine band to nothing and reproduces pre-quarantine behaviour exactly.
+- **Quarantine review page** (`/quarantine`) with three distinct outcomes — Release (resume, false positive), Keep paused (stop asking), Delete (blocklist + remove). Client presence is verified before acting, because qBittorrent answers `200 OK` to a resume for a hash it has never heard of.
+- **Quarantine timeout sweep** — expired holds are resolved before each scan, in both the web scheduler and the `--daemon` CLI path. Only entries with an `expires_at` are considered; the default is hold indefinitely. The timeout action defaults to `release`, because an expiring clock means nobody looked, not that the release was malicious.
+- **Remediation & Severity settings** under **Settings → Rules** — both thresholds, the quarantine timeout, and the timeout action, with a live explainer that spells out the resulting bands ("Recorded only: LOW | Quarantined: MEDIUM, HIGH | Deleted: CRITICAL"), including the clamped reading when the delete threshold is set below the act threshold.
+- **`quarantine` notification event** — falls back to the `action` event when `quarantine` is absent from `notify_on`, so existing configs are not silent about held torrents.
+- **`GET /api/health`** liveness endpoint. The fast path makes no outbound calls; `?deps=1` opts in to dependency checks and requires auth.
+
+### Added — Operating Modes
+
+
+- **Operating modes** (`remediation.operating_mode`) — a single control for how far Inspectarr may act, shown in Settings → Rules and on a banner across every page whenever it is not set to automatic.
+
+  | Mode | Behaviour |
+  |---|---|
+  | `monitor` | Findings are inspected, graded and recorded. Nothing is paused, blocklisted or deleted. |
+  | `quarantine` | Nothing is deleted automatically — including by a quarantine timeout. Anything that would have been remediated is held for review. You can still delete deliberately from the review page. |
+  | `automatic` | The remediation thresholds are applied exactly as written. **Default** — existing installs are unchanged. |
+
+  There are three modes rather than the four originally planned: "Monitor" and "Dry Run" turned out to describe the same behaviour under two names. The `--dry-run` CLI flag remains the way to get it for a single run, and still takes precedence over the configured mode.
+
+  The mode is a **ceiling**, not a preset. It never rewrites `min_severity` or `remediate_at` — those keep the values you gave them, so switching to monitor and back is lossless. It can only ever reduce an outcome, never escalate one. That property is asserted directly rather than inferred, because a "safety" control that could raise a decision would be worse than no control at all.
+
+  Because both readings stay true at once, the settings page can be specific rather than vague: the band explainer says what the thresholds decide *and* what the mode does to that, including the case where the mode prevents any deletion at all.
+
+- **`inspections.operating_mode` is now populated.** The column has existed and been NULL since structured inspections landed. Every terminal path — deleted, dry-run, recorded, failed — now records the posture the scan ran under, so a historical row can answer "why was this not deleted".
+
+- **New log event `capped_by_operating_mode`**, carrying both `decision_before_mode` and `decision`. It is deliberately distinct from `below_severity_floor`: one means the thresholds said record, the other means the thresholds said more and the mode refused. Reporting the wrong one would send anyone debugging it to the wrong setting.
+
+### Added — Replacement Outcome Tracking
+
+
+- **Replacement tracking** (`remediation.track_replacements`, default on) — after a release is deleted, Inspectarr watches the *arr to see whether a replacement arrives, which indexer served it, and whether that one survives inspection too. Results appear on **Indexers → Stats**, grouped by the indexer that served the *bad* release.
+
+  | Outcome | Meaning |
+  |---|---|
+  | `imported` | A replacement was grabbed and imported cleanly. |
+  | `rejected` | The replacement was itself flagged — the cycle repeated. |
+  | `abandoned` | The window closed without a conclusion. |
+
+  The useful distinction is one the health score cannot draw: an indexer whose bad releases are quickly replaced by good ones is a very different proposition from one whose bad releases are never replaced at all. Watches are opened at the moment of *rejection*, so "nothing ever arrived" is a recorded answer rather than merely an absence of data.
+
+  Purely observational — it never causes or prevents an action.
+
+- **Recovery rate per indexer**, counting settled cases only. Watches still open are excluded rather than counted as failures, so a fresh install shows a dash instead of a damning 0%.
+
+- **New config keys:** `remediation.track_replacements`, `remediation.replacement_window_hours` (default 72). **New table:** `replacements`. **New log events:** `replacement_grabbed`, `replacement_imported`, `replacement_rejected`, `replacement_abandoned`.
+
+- **Lidarr is excluded from replacement tracking** and says so explicitly rather than failing quietly. Detection, blocklisting, quarantine and everything else are unaffected. See below for why.
+
+### Added — AI Settings & Model Validation
+
+
+- **Dedicated Settings → AI pane** — AI is optional, so it got its own pane. Exposes `ollama.url`, `timeout`, `cache_ttl_hours`, and `update_check_hours`; four of six keys previously had no UI at all, `url` among them, so AI scoring could not be enabled without hand-editing `config.yaml`.
+- **Master AI enable/disable switch**, shipping **off** by default. While off, indexer AI scoring, AI notification digests, and periodic summaries are all skipped and no Ollama request is made. Existing installs are not broken: `enabled` defaults to whether a URL is configured, so an install that worked before this key existed keeps working. An explicit `enabled: false` always wins.
+- **Model validation engine** (`core/model_validator.py`) — three tests against the real scoring path: **discrimination** (good vs bad indexer, requires a ≥25-point spread, catches constant output and inverted scales), **schema compliance** (catches the echo bug and malformed scores), and **context capacity** at the real indexer count.
+- **Validation UI with a hard gate** — `/config/ai/model` returns 409 unless the model passed; `force=true` requires an explicit "Apply anyway" confirmation and is recorded as `forced`, distinct from `failed`. Runs in a background thread with polling, because a multi-minute validation in-request would hold a waitress worker.
+- **Model comparison table** listing every validated model with its test results and average response time.
+
+### Added — CLI Connection Test
+
+
+- **`inspectarr.py --test`** — tests every configured connection and exits, using the same checks as **System → Status** so the two can never disagree.
+
+  ```
+  Torrent Client (qbittorrent)  OK
+  Sonarr                        OK
+  Lidarr                        skipped (not configured)
+  Prowlarr                      OK
+  ```
+
+  Three exit codes, because they mean different things: **0** everything configured is reachable, **1** something configured is not, **2** the config could not be loaded or failed validation. A disabled service reports as skipped and does not fail the run; a config with nothing configured at all exits 1 rather than reporting success at having verified nothing.
+
+  Safe to run at any time against a live install: it is dispatched before anything opens the database or starts a scan.
+
+- **`core/connections.py`** — the connection checks moved out of the web layer. They never contained any Flask, and a command-line test should not import a Flask blueprint to reach them.
+
+### Performance
+
+
+- **The config file is no longer reparsed several times per request.** Measured first: a parse costs 9.61 ms, of which 99.5% is `yaml.safe_load`. A single page render did **four parses of the same unchanged file** — about 38 ms, which was 52% of the dashboard's total time and 70% of the quarantine page's.
+
+  The **parse** is cached, not the config object — callers legitimately mutate what they get back, so a shared instance would leak one request's changes into the next. Rebuilding the dataclasses costs 0.12 ms and keeps every caller's copy private.
+
+  The cache revalidates against the file's `(mtime_ns, size, inode)` on every read, at 0.002 ms — so **editing `config.yaml` by hand still takes effect immediately**, exactly as before. A cache that only noticed the app's own saves would have turned that documented behaviour into a baffling bug. Saves invalidate explicitly as well.
+
+  Result: `/` went 74 ms → 3.7 ms and `/quarantine` 41 ms → 2.4 ms. Pages dominated by outbound API calls, such as Indexers, are unchanged — config was never their bottleneck.
+
+### Changed
+
+
+- **LLM score cache key now includes model and system prompt.** It hashed indexer stats only, so swapping models served the previous model's scores under the new model's name for a full TTL. `llm_cache` gained a `model` column.
+- **`OllamaConfig.is_active()`** is now the single question every consumer asks ("enabled AND url AND model"). The URL on disk is never blanked to represent "off"; disabling and re-enabling round-trips the configured value untouched.
+- **System → Status** distinguishes "Ollama (disabled)" from "not configured".
+- **New config keys:** `prowlarr.ollama.enabled`, `remediation.min_severity`, `remediation.remediate_at`, `remediation.severity_overrides`, `remediation.quarantine_timeout_minutes`, `remediation.quarantine_timeout_action`.
+- **New tables:** `inspections`, `inspection_reasons`, `quarantine`, `validated_models`.
+
+### Notes — the *arr history API
+
+
+Finding a replacement means asking "what happened to this episode/movie", which needs history scoped to one media item — the global feed is 318,000 records on a real install.
+
+The endpoint that does this is **different per app, and the symmetric guess is wrong in both directions.** Measured against live Sonarr v4 and Radarr v3:
+
+| Call | Result |
+|---|---|
+| Sonarr `GET /history?episodeId=N` | Correctly scoped |
+| Sonarr `GET /history/series?episodeId=N` | **episodeId ignored** — returns the whole series |
+| Radarr `GET /history/movie?movieId=N` | Correctly scoped |
+| Radarr `GET /history?movieId=N` | **movieId ignored** — returns unfiltered global history |
+
+Both wrong forms return HTTP 200 with entirely plausible data; nothing in the response indicates the filter was dropped. So every response is verified to actually carry the id it was asked for, and rejected if not — a wrong answer here would be attributed to a real indexer as a real replacement. Lidarr stays off because it could not be verified against a live instance, and this is precisely the API where guessing has now been demonstrated wrong twice.
+
+### Fixed
+
+
+- **Ollama update check was pulling models.** `/config/ollama/update-check` called `/api/pull` with `stream=false`; Ollama has no dry-run, so it genuinely pulled on **every Settings page load**, starting a multi-GB download that was abandoned at the 30s timeout. The verdict was inverted too. Replaced with a side-effect-free digest comparison.
+- **`config.example.yaml` could not be loaded.** `dict.get(k, default)` returns `None` when the key exists but is empty, and the example ships `urls:` empty — so copying the reference config crashed on startup with a `TypeError`. Same latent bug on `rules`, `bad_extensions`, `bad_filename_patterns`, and `notify_on`. Added `_as_list()`; a rule left with no conditions now fails validation with a message naming the rule.
+- **Model digests were never real.** `/api/show` has no `digest` key at all, so every stored digest was a fallback guess. Digests are now read from `/api/tags`, and a migration NULLs any stored value that is not 64 hex characters — without it the corrected digest would report "changed since validation" for every model forever.
+- **Remediation settings had no UI.** Items 24 and 25 added five config keys and exposed none of them, and the quarantine empty state linked to Settings → AI, a page that never contained them. Quarantine is not an AI feature: severity is entirely deterministic and Ollama is never consulted on that path.
+- **Validation UI could not rejoin a run already in progress.** Nothing checked for an in-flight run on page load, and a 409 was treated as a plain error — so the one message telling you a run existed was also the one path that refused to show it.
+- **AI pane load hooks** were still bound to the old pane after the controls moved, so the system prompt showed "Loading…" forever and the model list never populated.
+- **Torrent-client delete failures wrote nothing** to the structured log, though the arr path did. Now emits `client_delete_failed`.
+- **Docker HEALTHCHECK pointed at `/`**, which is behind basic auth — any auth-enabled deploy would have been restart-looped.
+- **`:dev` tag race** between `release.yml` and `devcontainer.yml`. The dev container now publishes `:devcontainer`.
+- **No way to clear a stored validation record** — added `StateManager.delete_validation()`, `POST /config/ai/validation/delete`, and a per-row Clear action.
+- **Validation state was process-local**, so a restart orphaned the UI poll. An in-flight marker now lives in `app_state` and the status endpoint reports an interrupted run once, then self-clears.
+- **`update_check_hours` was exposed but unused.** The interval is now honoured and the last verdict stamped in `app_state`.
+- **AI scoring parser** accepts alternate key names (`score` for `health_score`, `id` for `indexer_id`) for model compatibility, with parsed-item and raw-response logging on parse failure.
+
+---
 
 ### Fixed — Audit of the Above
+
 
 An adversarial review of this release found ten bugs in it. They shared
 one shape: **every one lived in a code path that was not the scan path.**
@@ -34,138 +190,6 @@ written alongside that feature and looked where it was written.
 - **`was_imported()` credited imports it could not attribute**, so a hand-import or an unrelated release completing for the same episode was recorded as a clean replacement and fed to indexer reputation. Also fixed: two ISO timestamp dialects were compared as strings.
 
 - Smaller: the replacement sweep's per-pass cap counted list positions rather than checks (starving due watches) and did not count failures at all (making an unreachable *arr unbounded); `/api/health?deps=1` kept a duplicate service list; a bare `remediation:` key in YAML returned HTTP 500 for the whole Settings page.
-### Added — CLI Connection Test
-
-- **`inspectarr.py --test`** — tests every configured connection and exits, using the same checks as **System → Status** so the two can never disagree.
-
-  ```
-  Torrent Client (qbittorrent)  OK
-  Sonarr                        OK
-  Lidarr                        skipped (not configured)
-  Prowlarr                      OK
-  ```
-
-  Three exit codes, because they mean different things: **0** everything configured is reachable, **1** something configured is not, **2** the config could not be loaded or failed validation. A disabled service reports as skipped and does not fail the run; a config with nothing configured at all exits 1 rather than reporting success at having verified nothing.
-
-  Safe to run at any time against a live install: it is dispatched before anything opens the database or starts a scan.
-
-- **`core/connections.py`** — the connection checks moved out of the web layer. They never contained any Flask, and a command-line test should not import a Flask blueprint to reach them.
-
-### Performance
-
-- **The config file is no longer reparsed several times per request.** Measured first: a parse costs 9.61 ms, of which 99.5% is `yaml.safe_load`. A single page render did **four parses of the same unchanged file** — about 38 ms, which was 52% of the dashboard's total time and 70% of the quarantine page's.
-
-  The **parse** is cached, not the config object — callers legitimately mutate what they get back, so a shared instance would leak one request's changes into the next. Rebuilding the dataclasses costs 0.12 ms and keeps every caller's copy private.
-
-  The cache revalidates against the file's `(mtime_ns, size, inode)` on every read, at 0.002 ms — so **editing `config.yaml` by hand still takes effect immediately**, exactly as before. A cache that only noticed the app's own saves would have turned that documented behaviour into a baffling bug. Saves invalidate explicitly as well.
-
-  Result: `/` went 74 ms → 3.7 ms and `/quarantine` 41 ms → 2.4 ms. Pages dominated by outbound API calls, such as Indexers, are unchanged — config was never their bottleneck.
-
-### Added — Replacement Outcome Tracking
-
-- **Replacement tracking** (`remediation.track_replacements`, default on) — after a release is deleted, Inspectarr watches the *arr to see whether a replacement arrives, which indexer served it, and whether that one survives inspection too. Results appear on **Indexers → Stats**, grouped by the indexer that served the *bad* release.
-
-  | Outcome | Meaning |
-  |---|---|
-  | `imported` | A replacement was grabbed and imported cleanly. |
-  | `rejected` | The replacement was itself flagged — the cycle repeated. |
-  | `abandoned` | The window closed without a conclusion. |
-
-  The useful distinction is one the health score cannot draw: an indexer whose bad releases are quickly replaced by good ones is a very different proposition from one whose bad releases are never replaced at all. Watches are opened at the moment of *rejection*, so "nothing ever arrived" is a recorded answer rather than merely an absence of data.
-
-  Purely observational — it never causes or prevents an action.
-
-- **Recovery rate per indexer**, counting settled cases only. Watches still open are excluded rather than counted as failures, so a fresh install shows a dash instead of a damning 0%.
-
-- **New config keys:** `remediation.track_replacements`, `remediation.replacement_window_hours` (default 72). **New table:** `replacements`. **New log events:** `replacement_grabbed`, `replacement_imported`, `replacement_rejected`, `replacement_abandoned`.
-
-- **Lidarr is excluded from replacement tracking** and says so explicitly rather than failing quietly. Detection, blocklisting, quarantine and everything else are unaffected. See below for why.
-
-### Notes — the *arr history API
-
-Finding a replacement means asking "what happened to this episode/movie", which needs history scoped to one media item — the global feed is 318,000 records on a real install.
-
-The endpoint that does this is **different per app, and the symmetric guess is wrong in both directions.** Measured against live Sonarr v4 and Radarr v3:
-
-| Call | Result |
-|---|---|
-| Sonarr `GET /history?episodeId=N` | Correctly scoped |
-| Sonarr `GET /history/series?episodeId=N` | **episodeId ignored** — returns the whole series |
-| Radarr `GET /history/movie?movieId=N` | Correctly scoped |
-| Radarr `GET /history?movieId=N` | **movieId ignored** — returns unfiltered global history |
-
-Both wrong forms return HTTP 200 with entirely plausible data; nothing in the response indicates the filter was dropped. So every response is verified to actually carry the id it was asked for, and rejected if not — a wrong answer here would be attributed to a real indexer as a real replacement. Lidarr stays off because it could not be verified against a live instance, and this is precisely the API where guessing has now been demonstrated wrong twice.
-
-### Added — Operating Modes
-
-- **Operating modes** (`remediation.operating_mode`) — a single control for how far Inspectarr may act, shown in Settings → Rules and on a banner across every page whenever it is not set to automatic.
-
-  | Mode | Behaviour |
-  |---|---|
-  | `monitor` | Findings are inspected, graded and recorded. Nothing is paused, blocklisted or deleted. |
-  | `quarantine` | Nothing is deleted automatically — including by a quarantine timeout. Anything that would have been remediated is held for review. You can still delete deliberately from the review page. |
-  | `automatic` | The remediation thresholds are applied exactly as written. **Default** — existing installs are unchanged. |
-
-  There are three modes rather than the four originally planned: "Monitor" and "Dry Run" turned out to describe the same behaviour under two names. The `--dry-run` CLI flag remains the way to get it for a single run, and still takes precedence over the configured mode.
-
-  The mode is a **ceiling**, not a preset. It never rewrites `min_severity` or `remediate_at` — those keep the values you gave them, so switching to monitor and back is lossless. It can only ever reduce an outcome, never escalate one. That property is asserted directly rather than inferred, because a "safety" control that could raise a decision would be worse than no control at all.
-
-  Because both readings stay true at once, the settings page can be specific rather than vague: the band explainer says what the thresholds decide *and* what the mode does to that, including the case where the mode prevents any deletion at all.
-
-- **`inspections.operating_mode` is now populated.** The column has existed and been NULL since structured inspections landed. Every terminal path — deleted, dry-run, recorded, failed — now records the posture the scan ran under, so a historical row can answer "why was this not deleted".
-
-- **New log event `capped_by_operating_mode`**, carrying both `decision_before_mode` and `decision`. It is deliberately distinct from `below_severity_floor`: one means the thresholds said record, the other means the thresholds said more and the mode refused. Reporting the wrong one would send anyone debugging it to the wrong setting.
-
-### Fixed
-
-- **The remediation block was almost entirely unvalidated.** `min_severity`, `remediate_at`, `quarantine_timeout_action` and `quarantine_timeout_minutes` accepted any value; a bad one was silently absorbed by runtime fallbacks and the scan simply behaved differently than configured, with no error anywhere. All four are now validated at load and rejected by name, alongside the new `operating_mode`.
-
-### Added — Safety & Inspection Foundation
-
-- **Structured inspection records** — every flagged release now writes a durable `inspections` row plus one `inspection_reasons` row per finding (signal, detail, file path, file size, severity). Deliberately one row per *flagged* release rather than per torrent per scan; the literal reading would write thousands of "still clean" rows a day at a 15-minute poll.
-- **Structured findings** — `evaluate_rule()` returns `list[Finding]` (signal, detail, file_path, file_size) instead of a flat list of filenames, so the reason a file was flagged travels with the file.
-- **Correlation IDs** — a `scan_id` per run and an `inspection_id` per flagged release thread through the arr call, the torrent-client call, and every structured log event, so one release can be followed end to end.
-- **Severity engine** (`core/severity.py`) — assigns a severity per *finding* (executables CRITICAL, archives HIGH, undersized primary file HIGH, filename pattern MEDIUM) and aggregates with **MAX**, never an average, so a pile of minor findings cannot dilute one dangerous one. Per-extension overrides via `remediation.severity_overrides`.
-- **Quarantine mode** — a third outcome between "record it" and "delete it". Three bands: below `min_severity` is recorded only; between `min_severity` and `remediate_at` is **quarantined** (paused and held for review); at or above `remediate_at` is blocklisted and deleted. Both thresholds default to `LOW`, which collapses the quarantine band to nothing and reproduces pre-quarantine behaviour exactly.
-- **Quarantine review page** (`/quarantine`) with three distinct outcomes — Release (resume, false positive), Keep paused (stop asking), Delete (blocklist + remove). Client presence is verified before acting, because qBittorrent answers `200 OK` to a resume for a hash it has never heard of.
-- **Quarantine timeout sweep** — expired holds are resolved before each scan, in both the web scheduler and the `--daemon` CLI path. Only entries with an `expires_at` are considered; the default is hold indefinitely. The timeout action defaults to `release`, because an expiring clock means nobody looked, not that the release was malicious.
-- **Remediation & Severity settings** under **Settings → Rules** — both thresholds, the quarantine timeout, and the timeout action, with a live explainer that spells out the resulting bands ("Recorded only: LOW | Quarantined: MEDIUM, HIGH | Deleted: CRITICAL"), including the clamped reading when the delete threshold is set below the act threshold.
-- **`quarantine` notification event** — falls back to the `action` event when `quarantine` is absent from `notify_on`, so existing configs are not silent about held torrents.
-- **`GET /api/health`** liveness endpoint. The fast path makes no outbound calls; `?deps=1` opts in to dependency checks and requires auth.
-
-### Added — AI Settings & Model Validation
-
-- **Dedicated Settings → AI pane** — AI is optional, so it got its own pane. Exposes `ollama.url`, `timeout`, `cache_ttl_hours`, and `update_check_hours`; four of six keys previously had no UI at all, `url` among them, so AI scoring could not be enabled without hand-editing `config.yaml`.
-- **Master AI enable/disable switch**, shipping **off** by default. While off, indexer AI scoring, AI notification digests, and periodic summaries are all skipped and no Ollama request is made. Existing installs are not broken: `enabled` defaults to whether a URL is configured, so an install that worked before this key existed keeps working. An explicit `enabled: false` always wins.
-- **Model validation engine** (`core/model_validator.py`) — three tests against the real scoring path: **discrimination** (good vs bad indexer, requires a ≥25-point spread, catches constant output and inverted scales), **schema compliance** (catches the echo bug and malformed scores), and **context capacity** at the real indexer count.
-- **Validation UI with a hard gate** — `/config/ai/model` returns 409 unless the model passed; `force=true` requires an explicit "Apply anyway" confirmation and is recorded as `forced`, distinct from `failed`. Runs in a background thread with polling, because a multi-minute validation in-request would hold a waitress worker.
-- **Model comparison table** listing every validated model with its test results and average response time.
-
-### Changed
-
-- **LLM score cache key now includes model and system prompt.** It hashed indexer stats only, so swapping models served the previous model's scores under the new model's name for a full TTL. `llm_cache` gained a `model` column.
-- **`OllamaConfig.is_active()`** is now the single question every consumer asks ("enabled AND url AND model"). The URL on disk is never blanked to represent "off"; disabling and re-enabling round-trips the configured value untouched.
-- **System → Status** distinguishes "Ollama (disabled)" from "not configured".
-- **New config keys:** `prowlarr.ollama.enabled`, `remediation.min_severity`, `remediation.remediate_at`, `remediation.severity_overrides`, `remediation.quarantine_timeout_minutes`, `remediation.quarantine_timeout_action`.
-- **New tables:** `inspections`, `inspection_reasons`, `quarantine`, `validated_models`.
-
-### Fixed
-
-- **Ollama update check was pulling models.** `/config/ollama/update-check` called `/api/pull` with `stream=false`; Ollama has no dry-run, so it genuinely pulled on **every Settings page load**, starting a multi-GB download that was abandoned at the 30s timeout. The verdict was inverted too. Replaced with a side-effect-free digest comparison.
-- **`config.example.yaml` could not be loaded.** `dict.get(k, default)` returns `None` when the key exists but is empty, and the example ships `urls:` empty — so copying the reference config crashed on startup with a `TypeError`. Same latent bug on `rules`, `bad_extensions`, `bad_filename_patterns`, and `notify_on`. Added `_as_list()`; a rule left with no conditions now fails validation with a message naming the rule.
-- **Model digests were never real.** `/api/show` has no `digest` key at all, so every stored digest was a fallback guess. Digests are now read from `/api/tags`, and a migration NULLs any stored value that is not 64 hex characters — without it the corrected digest would report "changed since validation" for every model forever.
-- **Remediation settings had no UI.** Items 24 and 25 added five config keys and exposed none of them, and the quarantine empty state linked to Settings → AI, a page that never contained them. Quarantine is not an AI feature: severity is entirely deterministic and Ollama is never consulted on that path.
-- **Validation UI could not rejoin a run already in progress.** Nothing checked for an in-flight run on page load, and a 409 was treated as a plain error — so the one message telling you a run existed was also the one path that refused to show it.
-- **AI pane load hooks** were still bound to the old pane after the controls moved, so the system prompt showed "Loading…" forever and the model list never populated.
-- **Torrent-client delete failures wrote nothing** to the structured log, though the arr path did. Now emits `client_delete_failed`.
-- **Docker HEALTHCHECK pointed at `/`**, which is behind basic auth — any auth-enabled deploy would have been restart-looped.
-- **`:dev` tag race** between `release.yml` and `devcontainer.yml`. The dev container now publishes `:devcontainer`.
-- **No way to clear a stored validation record** — added `StateManager.delete_validation()`, `POST /config/ai/validation/delete`, and a per-row Clear action.
-- **Validation state was process-local**, so a restart orphaned the UI poll. An in-flight marker now lives in `app_state` and the status endpoint reports an interrupted run once, then self-clears.
-- **`update_check_hours` was exposed but unused.** The interval is now honoured and the last verdict stamped in `app_state`.
-- **AI scoring parser** accepts alternate key names (`score` for `health_score`, `id` for `indexer_id`) for model compatibility, with parsed-item and raw-response logging on parse failure.
-
----
 
 ## [v1.6.0] — 2026-08-16
 
