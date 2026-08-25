@@ -134,6 +134,46 @@ class Scanner:
                 f"'release' (the non-destructive option)")
             action = "release"
 
+        # The operating mode is a ceiling on AUTOMATIC action, and a timer
+        # firing is automatic. Without this, `operating_mode: quarantine`
+        # plus a timeout of `remediate` deletes torrents in the one mode
+        # documented as never deleting anything.
+        #
+        # A person clicking Delete on the review page is deliberately NOT
+        # capped: deciding is the entire purpose of that queue.
+        mode = getattr(self.config.remediation, "operating_mode",
+                       sev.DEFAULT_MODE) or sev.DEFAULT_MODE
+        if action == "remediate":
+            permitted = sev.cap_for_mode(sev.REMEDIATE, mode)
+            if permitted != sev.REMEDIATE:
+                if permitted == sev.QUARANTINE:
+                    # Keep holding, stop the clock. Releasing would let a
+                    # flagged torrent complete unreviewed; deleting is what
+                    # the mode forbids. Waiting for a person is the only
+                    # option consistent with what quarantine mode means.
+                    for entry in expired:
+                        self.state.clear_quarantine_expiry(entry.get("hash"))
+                        self.state.write_log({
+                            "level": "INFO",
+                            "event": "quarantine_timeout_blocked_by_mode",
+                            "torrent_name": entry.get("torrent_name"),
+                            "hash": entry.get("hash"),
+                            "operating_mode": mode,
+                            "configured_action": action,
+                            "resolution": "hold retained, timer cleared",
+                        })
+                    self.log.info(
+                        f"Quarantine: {len(expired)} timeout(s) would delete, "
+                        f"but operating_mode is '{mode}' — holds retained for "
+                        f"review and their timers cleared")
+                    return 0
+                # Ceiling is RECORD (monitor): monitor mode does not hold
+                # things at all, so undo the hold rather than keep it.
+                self.log.info(
+                    f"Quarantine: operating_mode is '{mode}' — releasing "
+                    f"instead of deleting")
+                action = "release"
+
         self.log.info(f"Quarantine: {len(expired)} hold(s) expired — {action}")
         handled = 0
         for entry in expired:
@@ -203,6 +243,11 @@ class Scanner:
             "category": entry.get("category"), "rule": entry.get("rule_name"),
             "arr_blocklisted": arr_ok, "qbit_deleted": True,
         })
+        # Same bookkeeping as any other rejection. A timer deleting
+        # something is still this indexer serving something bad, and still a
+        # release the arr may replace.
+        self.record_rejection(h, name, entry.get("arr_app") or "sonarr")
+
         self.log.info(f"  Remediated {name}")
         return True
 
@@ -628,7 +673,7 @@ class Scanner:
         watch = None
         if getattr(self.config.remediation, "track_replacements", False):
             watch = self._capture_replacement_identity(
-                arr_client, hash, name, rule, indexer_name)
+                arr_client, hash, name, rule.app, indexer_name)
 
         # Step 1 — blocklist in arr
         try:
@@ -813,11 +858,61 @@ class Scanner:
 
         # A retry that reaches here is a fresh action attempt, so it opens
         # its own inspection rather than mutating the original.
+        inspection_id = str(uuid.uuid4())
+        file_count = len(files)
+        total_size = sum(f.get("size", 0) or 0 for f in files)
+
+        # Re-decide, do not just re-act. The rule is re-evaluated above; the
+        # severity and the operating mode must be too. Otherwise a retry
+        # queued while the mode was `automatic` still deletes after the user
+        # switches to `monitor` to stop deletions -- and _evaluate_torrent
+        # skips hashes owned by the retry queue, so the mode never gets
+        # another chance to weigh in.
+        rem = getattr(self.config, "remediation", None)
+        overrides = getattr(rem, "severity_overrides", {}) or {}
+        min_sev = getattr(rem, "min_severity", sev.LOW) or sev.LOW
+        remediate_at = getattr(rem, "remediate_at", sev.LOW) or sev.LOW
+        mode = getattr(rem, "operating_mode", sev.DEFAULT_MODE) or sev.DEFAULT_MODE
+        assessment = sev.assess(retry_findings, overrides)
+        raw_decision = sev.decide(assessment["risk_level"], min_sev, remediate_at)
+        decision = sev.cap_for_mode(raw_decision, mode)
+
+        if decision != sev.REMEDIATE:
+            self.log.info(
+                f"  Retry for {name}: decision is now '{decision}' "
+                f"(mode={mode}) — not deleting")
+            self.state.write_log({
+                "level": "INFO", "event": "retry_decision_changed",
+                "inspection_id": inspection_id,
+                "torrent_name": name, "hash": h,
+                "rule": rule.name, "operating_mode": mode,
+                "decision_before_mode": raw_decision, "decision": decision,
+                "risk_level": assessment["risk_level"],
+            })
+            if decision == sev.QUARANTINE:
+                self._handle_quarantine(
+                    h, name, rule, bad_files, inspection_id=inspection_id,
+                    findings=retry_findings, assessment=assessment,
+                    file_count=file_count, total_size=total_size)
+            else:
+                self._record_inspection(
+                    inspection_id, retry_findings, h, name, rule,
+                    action="recorded", file_count=file_count,
+                    total_size=total_size, assessment=assessment,
+                    decision=decision,
+                    action_detail=f"retry re-decided as {decision} "
+                                  f"(operating_mode={mode})")
+            # The retry is resolved either way: it is no longer a pending
+            # deletion. Leaving it queued would re-ask the same question
+            # every cycle and never get a different answer.
+            self.state.resolve_retry(h)
+            return
+
         success = self._attempt_action(
             h, name, rule, bad_files,
-            inspection_id=str(uuid.uuid4()), findings=retry_findings,
-            file_count=len(files),
-            total_size=sum(f.get("size", 0) or 0 for f in files),
+            inspection_id=inspection_id, findings=retry_findings,
+            file_count=file_count, total_size=total_size,
+            assessment=assessment, decision=decision,
         )
         if success:
             self.state.resolve_retry(h)
@@ -841,8 +936,59 @@ class Scanner:
     # never mistaken for a complete one.
     MAX_REPLACEMENT_CHECKS = 25
 
+    def record_rejection(self, hash: str, name: str, arr_app: str,
+                         indexer_name: str = None) -> None:
+        """
+        Record the consequences of a rejection: indexer attribution and a
+        replacement watch.
+
+        Public because three different paths reject a release -- the scan
+        path, the quarantine timeout, and a person clicking Delete on the
+        review page -- and all three owe the same bookkeeping. Only the scan
+        path did it before, which meant quarantine-mode installs recorded
+        nothing at all.
+
+        Never raises. Bookkeeping must not be able to fail an action that has
+        already happened.
+        """
+        try:
+            arr_client = _build_arr_client(arr_app or "sonarr", self.config)
+        except Exception as exc:
+            self.log.debug(f"  record_rejection: no arr client: {exc}")
+            return
+
+        indexer_id = None
+        if self.config.prowlarr.enabled and indexer_name is None:
+            try:
+                indexer_id, indexer_name = self._record_grab_attribution(
+                    hash, name, arr_app)
+            except Exception as exc:
+                self.log.debug(f"  record_rejection: attribution failed: {exc}")
+
+        if self.config.prowlarr.enabled:
+            if indexer_id:
+                try:
+                    self._record_malicious_hit(hash, name, indexer_id, indexer_name)
+                except Exception as exc:
+                    self.log.warning(
+                        f"  Malicious hit not recorded for {name}: {exc}")
+            else:
+                self.log.warning(
+                    f"  Malicious hit NOT recorded for '{name}' — indexer "
+                    f"attribution failed")
+
+        if getattr(self.config.remediation, "track_replacements", False):
+            try:
+                watch = self._capture_replacement_identity(
+                    arr_client, hash, name, arr_app, indexer_name)
+                if watch:
+                    self.state.open_replacement_watch(watch)
+            except Exception as exc:
+                self.log.debug(f"  record_rejection: watch failed: {exc}")
+
     def _capture_replacement_identity(self, arr_client, hash: str, name: str,
-                                      rule, indexer_name: str = None) -> dict | None:
+                                      arr_app: str,
+                                      indexer_name: str = None) -> dict | None:
         """
         Build a watch record, or None if this release cannot be watched.
 
@@ -865,7 +1011,7 @@ class Scanner:
                 "original_hash":    (hash or "").upper(),
                 "original_name":    name,
                 "original_indexer": indexer_name or arr_client.get_grab_indexer(hash),
-                "arr_app":          rule.app,
+                "arr_app":          arr_app,
                 "media_id":         media_id,
                 "media_field":      arr_client.MEDIA_ID_FIELD,
                 "rejected_at":      datetime.now(timezone.utc).isoformat(),
@@ -885,7 +1031,10 @@ class Scanner:
         A 72-hour window works out at roughly ten checks per rejection rather
         than one per scan cycle, which at a 15-minute poll would be ~288.
         """
-        return min(10 * (2 ** max(0, check_count)), 360)
+        # Clamp the EXPONENT, not the product: check_count keeps growing on
+        # a permanently unreachable arr, and 2 ** big is a large-int
+        # computation for a number we immediately throw away.
+        return min(10 * (2 ** min(max(0, check_count), 6)), 360)
 
     def process_replacement_watches(self) -> int:
         """
@@ -917,33 +1066,60 @@ class Scanner:
                     f"checks this pass; {len(watches) - checked} watch(es) "
                     f"deferred to the next scan")
                 break
+            # Not-yet-due watches are skipped without touching the network,
+            # so they must not consume the budget. Counting them did: with
+            # more than MAX open watches, the oldest not-yet-due ones ate the
+            # whole allowance and due watches further down the list were
+            # never reached at all.
+            if not self._replacement_watch_is_due(w, now, window_hours):
+                continue
             try:
                 if self._advance_replacement_watch(w, now, window_hours):
                     resolved += 1
-                checked += 1
             except Exception as exc:
                 self.log.warning(
                     f"Replacement watch {w.get('id')} failed: {exc}")
                 self.state.update_replacement(
                     w["id"], last_checked=now.isoformat(),
                     check_count=int(w.get("check_count") or 0) + 1)
+            # Counted in BOTH outcomes. A failing check still costs an HTTP
+            # round trip, so an unreachable arr must exhaust the budget the
+            # same way a working one does -- otherwise the cap stops
+            # applying exactly when it matters most.
+            checked += 1
 
         return resolved
+
+    def _replacement_watch_is_due(self, w: dict, now, window_hours: int) -> bool:
+        """
+        Is this watch worth spending a network call on right now?
+
+        Separate from _advance_replacement_watch so the sweep can ask before
+        consuming its per-pass budget. An expired window is always due: it
+        resolves locally with no arr call at all.
+        """
+        try:
+            age_h = (now - datetime.fromisoformat(
+                w.get("rejected_at") or "")).total_seconds() / 3600
+            if age_h > window_hours:
+                return True
+        except Exception:
+            return True     # unparseable: deal with it rather than defer it
+
+        last = w.get("last_checked")
+        if not last:
+            return True
+        try:
+            elapsed = (now - datetime.fromisoformat(last)).total_seconds() / 60
+            return elapsed >= self._replacement_backoff_minutes(
+                int(w.get("check_count") or 0))
+        except Exception:
+            return True     # unparseable timestamp: check now and overwrite
 
     def _advance_replacement_watch(self, w: dict, now, window_hours: int) -> bool:
         """One watch. Returns True if it reached a final state."""
         rejected_at = w.get("rejected_at") or ""
         count = int(w.get("check_count") or 0)
-
-        # Backoff -- not due yet.
-        last = w.get("last_checked")
-        if last:
-            try:
-                elapsed = (now - datetime.fromisoformat(last)).total_seconds() / 60
-                if elapsed < self._replacement_backoff_minutes(count):
-                    return False
-            except Exception:
-                pass   # unparseable timestamp: check it now and overwrite
 
         # Window expired.
         try:

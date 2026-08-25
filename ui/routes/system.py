@@ -7,13 +7,12 @@ Connection checks run concurrently and are fetched async by the page so the
 initial render is instant.
 """
 import os
-import sys
 import shutil
 import platform
 from flask import Blueprint, render_template, current_app, jsonify
 
 # ROADMAP item 13: the checks live in core/ so the CLI can use them too.
-from core.connections import check_all, check_connection, SERVICE_NAMES
+from core.connections import check_all, check_connection
 
 # Kept so anything still referring to the old private name keeps working.
 _check_one = check_connection

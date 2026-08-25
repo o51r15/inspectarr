@@ -189,16 +189,11 @@ def api_health():
         if denied is not None:
             return denied
         try:
-            from concurrent.futures import ThreadPoolExecutor
+            from core.connections import check_all
             from core.config import load_config
-            from ui.routes.system import _check_one
 
             cfg = load_config(current_app.config["CONFIG_PATH"])
-            names = ["Torrent Client", "Sonarr", "Radarr",
-                     "Lidarr", "Prowlarr", "Ollama"]
-            with ThreadPoolExecutor(max_workers=len(names)) as pool:
-                results = list(pool.map(lambda n: _check_one(n, cfg), names))
-            payload["dependencies"] = results
+            payload["dependencies"] = check_all(cfg)
         except Exception as exc:
             # A dependency-check failure is reported, not raised: the core
             # health verdict above stands on its own.

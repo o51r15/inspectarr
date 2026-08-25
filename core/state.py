@@ -382,6 +382,24 @@ class StateManager:
             log.warning(f"Failed to read expired quarantine: {exc}")
             return []
 
+    def clear_quarantine_expiry(self, hash: str) -> bool:
+        """
+        Keep the hold, drop its timer.
+
+        Needed when the operating mode forbids the deletion a timeout would
+        otherwise perform: the entry must stay on the review queue for a
+        person, but must stop re-firing the timer on every pass.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "UPDATE quarantine SET expires_at = NULL "
+                    "WHERE hash = ? AND status = 'held'", (hash,))
+            return True
+        except Exception as exc:
+            log.warning(f"clear_quarantine_expiry failed: {exc}")
+            return False
+
     def has_active_quarantine(self, hash: str) -> bool:
         """
         True while a torrent is held.

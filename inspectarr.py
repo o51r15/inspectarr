@@ -98,6 +98,18 @@ def _run_connection_test(args) -> int:
     return 0
 
 
+def _run_periodic_sweeps(scanner) -> None:
+    """
+    The between-scan housekeeping both entry points owe.
+
+    Kept as one function so the daemon and the one-shot path cannot drift
+    apart -- they already had, which is how the one-shot path ended up never
+    advancing a replacement watch.
+    """
+    scanner.process_quarantine_timeouts()
+    scanner.process_replacement_watches()
+
+
 def _run_daemon(args):
     """Headless scan loop — no web UI, just scan → sleep → repeat."""
     import signal
@@ -139,8 +151,7 @@ def _run_daemon(args):
         try:
             if config.retry.enabled:
                 scanner.process_retries()
-            scanner.process_quarantine_timeouts()
-            scanner.process_replacement_watches()
+            _run_periodic_sweeps(scanner)
             scanner.run_scan()
         except Exception as exc:
             print(f"ERROR during scan: {exc}")
@@ -190,6 +201,7 @@ def main():
         print("Force-flushing retry queue (bypassing timing and exhaustion cap)...")
         scanner.process_retries(force=True)
         print("Done. Running scan...")
+        _run_periodic_sweeps(scanner)
         scanner.run_scan()
         return
 
@@ -197,6 +209,12 @@ def main():
 
     if config.retry.enabled:
         scanner.process_retries()
+
+    # The daemon loop runs these every cycle; a one-shot run must too. This
+    # IS the documented cron deployment, and without them a cron install
+    # would open replacement watches it never advanced and never fire a
+    # quarantine timeout.
+    _run_periodic_sweeps(scanner)
 
     scanner.run_scan()
 

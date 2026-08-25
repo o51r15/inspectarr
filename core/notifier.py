@@ -195,8 +195,27 @@ class Notifier:
         actions  = [e for e in events if e["type"] == "action"]
         dry_runs = [e for e in events if e["type"] == "dry_run"]
         errors   = [e for e in events if e["type"] == "error"]
+        holds    = [e for e in events if e["type"] == "quarantine"]
 
         lines = []
+        # Held torrents go FIRST: they are the only event type in this
+        # digest that is waiting on a reply. Everything else is a report of
+        # something already finished.
+        if holds:
+            lines.append(f"Quarantined {len(holds)} torrent(s) awaiting review:")
+            for e in holds[:5]:
+                level = f"[{e['risk_level']}] " if e.get("risk_level") else ""
+                # Not paused means it is still downloading, which changes how
+                # urgent this is. The single-notification path says so; the
+                # digest must too, or the two disagree about the same event.
+                warn = "" if e.get("paused", True) else "  (NOT PAUSED)"
+                lines.append(f"  - {level}{e.get('torrent')}{warn}")
+            if len(holds) > 5:
+                lines.append(f"  ... and {len(holds) - 5} more")
+            unpaused = [e for e in holds if not e.get("paused", True)]
+            if unpaused:
+                lines.append(f"  WARNING: {len(unpaused)} could not be paused "
+                             f"and are still downloading.")
         if actions:
             lines.append(f"Removed {len(actions)} torrent(s):")
             for e in actions[:5]:

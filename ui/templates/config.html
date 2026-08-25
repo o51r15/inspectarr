@@ -289,7 +289,11 @@
             <label for="remediation_operating_mode">Operating mode</label>
             <select name="remediation_operating_mode" id="remediation_operating_mode"
                     onchange="describeBands()">
-              {% set om = cfg.get('remediation',{}).get('operating_mode','automatic') %}
+              {# `remediation:` present but empty parses as None, and .get returns that
+   None rather than the default -- chaining .get on it raises and 500s the
+   whole Settings page. core/config.py guards this with `or {}`; so must the
+   template, which the raw-YAML editor makes reachable. #}
+{% set om = (cfg.get('remediation') or {}).get('operating_mode','automatic') %}
               <option value="monitor" {{ 'selected' if om == 'monitor' else '' }}>
                 Monitor — record findings, never act
               </option>
@@ -724,7 +728,7 @@
           <div class="form-group mb-16">
             <label>Notify On</label>
             <div class="flex gap-8" style="flex-wrap:wrap;margin-top:6px">
-              {% for evt in ['action','error','startup','dry_run'] %}
+              {% for evt in ['action','quarantine','error','startup','dry_run'] %}
               <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text)">
                 <input type="checkbox" name="notify_on" value="{{ evt }}"
                        {{ 'checked' if evt in appr.get('notify_on',[]) else '' }}>

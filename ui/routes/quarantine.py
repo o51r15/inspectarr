@@ -193,6 +193,21 @@ def quarantine_action():
             "arr": app_name, "arr_blocklisted": arr_ok, "qbit_deleted": True,
             "bad_files": entry.get("bad_files") or [],
         })
+        # Indexer attribution and the replacement watch. Missing here until
+        # now, which mattered because in `operating_mode: quarantine` every
+        # remediation goes through this button -- so the Indexers tab showed
+        # nothing, indistinguishable from having found no bad releases.
+        #
+        # Deliberately NOT gated on the operating mode: a person deciding is
+        # the point of this queue, and capping it would make quarantine mode
+        # a queue you cannot empty.
+        try:
+            from core.scanner import Scanner
+            Scanner(cfg, state).record_rejection(hash_, name, app_name)
+        except Exception as exc:
+            # Bookkeeping must never fail a deletion that already happened.
+            log.warning(f"Quarantine remediate: bookkeeping failed: {exc}")
+
         msg = f"{name} deleted"
         if not arr_ok:
             msg += " (arr blocklist failed — check the Events log)"

@@ -1,10 +1,36 @@
 import requests
 from abc import ABC
+from datetime import datetime, timezone
 from typing import Optional
 
 
 class ArrClientError(Exception):
     pass
+
+
+def _iso_after(a: str, b: str) -> bool:
+    """
+    Is timestamp `a` strictly later than `b`?
+
+    Parsed rather than string-compared, because the two sides are different
+    ISO dialects: the arrs emit "...T12:00:00Z" while our own timestamps are
+    datetime.isoformat() -> "...T12:00:00.123456+00:00". Lexically 'Z'
+    (0x5A) sorts above '.' (0x2E), so a same-second grab compared as
+    strictly later and would have been picked up as its own replacement.
+
+    Falls back to string comparison if either side will not parse, which is
+    no worse than what it replaces.
+    """
+    try:
+        pa = datetime.fromisoformat(a.replace("Z", "+00:00"))
+        pb = datetime.fromisoformat(b.replace("Z", "+00:00"))
+        if pa.tzinfo is None:
+            pa = pa.replace(tzinfo=timezone.utc)
+        if pb.tzinfo is None:
+            pb = pb.replace(tzinfo=timezone.utc)
+        return pa > pb
+    except Exception:
+        return a > b
 
 
 class AbstractArrClient(ABC):
@@ -254,7 +280,7 @@ class AbstractArrClient(ABC):
             if r.get("eventType") != "grabbed":
                 continue
             date = r.get("date") or ""
-            if not date or date <= after_iso:
+            if not date or not _iso_after(date, after_iso):
                 continue
             data = r.get("data") or {}
             # torrentInfoHash is the reliable one; downloadId is the infohash
@@ -290,12 +316,21 @@ class AbstractArrClient(ABC):
         for r in self.get_media_history(media_id):
             if r.get("eventType") != "downloadFolderImported":
                 continue
-            if (r.get("date") or "") <= after_iso:
+            if not _iso_after(r.get("date") or "", after_iso):
                 continue
             if want:
                 got = ((r.get("data") or {}).get("torrentInfoHash")
                        or r.get("downloadId") or "").upper()
-                if got and got != want:
+                # Require a POSITIVE match, not merely the absence of a
+                # contradiction. The old `if got and got != want` treated an
+                # unidentifiable import as a match, so a hand-import or an
+                # unrelated release completing for the same episode was
+                # recorded as "the replacement from indexer X imported
+                # cleanly" -- and then fed to indexer reputation as fact.
+                #
+                # This module already refuses to guess about scoping; it
+                # should hold itself to the same standard about attribution.
+                if got != want:
                     continue
             return True
         return False
