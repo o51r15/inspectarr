@@ -5,6 +5,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [Unreleased]
+
+### Added — Ollama Model Updates
+
+- **Registry update checking.** Inspectarr now tells you when a newer build of your model is published upstream, and offers a one-click pull.
+
+  The check is one unauthenticated request and a hash — it never pulls anything to find out. Ollama's `/api/tags` digest turns out to be exactly `sha256(the raw registry manifest)`, verified across 8 installed models including a third-party namespaced one, so comparing them is cheap and side-effect-free.
+
+  The badge says **which** update it found, because the two call for opposite reactions: *local* (the installed build changed since validation → re-validate) or *upstream* (a newer build exists → pull). "Could not reach the registry" reports as unavailable, never as up-to-date.
+
+  `prowlarr.ollama.auto_update_check` (default on) controls this. It is the one check that leaves your network, so it is opt-out — air-gapped installs set it false and lose nothing else.
+
+- **One-click model pull**, in the background with real byte-level progress. A pull is gigabytes; doing it in-request would tie up a worker and time out. Afterwards it says plainly that the new build is **not validated** — a different build of the same name can score differently, which is the whole reason the validation gate exists.
+
+- **Cached AI scores can no longer go stale across a model rebuild.** The scoring cache key now includes the model's digest, not just its name. Previously `ollama pull qwen2.5:7b` could replace the build behind a name and the old build's scores would keep being served under the new one for a full cache TTL.
+
+  In the key rather than an invalidation step, deliberately: invalidation only helps if a check happened to have run, whereas a key carrying the digest can never be hit by a stale entry at all.
+
+### Fixed — AI Scoring on Small Context Windows
+
+Scoring sent every indexer in one prettified JSON prompt. At 37 indexers that is ~5,500 tokens, so a 4k-context model lost the instructions and returned fabricated data rather than an error.
+
+The prompt is now compact and short-keyed — ~3,000 tokens for the same 37 — and Inspectarr splits the work into several calls when needed, merging the results. Both are invisible: nothing about how you configure scoring changes.
+
+**Fitting the window turned out not to be enough**, which is the more useful finding. Measured on `qwen2.5-coder:7b`:
+
+| Indexers | Window | Result |
+|---|---|---|
+| 25 | 4k | all 25 scored |
+| 30 | 4k | **echoes the input back** instead of scoring — in 3 seconds, window half full |
+| 37 | 8k | well-formed JSON that **silently omits five** |
+
+That last row is the one worth worrying about: it looks exactly like success. Nothing errors, the JSON parses, and the missing indexers quietly keep their deterministic score.
+
+So batching is capped by item count as well as tokens, and the two limits are nowhere near each other. `prowlarr.ollama.max_indexers_per_call` (default 25) is that cap — a property of your model rather than of Inspectarr, and the validation run on the AI settings page is how to find the right number for yours.
+
+`prowlarr.ollama.context_window` (default 4096) is also now sent to Ollama as `num_ctx`, so it uses the window being budgeted for instead of its own default.
+
+The same 37 indexers that scored **0 of 37** at 4k now score **37 of 37**.
+
+---
+
 ## [v2.0.0] — 2026-08-25
 
 The release the safety work was building toward. Inspectarr stops being a
