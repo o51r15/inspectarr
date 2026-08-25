@@ -8,6 +8,13 @@ from datetime import datetime
 from werkzeug.security import generate_password_hash
 from ui.routes._utils import safe_error
 
+# Model identity and update checking live in core/, not here -- the scorer
+# needs them too, and one implementation cannot drift from itself.
+from core.ollama_registry import (
+    local_digest as _ollama_local_digest,
+    check_for_update as _ollama_check_update,
+)
+
 log = logging.getLogger("inspectarr")
 
 config_bp = Blueprint("config", __name__)
@@ -700,30 +707,12 @@ def _validation_worker(app, config_path, url, model, timeout,
             pass
 
 
-def _ollama_digest(url, model):
-    """
-    Digest identifying the exact build of a model, from /api/tags.
+# ROADMAP item 13's lesson, applied again: identity and update checking are
+# not web concerns. They live in core/ollama_registry.py so the scorer can
+# use them for its cache key too, and so there is one implementation of
+# "which build is this" rather than two that can drift.
+_ollama_digest = _ollama_local_digest
 
-    NOT from /api/show -- that response has no `digest` key at all (verified
-    against Ollama 2026-08: its top-level keys are capabilities, details,
-    license, model_info, modelfile, modified_at, system, template, tensors).
-    The previous implementation read `digest` from /api/show and so always
-    got an empty string, silently defeating every staleness check built on it.
-
-    Returns None on any failure -- this feeds an advisory badge, never a
-    control-flow decision.
-    """
-    try:
-        import requests as req
-        r = req.get(f"{url.rstrip('/')}/api/tags", timeout=10)
-        if r.status_code != 200:
-            return None
-        for m in (r.json().get("models") or []):
-            if m.get("name") == model or m.get("model") == model:
-                return m.get("digest") or None
-    except Exception as exc:
-        log.debug(f"Could not read digest for {model}: {exc}")
-    return None
 
 
 @config_bp.route("/config/ai/model", methods=["POST"])

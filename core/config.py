@@ -125,7 +125,20 @@ class OllamaConfig:
     timeout: int = 120
     cache_ttl_hours: int = 24
     system_prompt: str = ""         # empty = use built-in default
-    update_check_hours: int = 24    # 0 = disable update checks
+    update_check_hours: int = 24
+
+    # Ask the Ollama REGISTRY whether a newer build of the configured model
+    # is published (ROADMAP item 15).
+    #
+    # Separate from update_check_hours, which governs the LOCAL check --
+    # "has the model under this name been replaced since we validated it".
+    # That one is a LAN request and always runs. This one leaves the network
+    # the machine is on, so it is opt-out rather than assumed: some installs
+    # are deliberately air-gapped, and a self-hosted tool should not phone
+    # anywhere the user did not agree to.
+    #
+    # It never pulls. One unauthenticated GET of a manifest, hashed locally.
+    auto_update_check: bool = True    # 0 = disable update checks
 
     def is_active(self) -> bool:
         """
@@ -371,6 +384,9 @@ def _parse_ollama(o_raw: dict) -> "OllamaConfig":
         cache_ttl_hours=o_raw.get("cache_ttl_hours", 24),
         system_prompt=o_raw.get("system_prompt", ""),
         update_check_hours=int(o_raw.get("update_check_hours", 24)),
+        auto_update_check=bool(
+            True if o_raw.get("auto_update_check") is None
+            else o_raw.get("auto_update_check")),
     )
 
 

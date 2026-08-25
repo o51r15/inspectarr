@@ -25,6 +25,7 @@ from .prowlarr    import ProwlarrClient
 from .state       import StateManager
 from .config      import ProwlarrConfig
 from .llm_client  import ollama_score_indexers
+from .ollama_registry import local_digest as ollama_local_digest
 
 
 WORST_RESPONSE_MS = 5000.0
@@ -295,15 +296,33 @@ class IndexerScorer:
             })
 
         # Content-hash cache: skip Ollama if identical input was scored recently.
-        # The key MUST include the model and system prompt, not just the indexer
-        # stats. Keying on stats alone meant swapping models returned the old
-        # model's cached scores under the new model's name, silently invalidating
-        # any A/B comparison between models for a full cache TTL.
+        #
+        # The key MUST include the model and system prompt, not just the
+        # indexer stats. Keying on stats alone meant swapping models returned
+        # the old model's cached scores under the new model's name, silently
+        # invalidating any A/B comparison between models for a full TTL.
+        #
+        # It must also include the model's DIGEST, for the same reason one
+        # level down: `ollama pull qwen2.5:7b` can replace the build behind a
+        # name without the name changing. Without the digest that produces a
+        # byte-identical key, and the previous build's scores are served
+        # under the new build's name until the TTL expires.
+        #
+        # In the key rather than invalidated on detection, deliberately.
+        # Invalidation only helps if the update check happened to have run;
+        # a key carrying the digest cannot be hit by a stale entry at all.
+        #
+        # A digest we cannot read (host down, model absent) becomes None and
+        # simply participates as None -- the cache still works, it just does
+        # not gain this protection for that run. Failing the scan over an
+        # advisory lookup would be the worse trade.
+        model_digest = ollama_local_digest(ocfg.url, ocfg.model)
         content_hash = hashlib.sha256(
             json.dumps(
                 {
                     "payload":       payload,
                     "model":         ocfg.model,
+                    "model_digest":  model_digest,
                     "system_prompt": ocfg.system_prompt,
                 },
                 sort_keys=True,

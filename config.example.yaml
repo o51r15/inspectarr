@@ -288,6 +288,19 @@ prowlarr:
     cache_ttl_hours: 24          # How long to cache LLM scoring results
     system_prompt: ""            # Custom system prompt (empty = built-in default)
     update_check_hours: 24       # Check for model updates every N hours (0 = disable)
+
+    # Also ask the Ollama REGISTRY whether a newer build of this model has
+    # been published upstream, and show a badge if so.
+    #
+    # This is separate from update_check_hours above, which is a purely
+    # LOCAL question: has the model under this name been replaced since
+    # Inspectarr validated it. That check never leaves your network.
+    #
+    # This one does leave it -- one unauthenticated GET of a manifest from
+    # registry.ollama.ai, hashed locally to compare. It never pulls and
+    # never sends anything about your setup. Set false if the machine is
+    # air-gapped or you would simply rather it did not.
+    auto_update_check: true
   # Automated indexer management
   # When enabled, indexers that drop below disable_threshold for consecutive_runs
   # scoring cycles are automatically disabled in Prowlarr, then re-enabled after
