@@ -14,6 +14,9 @@ from core.ollama_registry import (
     local_digest as _ollama_local_digest,
     check_for_update as _ollama_check_update,
 )
+# Comparing two Ollama URLs is one rule, and the gate here and the storage
+# in StateManager must not disagree about it.
+from core.state import validation_host_state
 
 log = logging.getLogger("inspectarr")
 
@@ -689,7 +692,8 @@ def _validation_worker(app, config_path, url, model, timeout, context_window,
         digest = _ollama_digest(url, model)
         state = app.config.get("STATE")
         if state:
-            state.save_validation(model, result, digest=digest)
+            state.save_validation(model, result, digest=digest,
+                                  ollama_url=url)
         with _validation_lock:
             _validation_state.update(running=False, result=result, stage="Done")
     except Exception as exc:
@@ -736,14 +740,46 @@ def ai_set_model():
 
     state = current_app.config.get("STATE")
     record = state.get_validation(model) if state else None
-    validated = bool(record and record.get("status") == "supported")
+
+    # A verdict is about a (host, model) pair. Before this check, moving
+    # prowlarr.ollama.url carried every stored "supported" across to hardware
+    # the model had never been measured on -- which is how a model validated
+    # on a GPU host came to be trusted on a CPU-only one.
+    #
+    # "unknown" (a record written before the column existed) still counts as
+    # validated. Anything else would invalidate an install's whole history on
+    # upgrade, and absence of evidence is not evidence of a different host.
+    current_url = ""
+    try:
+        _raw_cfg = _load_raw(config_path)
+        current_url = ((_raw_cfg.get("prowlarr") or {})
+                       .get("ollama") or {}).get("url", "") or ""
+    except Exception as exc:
+        # Unreadable config is the save path's problem, not the gate's.
+        log.debug(f"Could not read Ollama URL for the validation gate: {exc}")
+
+    host_state = validation_host_state(record, current_url)
+    validated = bool(record and record.get("status") == "supported"
+                     and host_state != "mismatch")
 
     if not validated and not force:
+        if record and record.get("status") == "supported" \
+                and host_state == "mismatch":
+            message = (
+                f"{model} passed validation against "
+                f"{record.get('ollama_url')}, not {current_url}. "
+                f"Re-validate it on this host before using it."
+            )
+        else:
+            message = f"{model} has not passed validation."
         return jsonify({
             "ok": False,
             "needs_validation": True,
             "status": (record or {}).get("status", "untested"),
-            "message": f"{model} has not passed validation.",
+            "host_state": host_state,
+            "validated_on": (record or {}).get("ollama_url"),
+            "current_host": current_url,
+            "message": message,
         }), 409
 
     try:
@@ -757,7 +793,8 @@ def ai_set_model():
 
         if not validated and state:
             state.mark_model_forced(
-                model, digest=_ollama_digest(ollama.get("url", ""), model))
+                model, digest=_ollama_digest(ollama.get("url", ""), model),
+                ollama_url=ollama.get("url", ""))
 
         return jsonify({
             "ok": True,

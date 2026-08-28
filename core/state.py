@@ -10,6 +10,54 @@ from typing import Optional
 log = logging.getLogger("inspectarr")
 
 
+def normalize_ollama_url(url: str | None) -> str | None:
+    """
+    Canonical form of an Ollama base URL, for comparing two of them.
+
+    Only trims what is genuinely cosmetic -- surrounding whitespace, a
+    trailing slash, and the case of the scheme and host. Deliberately does
+    NOT resolve hostnames to addresses: "the name I configured changed" is
+    itself worth noticing, and a DNS lookup on a comparison would make the
+    check fail whenever the network is down.
+    """
+    if not url:
+        return None
+    u = url.strip().rstrip("/")
+    if not u:
+        return None
+    if "://" in u:
+        scheme, rest = u.split("://", 1)
+        host, sep, path = rest.partition("/")
+        return f"{scheme.lower()}://{host.lower()}{sep}{path}"
+    return u.lower()
+
+
+def validation_host_state(record: dict | None, ollama_url: str | None) -> str:
+    """
+    Does this stored verdict describe the host we are about to use?
+
+      "match"    -- earned against this host
+      "unknown"  -- recorded before hosts were tracked (NULL column)
+      "mismatch" -- earned against a DIFFERENT host
+
+    "unknown" is deliberately not "mismatch". Every record written before
+    this column existed has a NULL url, and treating those as mismatched
+    would invalidate an entire install's validation history on upgrade --
+    the same reason a NULL model_digest reads as "validated before digests
+    were recorded" rather than as "changed".
+
+    Callers decide what each state means for them. The model gate treats
+    "unknown" as acceptable and "mismatch" as not, because a mismatch is
+    positive evidence that the measurement came from other hardware.
+    """
+    if not record:
+        return "unknown"
+    stored = normalize_ollama_url(record.get("ollama_url"))
+    if not stored:
+        return "unknown"
+    return "match" if stored == normalize_ollama_url(ollama_url) else "mismatch"
+
+
 class StateManager:
     """
     Manages SQLite state (processed hashes + retry queue) and the
@@ -447,20 +495,30 @@ class StateManager:
     # ------------------------------------------------------------------
 
     def save_validation(self, model: str, result: dict,
-                        digest: str = None) -> bool:
-        """Store a validation run. status is 'supported', 'failed' or 'forced'."""
+                        digest: str = None, ollama_url: str = None) -> bool:
+        """
+        Store a validation run. status is 'supported', 'failed' or 'forced'.
+
+        ollama_url records which host the verdict was earned against. It is
+        read from the result when not passed explicitly, so a caller that
+        already ran validate_model does not have to repeat itself.
+        """
         import json as _json
         try:
             status = "supported" if result.get("passed") else "failed"
+            url = ollama_url or result.get("ollama_url")
             with self._lock, self._conn() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO validated_models "
                     "(model, validated_at, status, passed, indexer_count, "
-                    " avg_response_ms, model_digest, results_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    " avg_response_ms, model_digest, results_json, "
+                    " ollama_url, tok_per_s, gpu_offload_pct) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (model, _now_iso(), status, 1 if result.get("passed") else 0,
                      result.get("indexer_count"), result.get("avg_response_ms"),
-                     digest, _json.dumps(result)),
+                     digest, _json.dumps(result),
+                     normalize_ollama_url(url), result.get("tok_per_s"),
+                     result.get("gpu_offload_pct")),
                 )
                 conn.commit()
             return True
@@ -468,7 +526,8 @@ class StateManager:
             log.warning(f"Failed to save validation for {model}: {exc}")
             return False
 
-    def mark_model_forced(self, model: str, digest: str = None) -> bool:
+    def mark_model_forced(self, model: str, digest: str = None,
+                          ollama_url: str = None) -> bool:
         """
         Record that a model was applied without passing validation.
 
@@ -482,10 +541,11 @@ class StateManager:
                 conn.execute(
                     "INSERT OR REPLACE INTO validated_models "
                     "(model, validated_at, status, passed, indexer_count, "
-                    " avg_response_ms, model_digest, results_json) "
-                    "VALUES (?, ?, 'forced', 0, NULL, NULL, ?, ?)",
+                    " avg_response_ms, model_digest, results_json, ollama_url) "
+                    "VALUES (?, ?, 'forced', 0, NULL, NULL, ?, ?, ?)",
                     (model, _now_iso(), digest,
-                     _json.dumps({"forced": True})),
+                     _json.dumps({"forced": True}),
+                     normalize_ollama_url(ollama_url)),
                 )
                 conn.commit()
             return True
@@ -743,7 +803,10 @@ class StateManager:
                     indexer_count   INTEGER,
                     avg_response_ms INTEGER,
                     model_digest    TEXT,
-                    results_json    TEXT
+                    results_json    TEXT,
+                    ollama_url      TEXT,
+                    tok_per_s       REAL,
+                    gpu_offload_pct INTEGER
                 )
             """)
             # replacements -- did the thing we rejected get replaced, and
@@ -905,6 +968,38 @@ class StateManager:
         except sqlite3.OperationalError as exc:
             # Table may not exist yet on a fresh database -- harmless.
             log.debug(f"model_digest cleanup skipped: {exc}")
+
+        # Migrate validated_models to record WHERE a verdict was earned.
+        #
+        # A verdict is about a (host, model) pair, not a model. The same
+        # phi4:latest scores 39/39 on a GPU host and can drop indexers on a
+        # CPU one, and moving prowlarr.ollama.url silently carried every
+        # stored verdict across to hardware it was never measured on. That
+        # is exactly what happened when this deployment moved from .125 to
+        # .97: 33 records, none of which knew which host they described.
+        #
+        # tok_per_s and gpu_offload_pct come with it because they are what
+        # makes a stale calibration DETECTABLE later: if measured throughput
+        # has drifted from the recorded value, the hardware changed under us
+        # (a GPU coming online, a busier host) and the verdict wants re-running
+        # even though host and model both still match.
+        #
+        # Pre-migration rows get NULL, which reads as "recorded before hosts
+        # were tracked" -- the same treatment NULL model_digest already gets,
+        # and deliberately NOT as "wrong host". Treating unknown as mismatched
+        # would invalidate every existing record on upgrade.
+        for _col in ("ollama_url TEXT", "tok_per_s REAL",
+                     "gpu_offload_pct INTEGER"):
+            try:
+                with self._lock, self._conn() as conn:
+                    conn.execute(
+                        f"ALTER TABLE validated_models ADD COLUMN {_col}")
+                    conn.commit()
+            except sqlite3.OperationalError as exc:
+                # BUG-16: only "duplicate column" is expected here.
+                if "duplicate column" not in str(exc).lower():
+                    log.warning(
+                        f"validated_models migration failed ({_col}): {exc}")
 
         # Migrate llm_cache to record which model produced each entry.
         # Pre-migration rows get NULL: their model is genuinely unknown, and

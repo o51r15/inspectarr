@@ -100,25 +100,66 @@ def _synthetic_indexers(count: int) -> list[dict]:
     return out
 
 
-def _warmup(ollama_url: str, model: str) -> None:
+def _warmup(ollama_url: str, model: str) -> dict:
     """
-    Load the model into VRAM before anything is timed.
+    Load the model before anything is timed, and measure the host while we
+    are there.
 
-    Without this the first test absorbs model-load time -- often tens of
+    Without the load, the first test absorbs model-load time -- often tens of
     seconds -- and the reported response times say more about disk speed than
     about the model. Failure is non-fatal: if warmup cannot run, the tests
     still can, they are just slower.
+
+    It also returns two host measurements, because this call has to happen
+    anyway and they are free here:
+
+      tok_per_s        generation throughput
+      gpu_offload_pct  how much of the model Ollama actually put on the GPU
+
+    The second is the one that explains the first. Ollama reports size_vram
+    of 0 for a model it is running entirely on CPU, and there is no other
+    honest way to tell a slow GPU from no GPU at all. A partial offload --
+    common on AMD/ROCm where VRAM is tight -- lands in between, which is
+    precisely the case a fixed default handles worst.
+
+    num_predict is 24 rather than 1: a single token gives a token rate
+    dominated by first-token latency, which is not the number we want.
+
+    Returns {} when it cannot measure. Callers must treat every key as
+    optional -- an unmeasurable host is not a failed validation.
     """
+    out: dict = {}
     try:
         import requests
-        requests.post(
-            f"{ollama_url.rstrip('/')}/api/generate",
+        base = ollama_url.rstrip("/")
+        resp = requests.post(
+            f"{base}/api/generate",
             json={"model": model, "prompt": "Ready.", "stream": False,
-                  "options": {"num_predict": 1}},
+                  "options": {"num_predict": 24}},
             timeout=300,
         )
+        data = resp.json() if resp.status_code == 200 else {}
+        if data.get("eval_duration") and data.get("eval_count"):
+            out["tok_per_s"] = round(
+                data["eval_count"] / (data["eval_duration"] / 1e9), 1)
     except Exception as exc:
         log.debug(f"Model warmup failed (non-fatal): {exc}")
+
+    try:
+        import requests
+        ps = requests.get(f"{ollama_url.rstrip('/')}/api/ps", timeout=30)
+        for m in (ps.json().get("models", []) if ps.status_code == 200 else []):
+            if m.get("name") != model:
+                continue
+            size = m.get("size") or 0
+            if size > 0:
+                out["gpu_offload_pct"] = round(
+                    100.0 * (m.get("size_vram") or 0) / size)
+            break
+    except Exception as exc:
+        log.debug(f"Could not read Ollama /api/ps (non-fatal): {exc}")
+
+    return out
 
 
 def _score_of(result: dict, indexer_id: int):
@@ -288,8 +329,12 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
     Returns a dict suitable for storage and for rendering directly.
     """
     started = time.time()
+    # ollama_url is recorded in the result because a verdict belongs to a
+    # (host, model) pair. Storing it here rather than only at the call site
+    # means anything that persists a result carries the host with it by
+    # default, instead of each caller having to remember.
     out = {"model": model, "indexer_count": indexer_count,
-           "context_window": context_window,
+           "context_window": context_window, "ollama_url": ollama_url,
            "tests": [], "passed": False, "avg_response_ms": 0}
 
     if not ollama_url or not model:
@@ -302,7 +347,7 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
     try:
         if progress_cb:
             progress_cb("Loading model", 0, 3)
-        _warmup(ollama_url, model)
+        out.update(_warmup(ollama_url, model))
 
         if progress_cb:
             progress_cb("Discrimination + schema", 1, 3)
