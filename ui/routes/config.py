@@ -397,6 +397,14 @@ def _form_to_config(form, existing: dict) -> dict:
                 "timeout":            _int(form.get("ollama_timeout"), 120),
                 "cache_ttl_hours":    _int(form.get("ollama_cache_ttl_hours"), 24),
                 "update_check_hours": _int(form.get("ollama_update_check_hours"), 24),
+                # Clamped rather than trusted. This arrives from a range
+                # input, but a hand-posted 0 would make _batch_size fall back
+                # to "all of them", which is the exact failure calibration
+                # exists to prevent, and a huge value would do it slowly.
+                "max_indexers_per_call": max(1, min(
+                    _int(form.get("ollama_max_indexers_per_call"), 25), 100)),
+                "context_window":     max(512, min(
+                    _int(form.get("ollama_context_window"), 4096), 131072)),
             })
             prowlarr_block["ollama"] = ollama_block
         # Auto-manage from form fields
@@ -676,7 +684,8 @@ _validation_state = {"running": False, "model": None, "stage": None,
 
 
 def _validation_worker(app, config_path, url, model, timeout, context_window,
-                       indexer_count, system_prompt):
+                       indexer_count, system_prompt, calibration="quick",
+                       max_indexers_per_call=25):
     from core.model_validator import validate_model
 
     def progress(stage, done, total):
@@ -688,7 +697,9 @@ def _validation_worker(app, config_path, url, model, timeout, context_window,
                                 indexer_count=indexer_count,
                                 system_prompt=system_prompt,
                                 progress_cb=progress,
-                                context_window=context_window)
+                                context_window=context_window,
+                                calibration=calibration,
+                                max_indexers_per_call=max_indexers_per_call)
         digest = _ollama_digest(url, model)
         state = app.config.get("STATE")
         if state:
@@ -806,12 +817,58 @@ def ai_set_model():
         return jsonify({"ok": False, "message": safe_error(exc)}), 500
 
 
+@config_bp.route("/config/ai/calibration", methods=["GET"])
+def ai_calibration():
+    """
+    What the batch slider needs to colour itself: the calibrated ceiling for
+    the CURRENTLY configured (host, model), or an honest statement that there
+    is not one.
+
+    Deliberately keyed on the live config rather than on a model passed in by
+    the caller. The slider writes a value that the scorer will use with
+    whatever host and model are actually configured, so that is the pair the
+    ceiling has to describe.
+    """
+    state = current_app.config.get("STATE")
+    try:
+        raw = _load_raw(current_app.config["CONFIG_PATH"])
+        ollama = ((raw.get("prowlarr") or {}).get("ollama") or {})
+    except Exception as exc:
+        return jsonify({"ok": False, "message": safe_error(exc)}), 500
+
+    model = ollama.get("model") or ""
+    url = ollama.get("url") or ""
+    record = state.get_validation(model) if (state and model) else None
+    host_state = validation_host_state(record, url)
+
+    calibrated = bool(record and record.get("calibrated")
+                      and host_state != "mismatch")
+    return jsonify({
+        "ok": True,
+        "model": model,
+        "host": url,
+        "host_state": host_state,
+        "calibrated": calibrated,
+        # Only meaningful when calibrated -- a quick validation records the
+        # size it happened to test, which is not a measured ceiling.
+        "max_safe_batch": (record or {}).get("max_safe_batch") if calibrated else None,
+        "tok_per_s": (record or {}).get("tok_per_s"),
+        "gpu_offload_pct": (record or {}).get("gpu_offload_pct"),
+        "current": _int(ollama.get("max_indexers_per_call"), 25),
+        "validated_on": (record or {}).get("ollama_url"),
+    })
+
+
 @config_bp.route("/config/ai/validate", methods=["POST"])
 def ai_validate():
     """Start a validation run in the background. Returns immediately."""
     config_path = current_app.config["CONFIG_PATH"]
     data = request.get_json(silent=True) or {}
     model = (data.get("model") or "").strip()
+    # "quick" proves the configured batch size works. "deep" searches for the
+    # largest size that works, twice, and is minutes rather than seconds --
+    # the UI says so before offering it.
+    calibration = "deep" if data.get("calibration") == "deep" else "quick"
     if not model:
         return jsonify({"ok": False, "message": "No model specified"}), 400
 
@@ -852,7 +909,7 @@ def ai_validate():
             _validation_state.update(
                 running=True, model=model, stage="Starting", done=0, total=3,
                 result=None, error=None, started_at=datetime.now().isoformat(),
-                indexer_count=indexer_count)
+                indexer_count=indexer_count, calibration=calibration)
 
         if state:
             try:
@@ -869,11 +926,14 @@ def ai_validate():
                   # to 8k, and vice versa.
                   _int(ollama.get("context_window"), 4096),
                   indexer_count,
-                  ollama.get("system_prompt") or ""),
+                  ollama.get("system_prompt") or "",
+                  calibration,
+                  _int(ollama.get("max_indexers_per_call"), 25)),
             daemon=True, name=f"inspectarr-validate-{model}")
         t.start()
         return jsonify({"ok": True, "message": "Validation started",
-                        "indexer_count": indexer_count})
+                        "indexer_count": indexer_count,
+                        "calibration": calibration})
     except Exception as exc:
         with _validation_lock:
             _validation_state.update(running=False)

@@ -163,7 +163,7 @@ class OllamaConfig:
     #
     # A property of the model. Raise it if yours copes; the AI settings
     # page's validation run is how to find out.
-    max_indexers_per_call: int = 25    # 0 = disable update checks
+    max_indexers_per_call: int = 25
 
     def is_active(self) -> bool:
         """

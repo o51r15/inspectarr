@@ -22,7 +22,9 @@ import logging
 import time
 
 from .llm_client import (ollama_score_indexers,
-                         DEFAULT_CONTEXT_WINDOW)
+                         DEFAULT_CONTEXT_WINDOW,
+                         MAX_INDEXERS_PER_CALL,
+                         NEAR_TIMEOUT_WARN_FRACTION)
 
 log = logging.getLogger("inspectarr")
 
@@ -32,6 +34,23 @@ log = logging.getLogger("inspectarr")
 GOOD_MIN   = 70
 BAD_MAX    = 40
 MIN_SPREAD = 25
+
+# Batch sizes tried during in-depth calibration, largest first.
+#
+# Descending rather than ascending because the answer is usually near the top
+# and we stop at the first size that works -- climbing would pay for every
+# rung below it every time.
+BATCH_LADDER = (25, 20, 15, 10, 5)
+
+# How many times a candidate size must score cleanly before it is accepted.
+#
+# Two, not one, and this is the whole reason in-depth mode exists. Silent
+# omission is stochastic: gemma:latest passed a single-pass validation at 39
+# indexers and dropped 15 of 39 the next day, same host, same window. One
+# clean run is not evidence a size is safe -- it is one sample of something
+# that fails intermittently, and accepting it is how a confident, wrong
+# calibration gets written to the database.
+BATCH_PASSES_REQUIRED = 2
 
 
 def _fixture_good(indexer_id: int = 9001) -> dict:
@@ -314,10 +333,123 @@ def _test_context(url, model, timeout, prompt, indexer_count,
     return out, ms
 
 
+def _probe_batch(url, model, timeout, prompt, indexer_count,
+                 context_window, batch) -> dict:
+    """
+    Score `indexer_count` indexers with calls of at most `batch` each, and
+    report whether the result was complete AND comfortably inside the timeout.
+
+    Both conditions matter and they fail differently. A size can be correct
+    and still be wrong to ship: 25 indexers per call scored 39/39 on the CPU
+    host here and took 269-295s against a 300s timeout, which is a batch that
+    works right up until the host is slightly busier.
+
+    per_call_s is the measured total divided by the number of calls. That is
+    an average rather than the true worst call -- ollama_score_indexers does
+    not report per-call timings, and threading that through for a diagnostic
+    would put test-only plumbing in the scoring path. The average is slightly
+    optimistic (the last batch is usually the small remainder), which is worth
+    knowing when reading a borderline result.
+    """
+    data = _synthetic_indexers(indexer_count)
+    wanted = {d["indexer_id"] for d in data}
+    calls = max(1, -(-indexer_count // max(1, batch)))
+
+    t0 = time.time()
+    result = ollama_score_indexers(data, url, model, timeout,
+                                   custom_prompt=prompt,
+                                   context_window=context_window,
+                                   max_indexers_per_call=batch)
+    elapsed = time.time() - t0
+
+    got = set()
+    for k in (result or {}):
+        try:
+            got.add(int(k))
+        except (TypeError, ValueError):
+            pass
+    scored_ok = sum(1 for i in wanted if _score_of(result or {}, i) is not None)
+    per_call = elapsed / calls
+
+    out = {
+        "batch": batch,
+        "scored_ok": scored_ok,
+        "missing": len(wanted - got),
+        "invented": len(got - wanted),
+        "elapsed_s": round(elapsed, 1),
+        "per_call_s": round(per_call, 1),
+        "calls": calls,
+    }
+    out["complete"] = (scored_ok == indexer_count and not out["invented"])
+    out["within_timeout"] = (
+        not timeout or per_call <= timeout * NEAR_TIMEOUT_WARN_FRACTION)
+    out["passed"] = out["complete"] and out["within_timeout"]
+    return out
+
+
+def _calibrate_batch(url, model, timeout, prompt, indexer_count,
+                     context_window, ceiling, progress_cb=None) -> dict:
+    """
+    Find the largest batch size this (host, model) pair handles reliably.
+
+    Descends BATCH_LADDER and returns the first size that passes
+    BATCH_PASSES_REQUIRED times in a row. Never raises; on total failure it
+    reports the smallest rung tried and lets the caller decide, because
+    "we could not measure" and "this model is broken" are different answers
+    and only validate_model's other tests can tell them apart.
+    """
+    rungs = [b for b in BATCH_LADDER if b <= min(ceiling, indexer_count)]
+    if not rungs:
+        rungs = [max(1, min(ceiling, indexer_count))]
+
+    out = {"name": "Batch calibration", "passed": False,
+           "ladder": rungs, "attempts": [], "max_safe_batch": None,
+           "expected": (f"largest batch scoring {indexer_count}/{indexer_count} "
+                        f"cleanly {BATCH_PASSES_REQUIRED}x in a row")}
+
+    for step, batch in enumerate(rungs):
+        if progress_cb:
+            progress_cb(f"Calibrating batch size ({batch})", step, len(rungs))
+        runs = []
+        for _ in range(BATCH_PASSES_REQUIRED):
+            attempt = _probe_batch(url, model, timeout, prompt,
+                                   indexer_count, context_window, batch)
+            out["attempts"].append(attempt)
+            runs.append(attempt)
+            if not attempt["passed"]:
+                break            # a failed rung needs no second opinion
+        if all(r["passed"] for r in runs) and len(runs) == BATCH_PASSES_REQUIRED:
+            out["max_safe_batch"] = batch
+            out["passed"] = True
+            worst = max(r["per_call_s"] for r in runs)
+            out["detail"] = (
+                f"{batch} per call: {indexer_count}/{indexer_count} scored "
+                f"{BATCH_PASSES_REQUIRED}x, worst call ~{worst:.0f}s of a "
+                f"{timeout}s timeout.")
+            return out
+
+    last = out["attempts"][-1] if out["attempts"] else {}
+    why = []
+    if last.get("missing"):
+        why.append(f"{last['missing']} indexer(s) dropped")
+    if last.get("invented"):
+        why.append(f"{last['invented']} id(s) invented")
+    if last and not last.get("within_timeout", True):
+        why.append(f"~{last.get('per_call_s')}s per call against a "
+                   f"{timeout}s timeout")
+    out["detail"] = (
+        f"No batch size down to {rungs[-1]} was reliable"
+        + (" (" + "; ".join(why) + ")" if why else "")
+        + ". Try a smaller model, or raise prowlarr.ollama.timeout.")
+    return out
+
+
 def validate_model(ollama_url: str, model: str, timeout: int = 300,
                    indexer_count: int = 20, system_prompt: str = "",
                    progress_cb=None,
-                   context_window: int = DEFAULT_CONTEXT_WINDOW) -> dict:
+                   context_window: int = DEFAULT_CONTEXT_WINDOW,
+                   calibration: str = "quick",
+                   max_indexers_per_call: int = MAX_INDEXERS_PER_CALL) -> dict:
     """
     Run the full validation suite. Never raises -- a validation run must not
     be able to take down the caller, and every failure mode is a result the
@@ -360,10 +492,33 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
                                  system_prompt, indexer_count,
                                  context_window=context_window)
 
+        out["tests"] = [disc, schema, ctx]
+
+        # In-depth calibration only runs once the model has shown it can
+        # score at all. Searching for the best batch size of a model that
+        # cannot produce a usable score is minutes spent proving nothing --
+        # every rung would fail for the same reason, and the report would
+        # blame batch size for a discrimination problem.
+        if calibration == "deep" and disc["passed"] and schema["passed"]:
+            cal = _calibrate_batch(ollama_url, model, timeout, system_prompt,
+                                   indexer_count, context_window,
+                                   ceiling=max_indexers_per_call,
+                                   progress_cb=progress_cb)
+            out["tests"].append(cal)
+            out["max_safe_batch"] = cal.get("max_safe_batch")
+        elif ctx["passed"]:
+            # Quick mode proved the CONFIGURED size works, which is a weaker
+            # claim than "this is the largest safe size" and is recorded as
+            # such. calibrated stays False so the UI can offer the real thing.
+            out["max_safe_batch"] = min(max_indexers_per_call, indexer_count)
+
+        out["calibration"] = calibration
+        out["calibrated"] = bool(calibration == "deep"
+                                 and out.get("max_safe_batch"))
+
         if progress_cb:
             progress_cb("Done", 3, 3)
 
-        out["tests"] = [disc, schema, ctx]
         out["passed"] = all(t["passed"] for t in out["tests"])
         out["avg_response_ms"] = round((ms1 + ms2) / 2)
     except Exception as exc:

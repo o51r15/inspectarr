@@ -512,13 +512,16 @@ class StateManager:
                     "INSERT OR REPLACE INTO validated_models "
                     "(model, validated_at, status, passed, indexer_count, "
                     " avg_response_ms, model_digest, results_json, "
-                    " ollama_url, tok_per_s, gpu_offload_pct) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " ollama_url, tok_per_s, gpu_offload_pct, "
+                    " max_safe_batch, calibrated) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (model, _now_iso(), status, 1 if result.get("passed") else 0,
                      result.get("indexer_count"), result.get("avg_response_ms"),
                      digest, _json.dumps(result),
                      normalize_ollama_url(url), result.get("tok_per_s"),
-                     result.get("gpu_offload_pct")),
+                     result.get("gpu_offload_pct"),
+                     result.get("max_safe_batch"),
+                     1 if result.get("calibrated") else 0),
                 )
                 conn.commit()
             return True
@@ -806,7 +809,9 @@ class StateManager:
                     results_json    TEXT,
                     ollama_url      TEXT,
                     tok_per_s       REAL,
-                    gpu_offload_pct INTEGER
+                    gpu_offload_pct INTEGER,
+                    max_safe_batch  INTEGER,
+                    calibrated      INTEGER NOT NULL DEFAULT 0
                 )
             """)
             # replacements -- did the thing we rejected get replaced, and
@@ -989,7 +994,8 @@ class StateManager:
         # and deliberately NOT as "wrong host". Treating unknown as mismatched
         # would invalidate every existing record on upgrade.
         for _col in ("ollama_url TEXT", "tok_per_s REAL",
-                     "gpu_offload_pct INTEGER"):
+                     "gpu_offload_pct INTEGER", "max_safe_batch INTEGER",
+                     "calibrated INTEGER NOT NULL DEFAULT 0"):
             try:
                 with self._lock, self._conn() as conn:
                     conn.execute(
