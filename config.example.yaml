@@ -289,6 +289,30 @@ prowlarr:
     system_prompt: ""            # Custom system prompt (empty = built-in default)
     update_check_hours: 24       # Check for model updates every N hours (0 = disable)
 
+    # How large a scoring prompt to budget for, and how many indexers to put
+    # in one call. Settings -> AI can measure both for you ("Calibrate").
+    #
+    # context_window is also sent to Ollama as num_ctx. Without it Ollama
+    # applies its own default (4096 for most models) and silently truncates
+    # past it -- the model then loses the scoring instructions and answers
+    # with confident invented numbers rather than an error.
+    context_window: 4096
+
+    # max_indexers_per_call is a property of the MODEL AND THE HOST, not of
+    # Inspectarr, which is why it is measured rather than guessed. Two
+    # measured examples from the same CPU-only host, 39 indexers each:
+    #
+    #   gemma:latest     at 25 per call -> 24 of 39 scored, 15 dropped
+    #   gemma:latest     at 10 per call -> 39 of 39
+    #   phi4-mini:latest at 25 per call -> 37 of 39, and SLOWER than 10
+    #
+    # Nothing errors when indexers are dropped. They quietly keep their
+    # deterministic score, and if auto_manage is on they can be disabled on
+    # it. Lower this before raising `timeout`: a smaller batch cuts per-call
+    # time roughly proportionally and is often faster overall, because a
+    # model that loses track of a long list burns tokens flailing at it.
+    max_indexers_per_call: 25
+
     # Also ask the Ollama REGISTRY whether a newer build of this model has
     # been published upstream, and show a badge if so.
     #

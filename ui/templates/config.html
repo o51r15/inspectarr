@@ -626,7 +626,8 @@
               </div>
             </div>
             <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
-              <button type="button" class="btn btn-ghost btn-sm" id="ollama-validate-btn" onclick="validateModel()">Validate</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="ollama-validate-btn" onclick="validateModel('quick')">Validate</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="ollama-calibrate-btn" onclick="validateModel('deep')" title="Measure the largest batch size this model handles reliably on this host">Calibrate</button>
               <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn" onclick="applyOllamaModel()" disabled>Apply</button>
               <span id="ollama-model-status" class="hint"></span>
             </div>
@@ -708,6 +709,29 @@
               <input type="number" name="ollama_update_check_hours" id="ollama_update_check_hours" min="0" max="720"
                      value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('update_check_hours',24) }}">
               <span class="hint">How often to check whether your model has a newer version published. 0 disables the check.</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ollama_context_window">Context window (tokens)</label>
+              <input type="number" name="ollama_context_window" id="ollama_context_window"
+                     min="512" max="131072" step="512"
+                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('context_window',4096) }}">
+              <span class="hint">Sent to Ollama as <code>num_ctx</code>. Without it Ollama applies its own default (usually 4096) and silently truncates anything past it. Set it higher only if the model genuinely supports it.</span>
+            </div>
+            <div class="form-group">
+              <label for="ollama_max_indexers_per_call">
+                Indexers per scoring call
+                <output id="batch-value" for="ollama_max_indexers_per_call">25</output>
+              </label>
+              <input type="range" name="ollama_max_indexers_per_call"
+                     id="ollama_max_indexers_per_call" min="1" max="50" step="1"
+                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('max_indexers_per_call',25) }}"
+                     oninput="onBatchInput()" onchange="onBatchCommit()">
+              <span class="hint" id="batch-hint">
+                How many indexers go in one request. Fewer per call is slower overall but far more reliable: a model that loses track of a long list drops indexers silently, and the scores it does not return quietly fall back to the deterministic ones.
+              </span>
+              <span class="hint" id="batch-calibration">Checking calibration…</span>
             </div>
           </div>
         </div>
@@ -1025,6 +1049,8 @@
   const AI_FIELDS = ['ollama_url', 'ollama_timeout', 'ollama_cache_ttl_hours',
                      'ollama_update_check_hours', 'ollama-model-select',
                      'ollama-apply-btn', 'ollama-validate-btn',
+                     'ollama-calibrate-btn', 'ollama_context_window',
+                     'ollama_max_indexers_per_call',
                      'ollama-system-prompt'];
 
   function aiEnabled() {
@@ -1553,7 +1579,9 @@
   showPane = function(pane) {
     origShowPane(pane);
     if (pane === 'backups') loadBackups();
-    if (pane === 'ai') { loadOllamaModels(); loadSystemPrompt(); }
+    if (pane === 'ai') {
+      loadOllamaModels(); loadSystemPrompt(); loadBatchCalibration();
+    }
   };
 
   // ---- Ollama model selection ----
@@ -1770,16 +1798,108 @@
     pollValidation();
   }
 
-  function validateModel() {
+  // ---- batch size slider -------------------------------------------------
+  //
+  // The ceiling is measured, so the slider can say which positions are known
+  // good and which are guesses. A modal on every nudge would be worse than
+  // useless: people learn to dismiss it, and then the one that mattered goes
+  // unread too. So movement inside the measured range is silent, and only
+  // crossing ABOVE the measured ceiling asks for confirmation -- that is the
+  // only move with a known failure behind it.
+  let BATCH_CAL = null;
+
+  function onBatchInput() {
+    const el = document.getElementById('ollama_max_indexers_per_call');
+    const out = document.getElementById('batch-value');
+    if (out && el) out.textContent = el.value;
+    paintBatchZone();
+  }
+
+  function paintBatchZone() {
+    const el = document.getElementById('ollama_max_indexers_per_call');
+    const note = document.getElementById('batch-calibration');
+    if (!el || !note) return;
+    const v = parseInt(el.value, 10);
+    const cal = BATCH_CAL || {};
+
+    if (!cal.calibrated || !cal.max_safe_batch) {
+      note.textContent = cal.host_state === 'mismatch'
+        ? 'Not calibrated on this host \u2014 the stored result came from '
+          + (cal.validated_on || 'another server') + '. Run Calibrate.'
+        : 'Not calibrated. Run Calibrate to measure the largest batch this '
+          + 'model handles reliably here.';
+      note.style.color = 'var(--warn, #d18616)';
+      return;
+    }
+    const safe = cal.max_safe_batch;
+    let hw = '';
+    if (cal.gpu_offload_pct !== null && cal.gpu_offload_pct !== undefined) {
+      hw = ' (' + (cal.gpu_offload_pct === 0 ? 'CPU only'
+            : cal.gpu_offload_pct + '% on GPU')
+           + (cal.tok_per_s ? ', ' + cal.tok_per_s + ' tok/s' : '') + ')';
+    }
+    if (v <= safe) {
+      note.textContent = 'Measured safe up to ' + safe + ' on this host' + hw + '.';
+      note.style.color = 'var(--ok, #3ba55d)';
+    } else {
+      note.textContent = 'Above the measured ceiling of ' + safe
+        + '. Indexers may be dropped silently' + hw + '.';
+      note.style.color = 'var(--danger, #d64545)';
+    }
+  }
+
+  function onBatchCommit() {
+    const el = document.getElementById('ollama_max_indexers_per_call');
+    const cal = BATCH_CAL || {};
+    if (!el || !cal.calibrated || !cal.max_safe_batch) return;
+    const v = parseInt(el.value, 10);
+    if (v <= cal.max_safe_batch) return;
+    const ok = confirm(
+      'Measured ceiling for ' + (cal.model || 'this model') + ' on this host is '
+      + cal.max_safe_batch + ' indexers per call.\n\n'
+      + 'Above that, this model returned well-formed JSON that silently left '
+      + 'indexers out. They do not error -- they quietly keep their '
+      + 'deterministic score, and if auto-manage is on they can be disabled '
+      + 'on it.\n\nSet it to ' + v + ' anyway?');
+    if (!ok) {
+      el.value = cal.max_safe_batch;
+      onBatchInput();
+    }
+  }
+
+  function loadBatchCalibration() {
+    fetch('/config/ai/calibration')
+      .then(r => r.json())
+      .then(function (d) { if (d.ok) { BATCH_CAL = d; } onBatchInput(); })
+      .catch(function () { onBatchInput(); });
+  }
+
+  function validateModel(mode) {
     const sel = document.getElementById('ollama-model-select');
     const model = sel ? sel.value : '';
     if (!model) return;
+    const deep = (mode === 'deep');
+    if (deep) {
+      if (!confirm(
+          'In-depth calibration scores your indexers repeatedly at several '
+          + 'batch sizes, and each size has to come back clean twice before '
+          + 'it is accepted \u2014 one clean run is not evidence, because '
+          + 'dropped indexers happen intermittently.\n\n'
+          + 'On a slow or CPU-only host with a lot of indexers this can take '
+          + '20-40 minutes. It runs in the background and you can keep '
+          + 'working.\n\nStart calibration?')) {
+        return;
+      }
+    }
+    // A finished calibration changes the slider's ceiling, so re-read it
+    // once the run reports done rather than leaving the old zone painted.
+    window.__afterValidation = loadBatchCalibration;
     // Immediate feedback: the request itself can take a moment, and silence
     // reads as a dead button.
     attachToValidation(model);
     fetch('/config/ai/validate', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: model}),
+      body: JSON.stringify({model: model, calibration: deep ? 'deep' : 'quick'}),
     })
       .then(r => r.json().then(d => ({code: r.status, d: d})))
       .then(function (res) {
@@ -2043,7 +2163,9 @@
 
   // Re-fire deferred hooks for the initial pane (wrapper + functions defined above)
   if (_initialPane === 'backups') loadBackups();
-  if (_initialPane === 'ai') { loadOllamaModels(); loadSystemPrompt(); }
+  if (_initialPane === 'ai') {
+    loadOllamaModels(); loadSystemPrompt(); loadBatchCalibration();
+  }
   // Always check for Ollama updates on Settings page load
   checkOllamaUpdate();
   resumePullIfRunning();
