@@ -1,3 +1,26 @@
+/* Model validation states.
+ *
+ * Four states the user asked for, mapped onto the palette that already
+ * exists rather than new hexes: default text = untested, error = failed,
+ * warning = validated but uncalibrated, success = validated + calibrated.
+ *
+ * --success/--warning/--error are not redefined for the light theme, and
+ * the amber in particular is too light against a white card, so the two
+ * that need it get a darker value there. Same reason --text-dim was
+ * darkened when the contrast audit ran.
+ */
+.ms-none { color: var(--text); }
+.ms-bad  { color: var(--error); }
+.ms-warn { color: var(--warning); }
+.ms-good { color: var(--success); }
+
+select.model-opt { color: var(--text); }
+option.model-opt { background: var(--card); }
+
+[data-theme="light"] .ms-bad  { color: #b91c1c; }
+[data-theme="light"] .ms-warn { color: #a16207; }
+[data-theme="light"] .ms-good { color: #15803d; }
+
 :root {
   --bg:           #0c0d0f;
   --surface:      #101215;

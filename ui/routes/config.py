@@ -994,6 +994,14 @@ def ai_validations():
     state = current_app.config.get("STATE")
     if not state:
         return jsonify({"ok": True, "validations": []})
+    # The table has to distinguish "validated" from "validated ON THIS HOST",
+    # so the current URL is read once here rather than per row.
+    try:
+        _raw = _load_raw(current_app.config["CONFIG_PATH"])
+        current_url = ((_raw.get("prowlarr") or {}).get("ollama") or {}).get("url", "")
+    except Exception:
+        current_url = ""
+
     out = []
     for v in state.get_validations():
         import json as _json
@@ -1007,6 +1015,15 @@ def ai_validations():
             "validated_at": v.get("validated_at"),
             "indexer_count": v.get("indexer_count"),
             "avg_response_ms": v.get("avg_response_ms"),
+            "calibrated": bool(v.get("calibrated")),
+            "max_safe_batch": v.get("max_safe_batch"),
+            "ollama_url": v.get("ollama_url"),
+            "gpu_offload_pct": v.get("gpu_offload_pct"),
+            "tok_per_s": v.get("tok_per_s"),
+            # match / unknown / mismatch. A green row for a verdict earned on
+            # another machine would be the exact lie this column exists to
+            # stop, so the front end needs this to colour honestly.
+            "host_state": validation_host_state(v, current_url),
             "tests": [{"name": t.get("name"), "passed": t.get("passed"),
                        "detail": t.get("detail", "")}
                       for t in (res.get("tests") or [])],

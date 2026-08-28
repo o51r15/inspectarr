@@ -619,7 +619,7 @@
             <div class="form-group">
               <label>Model</label>
               <div style="display:flex;gap:8px;align-items:center">
-                <select id="ollama-model-select" style="flex:1" onchange="renderValidationDetail()" disabled>
+                <select id="ollama-model-select" class="model-opt" style="flex:1" onchange="renderValidationDetail(); paintSelectedModel()" disabled>
                   <option value="">Loading…</option>
                 </select>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="loadOllamaModels()" title="Refresh model list">↻</button>
@@ -686,7 +686,8 @@
               <thead>
                 <tr>
                   <th>Model</th><th>Status</th><th>Discrimination</th>
-                  <th>Schema</th><th>Context</th><th>Avg response</th>
+                  <th>Schema</th><th>Context</th><th>Calibrated</th>
+                  <th>Host</th><th>Avg response</th>
                   <th>Validated</th><th><span class="sr-only">Actions</span></th>
                 </tr>
               </thead>
@@ -1674,22 +1675,76 @@
   let _validations = {};      // model -> record
   let _validationPoll = null;
 
+  // One place decides what a model's state IS, so the dropdown, the detail
+  // box and the table can never disagree about it.
+  //
+  // Colour is the fast channel, but it is never the ONLY channel: roughly one
+  // man in twelve cannot separate the red from the green, and a native
+  // <select> on macOS and on most mobile pickers ignores option colour
+  // entirely. So every state also carries a glyph and a word, and the colour
+  // is the enhancement rather than the message.
+  //
+  // Two states beyond the obvious four, both of which would otherwise get a
+  // colour that flatters them:
+  //   forced    -- applied deliberately WITHOUT passing. Not a failure, but
+  //                not trustworthy either, so it sits with the red group.
+  //   mismatch  -- passed, but against a different Ollama host. Showing that
+  //                green is precisely the silent carry-over that moving from
+  //                .125 to .97 caused.
+  const MODEL_STATES = {
+    untested:   {cls: 'ms-none', text: '\u2014 untested'},
+    failed:     {cls: 'ms-bad',  text: '\u2717 failed'},
+    forced:     {cls: 'ms-bad',  text: '\u26a0 forced'},
+    mismatch:   {cls: 'ms-bad',  text: '\u26a0 other host'},
+    validated:  {cls: 'ms-warn', text: '\u2713 validated'},
+    calibrated: {cls: 'ms-good', text: '\u2713 calibrated'},
+  };
+
+  function modelStateKey(rec) {
+    if (!rec) return 'untested';
+    if (rec.status === 'failed') return 'failed';
+    if (rec.status === 'forced') return 'forced';
+    if (rec.status !== 'supported') return 'untested';
+    if (rec.host_state === 'mismatch') return 'mismatch';
+    return rec.calibrated ? 'calibrated' : 'validated';
+  }
+
+  function modelState(rec) {
+    return MODEL_STATES[modelStateKey(rec)] || MODEL_STATES.untested;
+  }
+
+  // Kept for the detail box, which describes the RECORD rather than the
+  // model's usable state.
   const VAL_MARK = {supported: '✓ validated', failed: '✗ failed',
                     forced: '⚠ forced'};
 
-  // A native <select> cannot carry per-option colour or markup reliably
-  // across browsers, so status rides in the option text. The rich view lives
-  // in the detail box and table below, where real markup works.
+  // Colour AND text on every option.
+  //
+  // Chrome, Edge and Firefox honour a colour set on an <option>; the macOS
+  // native popup and most mobile pickers do not. The text is therefore the
+  // guaranteed channel and the colour is the fast one -- dropping the text
+  // would make this pane unreadable on the platforms that ignore the colour.
   function decorateModelOptions() {
     const sel = document.getElementById('ollama-model-select');
     if (!sel) return;
     Array.from(sel.options).forEach(function (opt) {
       const base = opt.dataset.baseLabel || opt.textContent.trim();
       opt.dataset.baseLabel = base;
-      const rec = _validations[opt.value];
-      const mark = rec ? (VAL_MARK[rec.status] || '') : '— untested';
-      opt.textContent = mark ? base + '  ' + mark : base;
+      if (!opt.value) return;              // the placeholder row
+      const st = modelState(_validations[opt.value]);
+      opt.textContent = base + '  ' + st.text;
+      opt.className = 'model-opt ' + st.cls;
     });
+    paintSelectedModel();
+  }
+
+  // The closed select shows only the selected row, and a <select> does not
+  // inherit the chosen option's colour, so it is applied to the control too.
+  function paintSelectedModel() {
+    const sel = document.getElementById('ollama-model-select');
+    if (!sel) return;
+    sel.classList.remove('ms-none', 'ms-bad', 'ms-warn', 'ms-good');
+    sel.classList.add(modelState(_validations[sel.value]).cls);
   }
 
   function renderValidationDetail() {
@@ -1756,10 +1811,39 @@
         else if (/^Schema/.test(t.name)) byName.schema = t;
         else if (/^Context/.test(t.name)) byName.ctx = t;
       });
+      const st = modelState(v);
+
+      // Calibrated shows the MEASURED ceiling, because "yes" on its own is
+      // not the useful part -- the number is what the slider is set from.
+      const calCell = v.calibrated
+        ? '<td class="mono ms-good" title="Largest batch that scored cleanly '
+          + 'twice in a row">\u2713 ' + (v.max_safe_batch || '?') + '/call</td>'
+        : '<td class="mono ms-warn" title="Validated, but the batch ceiling '
+          + 'was never measured. Run Calibrate.">\u2014</td>';
+
+      // Which machine earned this verdict. Blank host means the record
+      // predates host tracking, which is not the same as a wrong host.
+      let hostCell;
+      if (v.host_state === 'mismatch') {
+        hostCell = '<td class="mono ms-bad" title="' + escapeHtml(v.ollama_url || '')
+          + '">other host</td>';
+      } else if (v.host_state === 'match') {
+        hostCell = '<td class="mono ms-good" title="' + escapeHtml(v.ollama_url || '')
+          + '">this host'
+          + (v.gpu_offload_pct === null || v.gpu_offload_pct === undefined ? ''
+             : ' \u00b7 ' + (v.gpu_offload_pct === 0 ? 'CPU'
+                              : v.gpu_offload_pct + '% GPU'))
+          + '</td>';
+      } else {
+        hostCell = '<td class="mono ms-none" title="Recorded before the host '
+          + 'was tracked">unknown</td>';
+      }
+
       return '<tr>' +
         '<td class="mono">' + escapeHtml(v.model) + '</td>' +
-        '<td>' + (VAL_MARK[v.status] || escapeHtml(v.status)) + '</td>' +
+        '<td class="' + st.cls + '">' + st.text + '</td>' +
         cell(byName.disc) + cell(byName.schema) + cell(byName.ctx) +
+        calCell + hostCell +
         '<td class="mono">' + (v.avg_response_ms
             ? Math.round(v.avg_response_ms / 1000) + 's' : '—') + '</td>' +
         '<td class="mono">' + escapeHtml((v.validated_at || '')
@@ -1828,7 +1912,7 @@
           + (cal.validated_on || 'another server') + '. Run Calibrate.'
         : 'Not calibrated. Run Calibrate to measure the largest batch this '
           + 'model handles reliably here.';
-      note.style.color = 'var(--warn, #d18616)';
+      note.style.color = 'var(--warning)';
       return;
     }
     const safe = cal.max_safe_batch;
@@ -1840,11 +1924,11 @@
     }
     if (v <= safe) {
       note.textContent = 'Measured safe up to ' + safe + ' on this host' + hw + '.';
-      note.style.color = 'var(--ok, #3ba55d)';
+      note.style.color = 'var(--success)';
     } else {
       note.textContent = 'Above the measured ceiling of ' + safe
         + '. Indexers may be dropped silently' + hw + '.';
-      note.style.color = 'var(--danger, #d64545)';
+      note.style.color = 'var(--error)';
     }
   }
 
