@@ -16,6 +16,7 @@ Design mirrors trackarr's scoring.py / quality_assessment.py pattern.
 import json
 import logging
 import re
+import time
 
 import requests
 
@@ -143,6 +144,18 @@ PROMPT_BUDGET_FRACTION = 0.66
 MAX_INDEXERS_PER_CALL = 25
 
 OVERFLOW_WARN_FRACTION = 0.9
+
+# Warn when a scoring call finishes this close to the timeout.
+#
+# A call that takes 96% of the budget and one that takes 101% are the same
+# call on a slightly busier host, but only the second leaves a trace -- and
+# by then a whole batch has already been lost. Measured on a CPU-only host
+# at the shipped batch size of 25: 269s, 290s, 295s, then a timeout. Three
+# successes and a failure, indistinguishable in the log until one broke.
+#
+# 0.8 rather than something tighter because the point is to fire BEFORE the
+# failure, with enough margin to be actionable rather than a post-mortem.
+NEAR_TIMEOUT_WARN_FRACTION = 0.8
 
 DEFAULT_CONTEXT_WINDOW = 4096
 
@@ -335,6 +348,7 @@ def _score_one_batch(
             "model may drop the instructions. Raise prowlarr.ollama."
             "context_window if this model supports more.", est, context_window)
 
+    call_started = time.monotonic()
     try:
         resp = requests.post(
             f"{ollama_url.rstrip('/')}/api/generate",
@@ -360,11 +374,29 @@ def _score_one_batch(
             return {}
         data = resp.json()
     except requests.Timeout:
-        log.warning("Ollama scoring timed out after %ds", timeout)
+        # Name the two settings that fix it. A bare "timed out" sends people
+        # to raise the timeout, which is the slower of the two answers: a
+        # smaller batch cuts per-call time roughly proportionally, and on a
+        # slow host it is also often FASTER overall, because a model that
+        # loses track of a long list burns tokens flailing at it.
+        log.warning(
+            "Ollama scoring timed out after %ds with %d indexers in the call. "
+            "Lower prowlarr.ollama.max_indexers_per_call (or raise "
+            ".timeout) -- this batch scored nothing.",
+            timeout, len(indexer_data))
         return {}
     except Exception as exc:
         log.warning("Ollama scoring request failed: %s", exc)
         return {}
+
+    elapsed = time.monotonic() - call_started
+    if timeout and elapsed > timeout * NEAR_TIMEOUT_WARN_FRACTION:
+        # This call succeeded. It is the next one that will not.
+        log.warning(
+            "Scoring call took %.0fs of a %ds timeout (%.0f%%) for %d "
+            "indexers. This is close enough to fail on a busier run -- "
+            "lower prowlarr.ollama.max_indexers_per_call or raise .timeout.",
+            elapsed, timeout, 100.0 * elapsed / timeout, len(indexer_data))
 
     raw_response = data.get("response", "")
     if not raw_response:
