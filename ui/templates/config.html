@@ -626,8 +626,8 @@
               </div>
             </div>
             <div class="form-group" style="justify-content:flex-end;flex-direction:row;align-items:flex-end;gap:8px">
-              <button type="button" class="btn btn-ghost btn-sm" id="ollama-validate-btn" onclick="validateModel('quick')">Validate</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="ollama-calibrate-btn" onclick="validateModel('deep')" title="Measure the largest batch size this model handles reliably on this host">Calibrate</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="ollama-validate-btn" onclick="validateModel('quick')" title="Can this model score correctly? Runs three tests, about 1-3 minutes. Does not measure the batch size.">Quick Check</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="ollama-calibrate-btn" onclick="validateModel('deep')" title="Everything Quick Check does, plus measures the largest batch size this model handles reliably on this host. 10-40 minutes.">Calibrate</button>
               <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn" onclick="applyOllamaModel()" disabled>Apply</button>
               <span id="ollama-model-status" class="hint"></span>
             </div>
@@ -2063,11 +2063,27 @@
     if (!model) return;
     _applyModel(model, false).then(function (res) {
       if (res.code === 409 && res.d.needs_validation) {
-        showApplyAnywayDialog(model, res.d.status);
+        showApplyAnywayDialog(model, res.d);
         return;
       }
-      if (status) status.textContent = (res.d.ok ? '✓ ' : '✗ ') + res.d.message;
-      if (res.d.ok) loadValidations();
+      if (status) {
+        status.textContent = (res.d.ok ? '\u2713 ' : '\u2717 ') + res.d.message;
+        status.className = 'hint ' + (res.d.ok ? 'ms-good' : 'ms-bad');
+      }
+      if (res.d.ok) {
+        // A validated-but-uncalibrated model applies cleanly -- it scores
+        // correctly, only its batch ceiling is unmeasured. That does not
+        // warrant a dialog; it warrants a sentence. Blocking it would put a
+        // model that works behind the same barrier as one that failed, and
+        // a dialog people learn to dismiss is worse than no dialog.
+        if (modelStateKey(_validations[model]) === 'validated' && status) {
+          status.className = 'hint ms-warn';
+          status.textContent =
+            '\u2713 applied. Batch size is not calibrated on this host, so '
+            + 'scoring uses the default. Run Calibrate to measure it.';
+        }
+        loadValidations();
+      }
     });
   }
 
@@ -2078,12 +2094,59 @@
     }).then(r => r.json().then(d => ({code: r.status, d: d})));
   }
 
-  function showApplyAnywayDialog(model, status) {
+  // Four situations reach this dialog and they are not the same problem, so
+  // they do not get the same sentence. The old copy said "has not been
+  // validated" for all of them, which was simply untrue for a model that had
+  // passed on another host, and unhelpful for one that had failed outright.
+  const APPLY_COPY = {
+    untested: {
+      title: 'Apply an untested model?',
+      known: 'Nothing is known about this model on this server yet.',
+      advice: 'Run <strong>Quick Check</strong> first (about 1-3 minutes) to '
+              + 'confirm it can score at all, or <strong>Calibrate</strong> to '
+              + 'do that and measure its batch size.',
+    },
+    failed: {
+      title: 'Apply a model that failed?',
+      known: 'This model was tested and <strong>failed</strong>. It did not '
+             + 'score correctly on this server.',
+      advice: 'Choosing a different model is usually the right move. The '
+              + 'failure detail is in the table below.',
+    },
+    forced: {
+      title: 'Apply an unvalidated model again?',
+      known: 'This model was previously applied <strong>without passing '
+             + 'validation</strong>.',
+      advice: 'Run <strong>Quick Check</strong> to find out whether it '
+              + 'actually works before relying on it.',
+    },
+    mismatch: {
+      title: 'Apply a model validated on another server?',
+      known: 'This model passed \u2014 but on a <strong>different Ollama '
+             + 'host</strong>, so that result does not describe this one.',
+      advice: 'Batch size and reliability differ between machines: the same '
+              + 'model can score cleanly on one host and drop indexers on '
+              + 'another. Run <strong>Calibrate</strong> here.',
+    },
+  };
+
+  function showApplyAnywayDialog(model, payload) {
     const existing = document.getElementById('apply-anyway-backdrop');
     if (existing) existing.remove();
-    const known = (status === 'failed')
-      ? 'This model has been validated and <strong>failed</strong>.'
-      : 'This model has not been validated yet.';
+    payload = payload || {};
+    // The server sends status + host_state; derive the same key the badges
+    // use so the dialog can never describe a different state than the row.
+    let key = 'untested';
+    if (payload.status === 'failed') key = 'failed';
+    else if (payload.status === 'forced') key = 'forced';
+    else if (payload.host_state === 'mismatch') key = 'mismatch';
+    const copy = APPLY_COPY[key] || APPLY_COPY.untested;
+    const known = copy.known
+      + (key === 'mismatch' && payload.validated_on
+         ? ' <br><span class="hint">Validated on <code>'
+           + escapeHtml(payload.validated_on) + '</code>, now using <code>'
+           + escapeHtml(payload.current_host || '?') + '</code>.</span>'
+         : '');
     const wrap = document.createElement('div');
     wrap.id = 'apply-anyway-backdrop';
     wrap.setAttribute('role', 'dialog');
@@ -2096,15 +2159,15 @@
       '<div style="background:var(--card);border:1px solid var(--border);' +
       'border-radius:4px;max-width:460px;padding:18px">' +
         '<div id="apply-anyway-title" class="form-section-title" ' +
-             'style="margin-bottom:10px">Apply an unvalidated model?</div>' +
+             'style="margin-bottom:10px">' + copy.title + '</div>' +
         '<p class="hint" style="margin-bottom:8px">' + known + '</p>' +
         '<p class="hint" style="margin-bottom:8px"><code>' +
-          escapeHtml(model) + '</code> may score indexers incorrectly — ' +
-          'a model that silently mishandles the prompt returns plausible ' +
-          'numbers rather than an error.</p>' +
-        '<p class="hint" style="margin-bottom:14px">Run <strong>Validate' +
-          '</strong> first to check it, or apply anyway and it will be ' +
-          'flagged as forced.</p>' +
+          escapeHtml(model) + '</code> may score indexers incorrectly. The '
+          + 'failure to worry about is silent: a model that mishandles the '
+          + 'prompt returns plausible numbers, or quietly leaves indexers '
+          + 'out, rather than raising an error.</p>' +
+        '<p class="hint" style="margin-bottom:14px">' + copy.advice +
+          ' Applying anyway is recorded as <em>forced</em>.</p>' +
         '<div style="display:flex;gap:8px;justify-content:flex-end">' +
           '<button type="button" class="btn btn-ghost btn-sm" ' +
                   'id="apply-anyway-cancel">Cancel</button>' +
