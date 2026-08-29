@@ -2,6 +2,8 @@ import logging
 import re
 
 import apprise
+
+from .llm_client import narrate
 import requests
 
 log = logging.getLogger("inspectarr")
@@ -28,6 +30,8 @@ class Notifier:
         self._ollama_url = _ocfg.url if _ocfg.is_active() else ""
         self._ollama_model = _ocfg.model if _ocfg.is_active() else ""
         self._ollama_timeout = config.prowlarr.ollama.timeout
+        self._ollama_context_window = getattr(
+            config.prowlarr.ollama, "context_window", 4096)
         self._buffer: list[dict] = []
         # Build the Apprise instance once
         self._apprise = apprise.Apprise()
@@ -243,20 +247,9 @@ class Notifier:
             "You are a concise notification writer for a torrent watchdog called inspectarr. "
             "Summarize the following scan events into a brief, readable notification "
             "(max 500 chars). Use plain language, no markdown. Group by event type.\n\n"
-            f"Events:\n{json.dumps(events, indent=2)}"
+            f"Events:\n{json.dumps(events, separators=(',', ':'))}"
         )
-        try:
-            resp = requests.post(
-                f"{self._ollama_url.rstrip('/')}/api/generate",
-                json={"model": self._ollama_model, "prompt": prompt, "stream": False},
-                timeout=self._ollama_timeout,
-            )
-            if resp.status_code != 200:
-                log.warning("Digest Ollama returned HTTP %d", resp.status_code)
-                return None
-            text = resp.json().get("response", "").strip()
-            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-            return text if text else None
-        except Exception as exc:
-            log.warning("Digest Ollama narration failed: %s", exc)
-            return None
+        return narrate(self._ollama_url, self._ollama_model, prompt,
+                       self._ollama_timeout,
+                       context_window=self._ollama_context_window,
+                       what="Digest narration")

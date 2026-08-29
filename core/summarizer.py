@@ -17,6 +17,8 @@ from datetime import datetime, timezone, timedelta
 import apprise
 import requests
 
+from .llm_client import narrate
+
 log = logging.getLogger("inspectarr")
 
 
@@ -31,6 +33,8 @@ class LogSummarizer:
         self._ollama_url = _ocfg.url if _ocfg.is_active() else ""
         self._ollama_model = _ocfg.model if _ocfg.is_active() else ""
         self._ollama_timeout = config.prowlarr.ollama.timeout
+        self._ollama_context_window = getattr(
+            config.prowlarr.ollama, "context_window", 4096)
         # Build Apprise instance
         self._apprise = apprise.Apprise()
         for url in self.apprise_cfg.urls:
@@ -85,6 +89,10 @@ class LogSummarizer:
                 if narrated:
                     self._send(f"inspectarr: {label} Summary", narrated)
                     return True
+                # Narration was unusable (see _as_prose). Falling through to
+                # the plain summary is the point, not a silent degradation:
+                # the deterministic version is always correct.
+                log.info("Summary narration unusable - sending plain summary")
 
             # Fallback: plain summary
             self._send(f"inspectarr: {label} Summary", self._plain_summary(data))
@@ -142,23 +150,16 @@ class LogSummarizer:
             f"watchdog called inspectarr. Summarize the following activity data into "
             f"a brief, readable notification (max 500 chars). Use plain "
             f"language, no markdown. Highlight anything unusual.\n\n"
-            f"Data:\n{json.dumps(data, indent=2, default=str)}"
+            # Compact, not indent=2. This payload carries up to ten action
+            # entries and five errors; pretty-printing it spends context on
+            # whitespace, and a prompt that overruns the window is how the
+            # instructions get lost in the first place.
+            f"Data:\n{json.dumps(data, separators=(',', ':'), default=str)}"
         )
-        try:
-            resp = requests.post(
-                f"{self._ollama_url.rstrip('/')}/api/generate",
-                json={"model": self._ollama_model, "prompt": prompt, "stream": False},
-                timeout=self._ollama_timeout,
-            )
-            if resp.status_code != 200:
-                log.warning("Summary Ollama returned HTTP %d", resp.status_code)
-                return None
-            text = resp.json().get("response", "").strip()
-            text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-            return text if text else None
-        except Exception as exc:
-            log.warning("Summary Ollama narration failed: %s", exc)
-            return None
+        return narrate(self._ollama_url, self._ollama_model, prompt,
+                       self._ollama_timeout,
+                       context_window=self._ollama_context_window,
+                       what="Summary narration")
 
     def _send(self, title: str, message: str):
         if not self.apprise_cfg.enabled or not self.apprise_cfg.urls:

@@ -157,6 +157,20 @@ OVERFLOW_WARN_FRACTION = 0.9
 # failure, with enough margin to be actionable rather than a post-mortem.
 NEAR_TIMEOUT_WARN_FRACTION = 0.8
 
+# Notification narration is capped rather than trusted to the prompt.
+# "max 500 chars" in a prompt is a request, not a limit, and Pushover and
+# friends truncate mid-word when it is ignored.
+NARRATION_MAX_CHARS = 900
+
+# Keys worth rescuing a sentence from when a model answers with JSON even
+# though prose was asked for.
+#
+# Deliberately generic. The model is a moving target (see PROCESS.md), so
+# matching one model's schema would break on the next swap -- this looks for
+# any commonly-named human-readable field and gives up cleanly otherwise.
+SALVAGE_KEYS = ("summary", "narrative", "notification", "message",
+                "digest", "overview", "text", "description")
+
 DEFAULT_CONTEXT_WINDOW = 4096
 
 
@@ -207,6 +221,113 @@ def _batch_size(rows: list[dict], overhead_tokens: int,
     budget = context_window * PROMPT_BUDGET_FRACTION - overhead_tokens
     by_tokens = len(rows) if (per <= 0 or budget <= 0) else int(budget / per)
     return max(1, min(by_tokens, max_items or len(rows)))
+
+
+def _as_prose(raw: str, max_chars: int = NARRATION_MAX_CHARS) -> str | None:
+    """
+    Turn a model's reply into something a human wants on their phone, or
+    return None so the caller falls back to its deterministic summary.
+
+    This exists because asking for prose does not get you prose. A model
+    fine-tuned on a structured task answers in its own schema no matter what
+    the prompt says -- one security-log model returned a full MITRE ATT&CK
+    object, and the whole blob went out as a Pushover notification, braces
+    and all. Nothing errored: the request succeeded and the text was
+    non-empty, which was the only thing being checked.
+
+    So the check is on the SHAPE OF THE ANSWER, not on the call succeeding:
+
+      prose            -> used
+      JSON with a usable human field -> that field is used
+      JSON without one -> rejected, caller falls back
+      truncated JSON   -> rejected
+
+    Rejecting is deliberately not a failure. The plain summary is always
+    correct and always available; a wall of JSON is strictly worse than it.
+    """
+    if not raw:
+        return None
+    text = THINK_BLOCK.sub("", raw).strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text).strip()
+    if not text:
+        return None
+
+    if text[:1] in ("{", "["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            # Started like JSON and is not valid JSON: almost always a reply
+            # cut off by the context window. Sending half an object is worse
+            # than sending the plain summary.
+            log.warning("Narration looked like truncated JSON; using the "
+                        "plain summary instead")
+            return None
+        salvaged = _salvage_prose(parsed)
+        if salvaged:
+            log.info("Narration came back as JSON; used its '%s' field",
+                     salvaged[0])
+            text = salvaged[1]
+        else:
+            log.warning(
+                "Narration returned JSON with no readable summary field "
+                "(keys: %s); using the plain summary instead",
+                ", ".join(list(parsed)[:6]) if isinstance(parsed, dict)
+                else "list")
+            return None
+
+    text = " ".join(text.split())
+    if len(text) > max_chars:
+        cut = text[:max_chars].rsplit(" ", 1)[0]
+        text = (cut or text[:max_chars]).rstrip(" ,;:.") + "..."
+    return text or None
+
+
+def _salvage_prose(parsed) -> tuple[str, str] | None:
+    """First usable human-readable field, as (key, value). None if there is none."""
+    if isinstance(parsed, dict):
+        for key in SALVAGE_KEYS:
+            val = parsed.get(key)
+            if isinstance(val, str) and val.strip():
+                return (key, val.strip())
+    return None
+
+
+def narrate(ollama_url: str, model: str, prompt: str, timeout: int,
+            context_window: int = DEFAULT_CONTEXT_WINDOW,
+            what: str = "narration") -> str | None:
+    """
+    Ask a model for a human-readable notification. None on any failure.
+
+    One implementation for both the scan digest and the periodic summary.
+    They had a copy each, identical apart from the log prefix, and both
+    trusted whatever came back -- so the same bug shipped twice and would
+    have been fixed once.
+
+    num_ctx is sent for the same reason the scorer sends it: without it
+    Ollama applies its own default and silently truncates the prompt, and a
+    model that lost the instructions is exactly the one that answers in the
+    wrong format.
+    """
+    if not ollama_url or not model or not prompt:
+        return None
+    try:
+        resp = requests.post(
+            f"{ollama_url.rstrip('/')}/api/generate",
+            json={"model": model, "prompt": prompt, "stream": False,
+                  "options": {"num_ctx": context_window}},
+            timeout=timeout,
+        )
+        if resp.status_code != 200:
+            log.warning("%s: Ollama returned HTTP %d", what, resp.status_code)
+            return None
+        return _as_prose(resp.json().get("response", ""))
+    except requests.Timeout:
+        log.warning("%s: Ollama timed out after %ds", what, timeout)
+        return None
+    except Exception as exc:
+        log.warning("%s: Ollama request failed: %s", what, exc)
+        return None
 
 
 def _parse_response(raw: str) -> list[dict]:
