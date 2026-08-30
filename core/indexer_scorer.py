@@ -277,8 +277,14 @@ class IndexerScorer:
             ams = self.state.get_auto_manage_state(iid)
 
             if s["health_score"] < am.disable_threshold:
+                if ams.get("disabled_by_auto"):
+                    # Already off by our own hand. Counting further low runs
+                    # measures nothing -- it cannot be disabled twice, and the
+                    # figure would only inflate the message when it eventually
+                    # recovers.
+                    continue
                 count = self.state.increment_consecutive_low(iid)
-                if count >= am.consecutive_runs and not ams.get("disabled_by_auto"):
+                if count >= am.consecutive_runs:
                     ok = self.prowlarr.set_indexer_enabled(s["_raw"], False)
                     if ok:
                         self.state.mark_auto_disabled(iid)
@@ -286,26 +292,78 @@ class IndexerScorer:
                         log.warning(
                             f"Auto-disabled indexer '{s['name']}' — "
                             f"score {s['health_score']} below {am.disable_threshold} "
-                            f"for {count} consecutive runs"
+                            f"for {count} consecutive run(s)"
                         )
+                    else:
+                        log.warning(
+                            f"Wanted to disable '{s['name']}' "
+                            f"(score {s['health_score']} below "
+                            f"{am.disable_threshold}) but Prowlarr rejected "
+                            f"the change"
+                        )
+                else:
+                    # Below the line but not yet for long enough. Without this
+                    # the wait is invisible and reads as the threshold not
+                    # working.
+                    log.info(
+                        f"Indexer '{s['name']}' scored {s['health_score']}, "
+                        f"below {am.disable_threshold} "
+                        f"({count} of {am.consecutive_runs} runs needed to "
+                        f"disable)"
+                    )
             else:
                 self.state.reset_consecutive_low(iid)
-                # Re-enable if it was auto-disabled and cooldown has passed
+                # Re-enable if it was auto-disabled and cooldown has passed.
+                #
+                # This branch used to be entirely silent when the cooldown had
+                # not elapsed, which is indistinguishable from being broken: the
+                # score visibly recovers, the indexer stays off, and nothing
+                # anywhere says why. cooldown_hours is an anti-flap guard and
+                # worth keeping, but a guard that never explains itself gets
+                # reported as a bug -- so a deferral is now logged once per
+                # pass, with the time remaining.
                 if ams.get("disabled_by_auto") and ams.get("disabled_at"):
                     try:
                         disabled_dt = datetime.fromisoformat(ams["disabled_at"])
                         elapsed_h = (datetime.now(timezone.utc) - disabled_dt).total_seconds() / 3600
-                        if elapsed_h >= am.cooldown_hours:
-                            ok = self.prowlarr.set_indexer_enabled(s["_raw"], True)
-                            if ok:
-                                self.state.clear_auto_disabled(iid)
-                                re_enabled.append(s["name"])
-                                log.info(
-                                    f"Auto-re-enabled indexer '{s['name']}' — "
-                                    f"score recovered to {s['health_score']}"
-                                )
                     except (ValueError, TypeError):
-                        pass
+                        # An unparseable timestamp must not strand an indexer
+                        # off forever. Treat it as "cooldown already served":
+                        # the score has recovered, which is the condition that
+                        # actually matters, and the clock is only there to stop
+                        # flapping.
+                        log.warning(
+                            f"Indexer '{s['name']}' has an unreadable "
+                            f"disabled_at ({ams.get('disabled_at')!r}); "
+                            f"treating its cooldown as elapsed"
+                        )
+                        elapsed_h = float(am.cooldown_hours)
+
+                    if elapsed_h >= am.cooldown_hours:
+                        ok = self.prowlarr.set_indexer_enabled(s["_raw"], True)
+                        if ok:
+                            self.state.clear_auto_disabled(iid)
+                            re_enabled.append(s["name"])
+                            log.info(
+                                f"Auto-re-enabled indexer '{s['name']}' — "
+                                f"score recovered to {s['health_score']}"
+                            )
+                        else:
+                            # Prowlarr refused. Say so: the alternative is an
+                            # indexer that looks eligible every pass and never
+                            # comes back, with nothing in the log.
+                            log.warning(
+                                f"Wanted to re-enable '{s['name']}' "
+                                f"(score {s['health_score']}, cooldown served) "
+                                f"but Prowlarr rejected the change"
+                            )
+                    else:
+                        log.info(
+                            f"Indexer '{s['name']}' has recovered to "
+                            f"{s['health_score']} but stays disabled for "
+                            f"another {am.cooldown_hours - elapsed_h:.1f}h "
+                            f"(auto_manage.cooldown_hours = {am.cooldown_hours})"
+                        )
 
         return {"disabled": disabled, "re_enabled": re_enabled}
 

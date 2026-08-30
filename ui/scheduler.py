@@ -241,16 +241,41 @@ class Scheduler:
             except Exception as db_exc:
                 print(f"DB logging failed (save_run): {db_exc}", file=sys.stderr)
 
-        # After each scan cycle, run auto-manage (every scan) and check reorder (interval-gated).
-        self._maybe_auto_manage()
-        self._maybe_reorder()
+        # Score once, then act on THAT score.
+        #
+        # These used to run the other way round and each did its own scoring
+        # pass, which produced both of the auto-manage complaints:
+        #
+        #   * When a reorder was due, the cycle scored twice -- a deterministic
+        #     pass for auto-manage and then an AI pass for the reorder. The AI
+        #     pass is the one whose numbers appear on the Indexers page, and
+        #     nothing evaluated disable/re-enable against it. An indexer could
+        #     visibly drop below the threshold and stay enabled until some
+        #     later cycle picked it up, which reads as "it disabled itself an
+        #     hour after it dipped".
+        #   * Two scoring passes in one cycle also meant the consecutive-low
+        #     counter could advance twice for one cycle's worth of evidence.
+        #
+        # _maybe_reorder now hands its scores back, so auto-manage judges the
+        # freshest numbers that exist and the counter advances exactly once per
+        # cycle. When no reorder is due it returns None and auto-manage does
+        # its own cheap deterministic pass, as before.
+        scored = self._maybe_reorder()
+        self._maybe_auto_manage(scored)
         # Check if a periodic log summary is due.
         self._maybe_summary()
 
-    def _maybe_auto_manage(self):
+    def _maybe_auto_manage(self, scored=None):
         """
         Run auto-manage after every scan cycle (not gated by reorder interval).
-        Uses deterministic scoring only (skip_ai=True) for speed.
+
+        `scored` is the result of the rescore that just happened, when one did.
+        Passing it in matters: it is what makes the disable/re-enable decision
+        follow the same numbers the user is looking at, rather than a second
+        pass taken moments later. When it is None (no reorder was due) this
+        does its own deterministic pass, which reflects any stored AI verdict
+        back anyway.
+
         Best-effort: any failure is logged and never affects the scan loop.
         """
         try:
@@ -268,7 +293,8 @@ class Scheduler:
             from core.indexer_scorer import IndexerScorer
             prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
             scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
-            scored   = scorer.score_all(skip_ai=True)   # fast deterministic pass
+            if scored is None:
+                scored = scorer.score_all(skip_ai=True)   # fast deterministic pass
             am_result = scorer.auto_manage(scored)
             if am_result.get("disabled") or am_result.get("re_enabled"):
                 self._state.write_log({
@@ -289,14 +315,20 @@ class Scheduler:
     def _maybe_reorder(self):
         """
         If Prowlarr scoring is enabled and reorder_interval_hours has elapsed
-        since the last reorder, run one. Best-effort: any failure is logged and
-        never affects the scan loop.
+        since the last reorder, run one.
+
+        Returns the scored list when it rescored, so the caller can run
+        auto-manage against those numbers instead of scoring all over again.
+        Returns None when no reorder was due or anything went wrong -- the
+        caller treats None as "score it yourself".
+
+        Best-effort: any failure is logged and never affects the scan loop.
         """
         try:
             from core.config import load_config
             config = load_config(self.config_path)
             if not config.prowlarr.enabled:
-                return
+                return None
 
             # BUG-17: _state can be None (config/DB unavailable at startup).
             # Passing None into IndexerScorer raised AttributeError which was
@@ -308,7 +340,7 @@ class Scheduler:
                 logging.getLogger("inspectarr").warning(
                     "Prowlarr auto-reorder skipped — state DB unavailable"
                 )
-                return
+                return None
 
             # BUG-20: recover last_reorder from the DB after a restart so the
             # reorder interval survives process restarts.
@@ -325,7 +357,7 @@ class Scheduler:
             if self.last_reorder is not None:
                 elapsed_h = (now - self.last_reorder).total_seconds() / 3600.0
                 if elapsed_h < interval_h:
-                    return
+                    return None
 
             from core.prowlarr import ProwlarrClient
             from core.indexer_scorer import IndexerScorer
@@ -339,6 +371,7 @@ class Scheduler:
                 "level": "INFO", "event": "prowlarr_auto_reorder",
                 "indexers_moved": changed,
             })
+            return scored
         except Exception as exc:
             if self._state:
                 try:
@@ -348,6 +381,8 @@ class Scheduler:
                     })
                 except Exception as db_exc:
                     print(f"DB logging failed (auto_reorder): {db_exc}", file=sys.stderr)
+        # Nothing usable to hand back -- the caller scores for itself.
+        return None
 
     def _maybe_summary(self):
         """
