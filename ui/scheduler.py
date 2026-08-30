@@ -340,12 +340,21 @@ class Scheduler:
         """
         try:
             from core.notifier import Notifier
-            Notifier(config).notify_error(
-                "AI scoring",
-                "Scoring run rejected and ignored: %s. Deterministic scores "
-                "were kept and auto-manage was skipped for this cycle."
-                % verdict.get("reason"),
-            )
+            body = ("Scoring run rejected and ignored: %s. Deterministic "
+                    "scores were kept and auto-manage was skipped for this "
+                    "cycle." % verdict.get("reason"))
+            # Recorded as a system notice regardless of whether a push goes
+            # out. The push depends on 'error' being in notify_on; the fact
+            # that a scoring run was thrown away should not.
+            if self._state:
+                self._state.record_notice(
+                    "system", "ai_scoring_rejected",
+                    "AI scoring run rejected", body, "recorded",
+                    "mean deviation %s, %s%% scored zero, %s indexers" % (
+                        verdict.get("mean_deviation"),
+                        round(100 * (verdict.get("zero_fraction") or 0)),
+                        verdict.get("n")))
+            Notifier(config, state=self._state).notify_error("AI scoring", body)
         except Exception as exc:
             log.warning("Could not send the AI-rejection notification: %s", exc)
 
@@ -463,7 +472,7 @@ class Scheduler:
                     pass
 
             from core.summarizer import LogSummarizer
-            summarizer = LogSummarizer(config)
+            summarizer = LogSummarizer(config, state=self._state)
             sent = summarizer.generate_and_send(self._state)
             if sent:
                 self._state.set_app_state("last_log_summary", now.isoformat())

@@ -491,6 +491,78 @@ class StateManager:
             return False
 
     # ------------------------------------------------------------------
+    # notices
+    # ------------------------------------------------------------------
+
+    NOTICE_KEEP = 2000
+
+    def record_notice(self, channel: str, event: str, title: str,
+                      body: str, status: str, detail: str = None) -> bool:
+        """
+        Record one notification attempt or system notice. Never raises.
+
+        Recording must never be able to break the thing it is recording, so
+        every failure here is swallowed with a log line -- a lost audit row
+        is a far smaller problem than a scan aborted by its own bookkeeping.
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "INSERT INTO notices "
+                    "(created_at, channel, event, title, body, status, detail) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (_now_iso(), channel, event, title,
+                     (body or "")[:4000], status, detail),
+                )
+                # Trim in the same transaction rather than on a timer: this
+                # table grows with every notification and nothing else would
+                # ever prune it.
+                conn.execute(
+                    "DELETE FROM notices WHERE id NOT IN "
+                    "(SELECT id FROM notices ORDER BY id DESC LIMIT ?)",
+                    (self.NOTICE_KEEP,),
+                )
+                conn.commit()
+            return True
+        except Exception as exc:
+            log.warning(f"Failed to record notice ({event}): {exc}")
+            return False
+
+    def get_notices(self, limit: int = 100, offset: int = 0,
+                    status: str = None, channel: str = None) -> list[dict]:
+        """Most recent first."""
+        try:
+            sql = "SELECT * FROM notices"
+            where, args = [], []
+            if status:
+                where.append("status = ?")
+                args.append(status)
+            if channel:
+                where.append("channel = ?")
+                args.append(channel)
+            if where:
+                sql += " WHERE " + " AND ".join(where)
+            sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+            args += [int(limit), int(offset)]
+            with self._lock, self._conn() as conn:
+                return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        except Exception as exc:
+            log.warning(f"Failed to read notices: {exc}")
+            return []
+
+    def count_notices(self) -> dict:
+        """Totals by status, for the summary row."""
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT status, COUNT(*) n FROM notices GROUP BY status"
+                ).fetchall()
+            return {r["status"]: r["n"] for r in rows}
+        except Exception as exc:
+            log.warning(f"Failed to count notices: {exc}")
+            return {}
+
+    # ------------------------------------------------------------------
     # validated_models
     # ------------------------------------------------------------------
 
@@ -897,6 +969,33 @@ class StateManager:
                     disabled_at         TEXT,
                     disabled_by_auto    INTEGER DEFAULT 0
                 )
+            """)
+            # notices -- every notification we tried to send, and every
+            # system-level event worth telling somebody about.
+            #
+            # Apprise is fire-and-forget: once a push leaves, there is no
+            # record that it happened, no record of one that FAILED to send,
+            # and no record of one suppressed because notifications were off.
+            # "Did I get told about that?" was unanswerable.
+            #
+            # status is the honest part. A row is not proof of delivery --
+            # only that Apprise accepted it -- but 'failed' and 'suppressed'
+            # are exactly the states that used to vanish.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notices (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    channel    TEXT NOT NULL,
+                    event      TEXT,
+                    title      TEXT,
+                    body       TEXT,
+                    status     TEXT NOT NULL,
+                    detail     TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_notices_created
+                ON notices (created_at DESC)
             """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS llm_scoring_log (

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Notifications — inspectarr{% endblock %}
+{% block page_title %}Notifications{% endblock %}
+
+{% block content %}
+
+<div class="form-section">
+  <div class="form-section-title">Notification history</div>
+  <p class="hint" style="margin-bottom:0.75rem">
+    Every notification inspectarr tried to send, and whether it got through.
+    <strong>Suppressed</strong> and <strong>failed</strong> rows are shown alongside
+    delivered ones — those are usually the answer when nobody was told about something.
+    A <em>sent</em> row means Apprise accepted the message, not that the service delivered it.
+    The most recent {{ counts.values() | sum }} are kept.
+  </p>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+    {% set order = [('sent','ms-good'),('failed','ms-bad'),('suppressed','ms-warn'),('recorded','ms-none')] %}
+    {% for key, cls in order %}
+      {% if counts.get(key) %}
+        <span class="{{ cls }}" style="font-family:var(--font-mono);font-size:.8rem">
+          {{ counts.get(key) }} {{ key }}
+        </span>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if not status and not channel else '' }}"
+       href="/system/notifications">All</a>
+    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if status == 'failed' else '' }}"
+       href="/system/notifications?status=failed">Failed</a>
+    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if status == 'suppressed' else '' }}"
+       href="/system/notifications?status=suppressed">Suppressed</a>
+    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if channel == 'system' else '' }}"
+       href="/system/notifications?channel=system">System events</a>
+    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if channel == 'push' else '' }}"
+       href="/system/notifications?channel=push">Pushes</a>
+  </div>
+
+  {% if not notices %}
+    <p class="hint">
+      {% if status or channel %}
+        Nothing matches that filter.
+      {% else %}
+        Nothing recorded yet. Notifications appear here as they are sent.
+      {% endif %}
+    </p>
+  {% else %}
+  <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:.87rem">
+      <thead>
+        <tr style="text-align:left;border-bottom:1px solid var(--border)">
+          <th style="padding:8px;white-space:nowrap">When</th>
+          <th style="padding:8px">Status</th>
+          <th style="padding:8px">Event</th>
+          <th style="padding:8px">Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for n in notices %}
+        {% set cls = 'ms-good' if n.status == 'sent'
+                     else ('ms-bad' if n.status == 'failed'
+                     else ('ms-warn' if n.status == 'suppressed' else 'ms-none')) %}
+        <tr style="border-bottom:1px solid var(--border-muted);vertical-align:top">
+          <td style="padding:8px;font-family:var(--font-mono);white-space:nowrap">
+            {{ (n.created_at or '')[:19] | replace('T', ' ') }}
+          </td>
+          <td style="padding:8px;white-space:nowrap" class="{{ cls }}">
+            {{ n.status }}
+            {% if n.channel == 'system' %}<br><span class="hint">system</span>{% endif %}
+          </td>
+          <td style="padding:8px;font-family:var(--font-mono);white-space:nowrap">
+            {{ n.event or '—' }}
+          </td>
+          <td style="padding:8px">
+            <strong>{{ n.title or '' }}</strong>
+            {% if n.body %}
+              <div class="hint" style="margin-top:2px;white-space:pre-wrap">{{ n.body[:400] }}{% if n.body|length > 400 %}…{% endif %}</div>
+            {% endif %}
+            {% if n.detail %}
+              <div class="hint {{ cls }}" style="margin-top:4px">{{ n.detail }}</div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+    {% set qs = [] %}
+    {% if status %}{% set _ = qs.append('status=' + status) %}{% endif %}
+    {% if channel %}{% set _ = qs.append('channel=' + channel) %}{% endif %}
+    {% set base = '/system/notifications?' + (qs | join('&')) + ('&' if qs else '') %}
+    {% if page > 1 %}
+      <a class="btn btn-ghost btn-sm" href="{{ base }}page={{ page - 1 }}">← Newer</a>
+    {% endif %}
+    <span class="hint">Page {{ page }}</span>
+    {% if has_more %}
+      <a class="btn btn-ghost btn-sm" href="{{ base }}page={{ page + 1 }}">Older →</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

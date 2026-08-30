@@ -62,7 +62,7 @@ class Scanner:
             retention_days=config.logging.retention_days,
         )
         self.qbit     = build_torrent_client(config)
-        self.notifier = Notifier(config)
+        self.notifier = Notifier(config, state=self.state)
         # Correlation ID for the current scan run. Every inspection and
         # log event produced by one pass shares it (ROADMAP item 22).
         self._scan_id = None

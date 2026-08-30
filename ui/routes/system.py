@@ -9,7 +9,7 @@ initial render is instant.
 import os
 import shutil
 import platform
-from flask import Blueprint, render_template, current_app, jsonify
+from flask import Blueprint, render_template, current_app, jsonify, request
 
 # ROADMAP item 13: the checks live in core/ so the CLI can use them too.
 from core.connections import check_all
@@ -76,6 +76,35 @@ def system_status_data():
         return jsonify({"ok": False, "message": str(exc), "connections": []})
 
     return jsonify({"ok": True, "connections": check_all(cfg)})
+
+
+@system_bp.route("/system/notifications")
+def system_notifications():
+    """
+    Everything Inspectarr tried to tell you, and whether it got through.
+
+    Deliberately shows suppressed and failed rows alongside sent ones. The
+    question this page answers is "why did nobody tell me", and the answer
+    is usually one of those two.
+    """
+    state = current_app.config.get("STATE")
+    status = (request.args.get("status") or "").strip() or None
+    channel = (request.args.get("channel") or "").strip() or None
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    per_page = 50
+    notices = state.get_notices(
+        limit=per_page, offset=(page - 1) * per_page,
+        status=status, channel=channel) if state else []
+    counts = state.count_notices() if state else {}
+    return render_template(
+        "system_notifications.html",
+        notices=notices, counts=counts, status=status, channel=channel,
+        page=page, per_page=per_page,
+        has_more=len(notices) == per_page,
+    )
 
 
 @system_bp.route("/system/tasks")

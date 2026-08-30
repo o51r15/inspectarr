@@ -44,6 +44,7 @@
         <div class="nav-group-items" id="system-group-items">
           <a href="/system/status" class="{{ 'active' if request.path.startswith('/system/status') else '' }}">Status</a>
           <a href="/system/tasks" class="{{ 'active' if request.path.startswith('/system/tasks') else '' }}">Tasks</a>
+          <a href="/system/notifications" class="{{ 'active' if request.path.startswith('/system/notifications') else '' }}">Notifications</a>
           <a href="/config#backups" data-pane="backups">Backups</a>
           <a href="/system/updates" class="{{ 'active' if request.path.startswith('/system/updates') else '' }}">Updates</a>
           <a href="/system/events" class="{{ 'active' if request.path.startswith('/system/events') or request.path.startswith('/logs') else '' }}">Logs</a>

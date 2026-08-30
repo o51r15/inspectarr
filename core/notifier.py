@@ -21,7 +21,11 @@ class Notifier:
       Startup and retry_exhausted notifications are always sent immediately.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, state=None):
+        # Optional so nothing breaks if a caller has no StateManager; when it
+        # is supplied every send is recorded, including the ones that fail or
+        # never leave.
+        self._notice_state = state
         self.cfg = config.notifications.apprise
         self.digest_cfg = config.notifications.digest
         # Only expose Ollama to the digest path when the master switch is on;
@@ -45,13 +49,33 @@ class Notifier:
     def _should(self, event_type: str) -> bool:
         return self.cfg.enabled and event_type in self.cfg.notify_on
 
-    def _send(self, title: str, message: str):
+    def _send(self, title: str, message: str, event: str = "notification"):
         if not self.cfg.enabled or not self.cfg.urls:
+            # Suppressed, not sent. Recorded because "I never got told" and
+            # "notifications are switched off" look identical otherwise.
+            self._record(event, title, message, "suppressed",
+                         "notifications disabled" if not self.cfg.enabled
+                         else "no Apprise URLs configured")
             return
         try:
-            self._apprise.notify(title=title, body=message)
+            ok = self._apprise.notify(title=title, body=message)
+            # Apprise returns False when every target rejected the message.
+            self._record(event, title, message,
+                         "sent" if ok is not False else "failed",
+                         None if ok is not False else "Apprise reported no "
+                         "target accepted the message")
         except Exception as exc:
             log.warning("Apprise notification failed: %s", exc)
+            self._record(event, title, message, "failed", str(exc))
+
+    def _record(self, event, title, body, status, detail=None):
+        if not self._notice_state:
+            return
+        try:
+            self._notice_state.record_notice(
+                "push", event, title, body, status, detail)
+        except Exception as exc:
+            log.debug("Could not record notice: %s", exc)
 
     # ------------------------------------------------------------------
     # Event methods — buffer in digest mode, send immediately otherwise
@@ -153,7 +177,7 @@ class Notifier:
                 "reason": reason,
             })
             return
-        self._send("inspectarr: Error", f"{context}\n{reason}")
+        self._send("inspectarr: Error", f"{context}\n{reason}", event="error")
 
     def notify_retry_exhausted(self, torrent_name: str, hash: str, attempts: int):
         """Always immediate — retry exhaustion is critical."""

@@ -25,7 +25,8 @@ log = logging.getLogger("inspectarr")
 class LogSummarizer:
     """Generates and sends periodic log summaries."""
 
-    def __init__(self, config):
+    def __init__(self, config, state=None):
+        self._notice_state = state
         self.cfg = config
         self.apprise_cfg = config.notifications.apprise
         self.summary = config.notifications.summary
@@ -163,8 +164,26 @@ class LogSummarizer:
 
     def _send(self, title: str, message: str):
         if not self.apprise_cfg.enabled or not self.apprise_cfg.urls:
+            self._record(title, message, "suppressed",
+                         "notifications disabled"
+                         if not self.apprise_cfg.enabled
+                         else "no Apprise URLs configured")
             return
         try:
-            self._apprise.notify(title=title, body=message)
+            ok = self._apprise.notify(title=title, body=message)
+            self._record(title, message,
+                         "sent" if ok is not False else "failed",
+                         None if ok is not False else "Apprise reported no "
+                         "target accepted the message")
         except Exception as exc:
             log.warning("Apprise summary notification failed: %s", exc)
+            self._record(title, message, "failed", str(exc))
+
+    def _record(self, title, body, status, detail=None):
+        if not self._notice_state:
+            return
+        try:
+            self._notice_state.record_notice(
+                "push", "log_summary", title, body, status, detail)
+        except Exception as exc:
+            log.debug("Could not record notice: %s", exc)
