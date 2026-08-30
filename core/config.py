@@ -165,6 +165,28 @@ class OllamaConfig:
     # page's validation run is how to find out.
     max_indexers_per_call: int = 25
 
+    # How far the AI may move a SINGLE indexer away from its deterministic
+    # score, in points. Measured on this deployment, healthy runs disagree
+    # with the deterministic score by 7-16 points on average, so 30 almost
+    # never binds in normal operation -- it exists to clip a lone outlier,
+    # not to muzzle the model. (ROADMAP C-5.)
+    max_adjustment: float = 30.0
+
+    # Reject the WHOLE run when the mean disagreement across the batch
+    # exceeds this.
+    #
+    # Indexer health does not move for the entire fleet at once. If every
+    # indexer suddenly disagrees with its deterministic score, the model is
+    # wrong, not the fleet. Measured here: eleven healthy runs sat between
+    # 7.4 and 15.3; one failed run sat at 44.9 and scored eight indexers at
+    # exactly 0.0 while its own reasoning said "no failures". Two of those
+    # were auto-disabled forty minutes later with deterministic scores of
+    # 90.4 and 93.4.
+    #
+    # 25 separates those two populations with a wide margin in both
+    # directions. Set 0 to disable the check.
+    max_mean_deviation: float = 25.0
+
     def is_active(self) -> bool:
         """
         True when AI can actually run: switched on AND configured.
@@ -363,6 +385,16 @@ def _as_int(value, default: int) -> int:
         return default
 
 
+def _as_float(value, default: float) -> float:
+    """float() that never raises. Same reasoning as _as_int above."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _as_list(value, default=None):
     """
     Coerce a YAML value to a list.
@@ -415,6 +447,9 @@ def _parse_ollama(o_raw: dict) -> "OllamaConfig":
         context_window=_as_int(o_raw.get("context_window"), 4096),
         max_indexers_per_call=_as_int(
             o_raw.get("max_indexers_per_call"), 25),
+        max_adjustment=_as_float(o_raw.get("max_adjustment"), 30.0),
+        max_mean_deviation=_as_float(
+            o_raw.get("max_mean_deviation"), 25.0),
     )
 
 

@@ -29,6 +29,68 @@ from .ollama_registry import local_digest as ollama_local_digest
 
 
 WORST_RESPONSE_MS = 5000.0
+
+# A run scoring this share of indexers at exactly zero is not assessing them.
+# The failed run measured here put 8 of 37 (22%) at 0.0 while its own
+# reasoning for those rows read "Low data, but no failures."
+#
+# Zero is the end that matters: it is what trips auto-disable. A model being
+# generous costs nothing, so there is deliberately no matching check at 100.
+MAX_ZERO_FRACTION = 0.15
+
+# Below this many comparable indexers there is not enough to judge a batch by,
+# and a strict check would reject small legitimate runs.
+MIN_COHERENCE_SAMPLE = 5
+
+
+def assess_ai_coherence(scored, ai_results, max_mean_deviation):
+    """
+    Does this AI run look like an assessment, or like a model that lost the
+    plot? Returns a verdict dict; never raises.
+
+    Judged on the batch, not the indexer, because that is where the signal
+    is. One indexer disagreeing with its deterministic score is ordinary and
+    is what the AI is for. Thirty-seven disagreeing at once is not the fleet
+    changing -- indexer health does not move together -- it is the model
+    failing, and the deterministic scores are the trustworthy ones.
+
+    Deliberately measured on the RAW AI output, before any clamping. Clamping
+    first would cap the deviation at the clamp and destroy the very signal
+    this reads.
+    """
+    pairs = [(s["health_score"], ai_results[s["id"]]["health_score"])
+             for s in scored
+             if s["id"] in ai_results
+             and s.get("health_score") is not None
+             and ai_results[s["id"]].get("health_score") is not None]
+
+    v = {"accepted": True, "reason": None, "n": len(pairs),
+         "mean_deviation": None, "zero_fraction": None}
+    if len(pairs) < MIN_COHERENCE_SAMPLE:
+        v["reason"] = "too few indexers to judge (%d)" % len(pairs)
+        return v
+
+    ai_vals = [a for _, a in pairs]
+    v["mean_deviation"] = round(
+        sum(abs(a - d) for d, a in pairs) / len(pairs), 1)
+    v["zero_fraction"] = round(
+        sum(1 for a in ai_vals if a == 0) / len(ai_vals), 3)
+
+    if len(set(ai_vals)) == 1:
+        v["accepted"] = False
+        v["reason"] = ("every indexer scored %s -- the model returned one "
+                       "value for the whole batch" % ai_vals[0])
+    elif v["zero_fraction"] > MAX_ZERO_FRACTION:
+        v["accepted"] = False
+        v["reason"] = ("%.0f%% of indexers scored exactly 0 (%d of %d)"
+                       % (100 * v["zero_fraction"],
+                          sum(1 for a in ai_vals if a == 0), len(ai_vals)))
+    elif max_mean_deviation and v["mean_deviation"] > max_mean_deviation:
+        v["accepted"] = False
+        v["reason"] = ("the whole batch disagrees with its deterministic "
+                       "scores by %.1f points on average (limit %.0f)"
+                       % (v["mean_deviation"], max_mean_deviation))
+    return v
 log = logging.getLogger("inspectarr")
 
 
@@ -479,20 +541,61 @@ class IndexerScorer:
         if isinstance(ai_results, dict):
             ai_results = {int(k): v for k, v in ai_results.items()}
 
+        # Is this run trustworthy at all? Checked before anything is applied,
+        # and on the raw values -- see assess_ai_coherence.
+        verdict = assess_ai_coherence(
+            scored, ai_results, getattr(ocfg, "max_mean_deviation", 25.0))
+        self.last_ai_verdict = verdict
+        if not verdict["accepted"]:
+            log.error(
+                "AI scoring run REJECTED: %s. Keeping deterministic scores "
+                "for all %d indexers. Auto-manage is skipped this cycle -- "
+                "nothing will be disabled on evidence this run produced.",
+                verdict["reason"], len(scored))
+            return scored
+
+        max_adj = float(getattr(ocfg, "max_adjustment", 30.0) or 0)
+        clamped = []
+
         log_entries = []
         for s in scored:
             ai = ai_results.get(s["id"])
             if ai is not None:
+                raw = ai["health_score"]
+                value = raw
+                # Clamp AFTER the batch verdict, never before. An indexer with
+                # no deterministic score has no baseline to clamp against, so
+                # it is left alone -- auto_manage skips those anyway (B-25).
+                if max_adj and s.get("health_score") is not None:
+                    lo = s["health_score"] - max_adj
+                    hi = s["health_score"] + max_adj
+                    value = max(lo, min(hi, raw))
+                    if value != raw:
+                        clamped.append((s["name"], raw, value,
+                                        s["health_score"]))
                 log_entries.append({
                     "indexer_id": s["id"],
                     "indexer_name": s["name"],
                     "deterministic_score": s["health_score"],
-                    "ai_score": ai["health_score"],
+                    "ai_score": value,
                     "ai_reasoning": ai.get("reasoning", ""),
                 })
-                s["health_score"] = ai["health_score"]
+                s["health_score"] = value
                 s["ai_scored"]    = True
                 s["ai_reasoning"] = ai.get("reasoning", "")
+
+        if clamped:
+            # Worth a line each: a clamp means the model wanted to move an
+            # indexer further than we allow, which is a weaker version of the
+            # same failure the batch gate catches.
+            for name, raw, value, det in clamped[:10]:
+                log.warning(
+                    "Clamped '%s': AI said %s against a deterministic %s; "
+                    "limited to %s (max_adjustment %.0f)",
+                    name, raw, det, value, max_adj)
+            if len(clamped) > 10:
+                log.warning("... and %d more clamped this run",
+                            len(clamped) - 10)
 
         # Persist the scoring run for the LLM Logs page
         if log_entries:

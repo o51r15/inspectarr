@@ -1,7 +1,13 @@
+import logging
 import sys
 import threading
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+
+# This module used to reach for logging.getLogger inline in one place and
+# print() to stderr in others, so half of what the scheduler did never
+# reached the log file the UI reads.
+log = logging.getLogger("inspectarr")
 
 
 class Scheduler:
@@ -260,8 +266,22 @@ class Scheduler:
         # freshest numbers that exist and the counter advances exactly once per
         # cycle. When no reorder is due it returns None and auto-manage does
         # its own cheap deterministic pass, as before.
-        scored = self._maybe_reorder()
-        self._maybe_auto_manage(scored)
+        scored, ai_rejected = self._maybe_reorder()
+        if ai_rejected:
+            # The scoring run was thrown out as incoherent. Disabling an
+            # indexer needs evidence, and we have just declared this run's
+            # evidence untrustworthy -- so no disable or re-enable decision
+            # is made at all this cycle.
+            #
+            # This is the exact sequence that switched off two healthy
+            # indexers: a run scored 8 of 37 at zero, and forty minutes later
+            # auto-manage acted on it. Deterministic scores are still
+            # perfectly good, but acting on them here would quietly convert
+            # "the model broke" into "your indexers changed", which is the
+            # confusion worth refusing.
+            log.warning("Auto-manage skipped: the scoring run was rejected")
+        else:
+            self._maybe_auto_manage(scored)
         # Check if a periodic log summary is due.
         self._maybe_summary()
 
@@ -312,15 +332,34 @@ class Scheduler:
                 except Exception as db_exc:
                     print(f"DB logging failed (auto_manage): {db_exc}", file=sys.stderr)
 
+    def _notify_ai_rejected(self, config, verdict):
+        """
+        Tell somebody. A rejected run is the one event where staying quiet is
+        worst: scoring silently reverts to deterministic, nothing looks
+        broken, and the model can keep failing for days unnoticed.
+        """
+        try:
+            from core.notifier import Notifier
+            Notifier(config).notify_error(
+                "AI scoring",
+                "Scoring run rejected and ignored: %s. Deterministic scores "
+                "were kept and auto-manage was skipped for this cycle."
+                % verdict.get("reason"),
+            )
+        except Exception as exc:
+            log.warning("Could not send the AI-rejection notification: %s", exc)
+
     def _maybe_reorder(self):
         """
         If Prowlarr scoring is enabled and reorder_interval_hours has elapsed
         since the last reorder, run one.
 
-        Returns the scored list when it rescored, so the caller can run
-        auto-manage against those numbers instead of scoring all over again.
-        Returns None when no reorder was due or anything went wrong -- the
-        caller treats None as "score it yourself".
+        Returns (scored, ai_rejected). `scored` is the scored list when it
+        rescored, so the caller can run auto-manage against those numbers
+        instead of scoring all over again, or None when no reorder was due or
+        something went wrong -- the caller treats None as "score it yourself".
+        `ai_rejected` is True when the AI pass ran and was thrown out, which
+        means no auto-manage decision should be made from this cycle at all.
 
         Best-effort: any failure is logged and never affects the scan loop.
         """
@@ -328,7 +367,7 @@ class Scheduler:
             from core.config import load_config
             config = load_config(self.config_path)
             if not config.prowlarr.enabled:
-                return None
+                return None, False
 
             # BUG-17: _state can be None (config/DB unavailable at startup).
             # Passing None into IndexerScorer raised AttributeError which was
@@ -340,7 +379,7 @@ class Scheduler:
                 logging.getLogger("inspectarr").warning(
                     "Prowlarr auto-reorder skipped — state DB unavailable"
                 )
-                return None
+                return None, False
 
             # BUG-20: recover last_reorder from the DB after a restart so the
             # reorder interval survives process restarts.
@@ -357,13 +396,24 @@ class Scheduler:
             if self.last_reorder is not None:
                 elapsed_h = (now - self.last_reorder).total_seconds() / 3600.0
                 if elapsed_h < interval_h:
-                    return None
+                    return None, False
 
             from core.prowlarr import ProwlarrClient
             from core.indexer_scorer import IndexerScorer
             prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
             scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
             scored   = scorer.score_all(skip_ai=False)   # rescore (with AI if configured) before auto-reorder
+            verdict  = getattr(scorer, "last_ai_verdict", None)
+            rejected = bool(verdict and not verdict.get("accepted"))
+            if rejected:
+                self._state.write_log({
+                    "level": "ERROR", "event": "ai_scoring_rejected",
+                    "reason": verdict.get("reason"),
+                    "mean_deviation": verdict.get("mean_deviation"),
+                    "zero_fraction": verdict.get("zero_fraction"),
+                    "indexers": verdict.get("n"),
+                })
+                self._notify_ai_rejected(config, verdict)
             changed  = scorer.reorder()
             self.last_reorder = now
             self._state.set_app_state("last_prowlarr_reorder", now.isoformat())
@@ -371,7 +421,7 @@ class Scheduler:
                 "level": "INFO", "event": "prowlarr_auto_reorder",
                 "indexers_moved": changed,
             })
-            return scored
+            return scored, rejected
         except Exception as exc:
             if self._state:
                 try:
@@ -382,7 +432,7 @@ class Scheduler:
                 except Exception as db_exc:
                     print(f"DB logging failed (auto_reorder): {db_exc}", file=sys.stderr)
         # Nothing usable to hand back -- the caller scores for itself.
-        return None
+        return None, False
 
     def _maybe_summary(self):
         """
