@@ -7,6 +7,100 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added — Batch Size Calibration
+
+Inspectarr can now **measure** how many indexers your model handles reliably in one request, instead of assuming a number.
+
+The old default of 25 per call was measured against a single model on a GPU host. It does not generalise. Measured on one CPU-only host, 39 indexers, identical settings:
+
+| Model | 25 per call | 10 per call |
+|---|---|---|
+| `phi4:latest` | 39 of 39 | 39 of 39 |
+| `securelogsummarizer:secure` | 39 of 39 | 39 of 39 |
+| `gemma:latest` | **24 of 39 — 15 dropped** | 39 of 39 |
+| `phi4-mini:latest` | **37 of 39 — 2 dropped** | 39 of 39 |
+
+One machine, four models, opposite outcomes. Nothing errors when indexers are dropped: they quietly keep their deterministic score.
+
+**Settings → AI** now has two actions rather than one, and they are not alternatives — **Calibrate does everything Quick Check does, and then measures the ceiling**:
+
+- **Quick Check** (1–3 min) — discrimination, schema, context capacity
+- **Calibrate** (10–40 min) — the same three, then a search for the largest safe batch size
+
+The search descends 25 → 20 → 15 → 10 → 5 and takes the first size that comes back **clean twice in a row**. Twice, because silent omission is intermittent: one model passed a single-pass check at 39 indexers and dropped 15 the next day on the same host with nothing changed. A candidate must also finish comfortably inside your timeout, not merely produce the right answer — a batch of 25 once scored 39 of 39 while taking 269–295 s against a 300 s limit.
+
+Indexers per scoring call is now a slider in Settings → AI, defaulted to whatever calibration measured. It is coloured by measurement: moving it at or below the measured ceiling is silent, and only crossing above it asks for confirmation.
+
+A scoring call that finishes above 80% of your timeout now warns, and names the setting to change. Three of four calls on that CPU host were landing within 10 seconds of the limit, and the log said nothing until one broke.
+
+### Added — Notification History
+
+**System → Notifications** records every notification Inspectarr tried to send and whether it got through.
+
+Apprise is fire-and-forget: once a push left there was no record it happened, none of one that *failed*, and none of one *suppressed* because notifications were switched off. "Nobody told me" and "notifications are off" looked identical.
+
+Each row is `sent`, `failed`, `suppressed`, or `recorded` (a system event that is not itself a push), filterable by status and channel. A `sent` row means Apprise accepted the message — not that the service delivered it, and the page says so.
+
+With digest mode enabled most events buffer and leave as a single `digest` push, so that is what the history shows; the individual events are inside that message.
+
+### Changed — A Validation Result Belongs to a Host
+
+`validated_models` records which Ollama server each verdict was earned against, along with the measured throughput and how much of the model sat on the GPU.
+
+Previously, changing `prowlarr.ollama.url` silently carried every stored "supported" across to hardware the model had never been tested on. That is not a technicality — the same model and batch size took **436 seconds on one host and 237 on another**, and a model clean at 25 per call on one dropped indexers on the other.
+
+Selecting a model whose only passing result came from a different server is now refused, and the message names both servers. Records written before this existed read as *unknown host*, not *wrong host* — absence of evidence is not evidence of a different machine, and treating it otherwise would invalidate an install's whole history on upgrade.
+
+The model list is now colour-coded: untested, red (failed, forced, or validated elsewhere), amber (validated but not calibrated), green (validated and calibrated). Colour is never the only signal — every state carries a symbol and a word, because some browsers ignore colour inside a dropdown entirely.
+
+### Fixed — A Broken AI Scoring Run Could Disable Healthy Indexers
+
+On one run the model returned scores that contradicted its own reasoning:
+
+| Indexer | Deterministic | AI | The model's own words |
+|---|---|---|---|
+| MVGroup Main | 90.4 | **0.0** | "Low data, but no failures." |
+| Sexy-Pics | 93.4 | **0.0** | "Low data, but no failures." |
+
+That run scored 8 of 37 indexers at exactly zero. Forty minutes later, auto-manage disabled two healthy indexers because of it.
+
+Inspectarr now checks whether a scoring run is coherent **before** using it. The premise is that indexer health does not move for the whole fleet at once — if every indexer suddenly disagrees with its deterministic score, the model is wrong, not the fleet. Measured across eleven healthy runs the disagreement sat between 7.4 and 15.3 points; the failed run sat at 44.9.
+
+A run is rejected when the batch disagrees by more than `max_mean_deviation` (25) on average, when more than 15% of indexers score exactly zero, or when every indexer gets the identical value. Zero is the end that matters because it is what trips auto-disable; a generous model costs nothing, so there is no matching check at 100.
+
+**A rejected run keeps the deterministic scores and skips auto-manage entirely for that cycle.** Disabling needs evidence, and the run's evidence has just been declared untrustworthy. It is recorded in the notification history and sent as an error notification — silence is the worst outcome, because scoring quietly reverts to deterministic and nothing looks broken.
+
+Separately, the AI may now move a single indexer at most `max_adjustment` (30) points from its deterministic score. Healthy runs disagree by 7–16 on average, so this rarely binds; it clips a lone outlier without muzzling the model.
+
+```yaml
+prowlarr:
+  ollama:
+    max_adjustment: 30.0        # per-indexer limit
+    max_mean_deviation: 25.0    # whole-run limit; 0 disables
+```
+
+### Fixed — Auto-Manage Acted on the Wrong Scores, and Never Explained Itself
+
+Two long-standing complaints, two different causes.
+
+**An indexer would visibly drop below the threshold and stay enabled, then turn up disabled later.** Auto-manage ran its own deterministic scoring pass; the AI rescore — the numbers shown on the Indexers page — never evaluated disable or re-enable at all. The decision and the number on screen were never the same event. When a reorder was due, the cycle also scored twice, which could advance the consecutive-low counter twice for one cycle's evidence.
+
+Scoring now happens once per cycle and auto-manage judges those numbers.
+
+**An indexer would recover above the threshold and stay disabled.** That is `cooldown_hours` working as configured, but it was completely silent — indistinguishable from broken. Every deferral now logs the hours remaining and names the setting.
+
+Also now visible rather than silent: waiting for more low runs (`n of N runs needed`), and a disable or re-enable that Prowlarr **rejects**. An already-disabled indexer no longer keeps incrementing its counter, and an unreadable `disabled_at` no longer strands one off permanently.
+
+### Fixed — Notifications Arriving as Raw JSON
+
+A daily summary went out as the model's raw output — a full JSON object, braces and all.
+
+Asking for prose does not guarantee prose: a model fine-tuned on a structured task answers in its own schema regardless of the prompt. The code checked only that the request succeeded and the reply was not empty, both of which were true.
+
+Inspectarr now checks the shape of the reply. Prose is sent as-is; JSON carrying a readable summary field has that field extracted; JSON with nothing readable, or a reply cut off mid-object, falls back to the built-in plain summary. Falling back is not a failure — the plain summary is always correct and strictly better than a wall of JSON — and the reason is logged.
+
+Length is capped rather than merely requested, and the narration prompt now sends `num_ctx` like the scorer does. Without it Ollama applies its own default and silently truncates, and a model that lost its instructions is precisely the one that answers in the wrong format.
+
 ### Added — Ollama Model Updates
 
 - **Registry update checking.** Inspectarr now tells you when a newer build of your model is published upstream, and offers a one-click pull.
