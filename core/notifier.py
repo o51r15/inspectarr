@@ -89,6 +89,7 @@ class Notifier:
         self._send(
             f"inspectarr started{tag}",
             f"{rules_count} rule(s) loaded and active.",
+            event="startup",
         )
 
     def notify_dry_run(self, torrent_name: str, bad_files: list[str]):
@@ -104,7 +105,8 @@ class Notifier:
                 "files": files,
             })
             return
-        self._send("[DRY RUN] Would remove", f"{torrent_name}\nBad files: {files}")
+        self._send("[DRY RUN] Would remove",
+                   f"{torrent_name}\nBad files: {files}", event="dry_run")
 
     def notify_quarantine(self, torrent_name: str, bad_files: list[str],
                           risk_level: str = None, paused: bool = True):
@@ -138,6 +140,7 @@ class Notifier:
         self._send(
             f"{level}Quarantined — awaiting review",
             f"{torrent_name}\nBad files: {files}{warn}",
+            event="quarantine",
         )
 
     def notify_action(
@@ -165,6 +168,7 @@ class Notifier:
             "inspectarr: Torrent removed",
             f"{torrent_name}\nFiles: {files}\n"
             f"{app_name.capitalize()}: {arr_status}  |  Client: {qbit_status}",
+            event="action",
         )
 
     def notify_error(self, context: str, reason: str):
@@ -186,6 +190,7 @@ class Notifier:
         self._send(
             "inspectarr: Retry exhausted",
             f"{torrent_name}\nHash: {hash[:12]}...\nFailed after {attempts} attempts.",
+            event="retry_exhausted",
         )
 
     # ------------------------------------------------------------------
@@ -211,11 +216,13 @@ class Notifier:
         if self.digest_cfg.use_ollama and self._ollama_url and self._ollama_model:
             narrated = self._ollama_narrate(events)
             if narrated:
-                self._send("inspectarr: Scan Digest", narrated)
+                self._send("inspectarr: Scan Digest", narrated,
+                           event="digest")
                 return
 
         # Fallback: plain summary
-        self._send("inspectarr: Scan Digest", self._plain_summary(events))
+        self._send("inspectarr: Scan Digest", self._plain_summary(events),
+                   event="digest")
 
     def _plain_summary(self, events: list[dict]) -> str:
         """Build a plain-text bullet summary from buffered events."""
