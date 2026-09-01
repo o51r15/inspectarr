@@ -15,3 +15,9 @@ services:
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml
+      # Read-only so inspectarr can CONFIRM a payload is gone after a
+      # delete. It never writes here; qBittorrent owns this tree.
+      - /mnt/otherpool/downloads:/downloads:ro
+    environment:
+      # <path as the torrent client sees it>:<path as inspectarr sees it>
+      - INSPECTARR_PATH_MAP=/downloads:/downloads

@@ -7,6 +7,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed - A deletion is not a deletion until something checks
+
+`delete_torrent()` returned `True` whenever the HTTP request did not raise.
+qBittorrent answers `POST /torrents/delete` with `200` in every case - including
+for a hash it does not hold, and when the payload could not be unlinked - so the
+return value proved only that the request was sent. Inspectarr recorded
+`qbit_success=1`, wrote a terminal `action='deleted'` row, and pushed a
+notification saying the torrent was gone.
+
+On the live deployment that produced four malicious `.exe` payloads sitting on
+the share, ~4.8 GB, while `processed_hashes` reported nine clean deletions. Two
+were files re-grabbed within twenty seconds of a genuine delete; two were
+orphans whose torrent had already left the client, so the delete removed
+nothing. Because `'deleted'` is terminal in `is_processed()`, none of them were
+ever looked at again.
+
+`delete_torrent()` now confirms its own work before reporting success:
+
+- the client must actually hold the torrent when asked - deleting an unknown
+  hash is a no-op, not a success
+- the torrent must be gone from the client afterwards (polled, 20s)
+- when `INSPECTARR_PATH_MAP` maps the client's paths onto ones Inspectarr can
+  see, the payload must be gone from disk (polled, 10s - a CIFS share caches
+  attributes, so a single `stat` right after the unlink can still return the
+  old entry)
+
+Anything short of that returns `False`, which routes the torrent onto the
+failure path that already existed and was until now unreachable: a
+`client_delete_failed` event, an error notification, `action='failed'`
+(re-eligible on the next scan) and the retry queue.
+
+Payload verification is skipped, not assumed, when unconfigured.
+`docker-compose.yml` now mounts the download tree read-only and sets
+`INSPECTARR_PATH_MAP`.
+
+`transmission.py` and `deluge.py` still return `True` on a request that did not
+raise. Same bug, untouched here.
+
+
 ### Added — Batch Size Calibration
 
 Inspectarr can now **measure** how many indexers your model handles reliably in one request, instead of assuming a number.
