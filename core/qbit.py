@@ -1,7 +1,4 @@
 import logging
-import os
-import time
-
 import requests
 
 from .torrent_client import AbstractTorrentClient, TorrentClientError
@@ -160,97 +157,20 @@ class QBittorrentClient(AbstractTorrentClient):
         resp = self._req("GET", "/api/v2/torrents/files", params={"hash": hash})
         return resp.json()
 
-    # Environment hook for filesystem verification. Format is a
-    # comma-separated list of "<path as the client sees it>:<path as
-    # inspectarr sees it>", e.g. "/downloads:/downloads". Empty (the default)
-    # means the payload path is not reachable from this process and only the
-    # client-side check runs.
-    _PATH_MAP_ENV = "INSPECTARR_PATH_MAP"
-
-    def _local_path(self, client_path: str) -> str | None:
-        """
-        Translate a path as the torrent client sees it into one this process
-        can stat. Returns None when no mapping applies or the mapped root is
-        not mounted here -- which means "cannot verify", not "not deleted".
-        """
-        raw = os.environ.get(self._PATH_MAP_ENV, "").strip()
-        if not raw or not client_path:
-            return None
-        for pair in raw.split(","):
-            if ":" not in pair:
-                continue
-            src, dst = pair.split(":", 1)
-            src, dst = src.strip(), dst.strip()
-            if src and dst and client_path.startswith(src):
-                root = dst.rstrip("/") or "/"
-                if not os.path.isdir(root):
-                    return None
-                return client_path.replace(src, dst, 1)
-        return None
-
-    def delete_torrent(
-        self,
-        hash: str,
-        delete_files: bool = True,
-        verify: bool = True,
-        verify_timeout: float = 20.0,
-    ) -> bool:
-        """
-        Delete a torrent from qBittorrent and confirm it actually went away.
-
-        qBittorrent answers POST /torrents/delete with 200 whatever happens --
-        including for a hash it does not hold, and when it could not unlink the
-        payload -- so the HTTP status is not evidence of anything. Callers read
-        the return value of this method as "the bad thing is gone" and report it
-        to the user in exactly those words, so it has to mean that:
-
-          0. the client actually held the torrent when we asked (deleting a
-             hash qBittorrent does not have is a no-op that still answers
-             200, and leaves the payload orphaned on disk -- this is how
-             untracked .exe files survived a "deleted" notification),
-          1. the torrent is no longer listed by the client, and
-          2. when delete_files is set and the payload path is reachable from
-             this process, the payload is no longer on disk.
-
-        Returns True only when every check available to us passed. A False
-        return puts the caller on its existing failure path: a
-        ``client_delete_failed`` event, an error notification, ``action=
-        'failed'`` (which stays re-eligible for the next scan) and the retry
-        queue -- rather than a terminal 'deleted' record for a file that is
-        still there.
-        """
-        # --- check 0: does the client actually hold this torrent? ---------
-        # A delete for an unknown hash succeeds loudly and does nothing. If we
-        # skip this, an orphaned payload reads as a clean deletion.
-        content_path = None
-        present = None
+    def _payload_path(self, hash: str) -> str | None:
         try:
-            info = self._req(
-                "GET", "/api/v2/torrents/info", params={"hashes": hash}
-            ).json()
-            present = bool(info)
-            if info:
-                content_path = info[0].get("content_path") or None
-        except Exception as exc:
-            log.warning(
-                "qBit: could not query %s before deleting it: %s", hash[:12], exc
-            )
+            info = self._req("GET", "/api/v2/torrents/info",
+                             params={"hashes": hash}).json()
+            return info[0].get("content_path") or None if info else None
+        except Exception:
+            return None
 
-        if verify and present is False:
-            log.error(
-                "qBit was asked to delete %s but the client does not hold that "
-                "torrent -- nothing was deleted and any payload on disk is "
-                "unaccounted for; reporting failure", hash[:12],
-            )
+    def delete_torrent(self, hash: str, delete_files: bool = True,
+                       verify: bool = True, verify_timeout: float = 20.0) -> bool:
+        """Delete a torrent from qBittorrent and confirm it actually went away."""
+        content_path = self._payload_path(hash) if delete_files else None
+        if verify and not self._precheck_delete(hash):
             return False
-
-        if verify and present is None:
-            log.error(
-                "qBit: could not confirm whether %s is in the client, so a "
-                "delete cannot be vouched for; reporting failure", hash[:12],
-            )
-            return False
-
         try:
             self._req(
                 "POST", "/api/v2/torrents/delete",
@@ -259,68 +179,8 @@ class QBittorrentClient(AbstractTorrentClient):
         except requests.HTTPError as exc:
             log.warning("qBit delete failed for %s: %s", hash[:12], exc)
             return False
-
-        if not verify:
-            return True
-
-        # --- check 1: the torrent left the client -------------------------
-        deadline = time.monotonic() + verify_timeout
-        gone = False
-        while True:
-            try:
-                still = self._req(
-                    "GET", "/api/v2/torrents/info", params={"hashes": hash}
-                ).json()
-            except Exception as exc:
-                log.error(
-                    "qBit: could not verify deletion of %s: %s", hash[:12], exc
-                )
-                return False
-            if not still:
-                gone = True
-                break
-            if time.monotonic() >= deadline:
-                break
-            time.sleep(1.0)
-
-        if not gone:
-            log.error(
-                "qBit accepted the delete for %s but the torrent is STILL in "
-                "the client after %.0fs -- reporting failure",
-                hash[:12], verify_timeout,
-            )
-            return False
-
-        # --- check 2: the payload left the disk ---------------------------
-        if content_path:
-            local = self._local_path(content_path)
-            if local is None:
-                log.info(
-                    "qBit delete verified for %s (client only; payload path %r "
-                    "is not visible to inspectarr -- set %s to verify the "
-                    "filesystem too)",
-                    hash[:12], content_path, self._PATH_MAP_ENV,
-                )
-                return True
-
-            # A network share caches attributes (this deployment mounts the
-            # download tree over CIFS), so a stat taken immediately after the
-            # unlink can still return the old entry. Re-check for a few
-            # seconds before calling it a failure.
-            fs_deadline = time.monotonic() + 10.0
-            while os.path.exists(local) and time.monotonic() < fs_deadline:
-                time.sleep(1.0)
-            if os.path.exists(local):
-                log.error(
-                    "qBit removed torrent %s but the payload is STILL on disk: "
-                    "%s -- reporting failure", hash[:12], local,
-                )
-                return False
-            log.info(
-                "qBit delete verified for %s (torrent and payload both gone)",
-                hash[:12],
-            )
-        return True
+        return True if not verify else self._confirm_deleted(
+            hash, content_path, verify_timeout)
 
     def test_connection(self) -> bool:
         """Verify credentials and connectivity."""

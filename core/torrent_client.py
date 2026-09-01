@@ -24,6 +24,9 @@ get_torrent_files() returns dicts with at least:
 
 from __future__ import annotations
 
+import logging
+import os
+import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -41,6 +44,9 @@ NORMALISED_STATES = {
 class TorrentClientError(Exception):
     """Raised on auth failures, connection errors, or unexpected API responses."""
     pass
+
+
+log = logging.getLogger("inspectarr")
 
 
 class AbstractTorrentClient(ABC):
@@ -83,8 +89,14 @@ class AbstractTorrentClient(ABC):
         """Resume / start a torrent. Returns True on success."""
 
     @abstractmethod
-    def delete_torrent(self, hash: str, delete_files: bool = True) -> bool:
-        """Delete torrent (and optionally its data). Returns True on success."""
+    def delete_torrent(self, hash: str, delete_files: bool = True,
+                       verify: bool = True, verify_timeout: float = 20.0) -> bool:
+        """
+        Delete torrent (and optionally its data). Returns True only when the
+        deletion has been CONFIRMED -- see _confirm_deleted(). A True here is
+        reported to the user as "the file is gone", so implementations must
+        not return it on the strength of a request that merely did not raise.
+        """
 
     @abstractmethod
     def set_torrent_category(self, hash: str, category: str) -> bool:
@@ -105,6 +117,123 @@ class AbstractTorrentClient(ABC):
     @abstractmethod
     def get_torrent_trackers(self, hash: str) -> list[dict]:
         """Return tracker list: [{url, status, ...}, ...]."""
+
+    # ------------------------------------------------------------------
+    # Deletion verification (shared by every client)
+    # ------------------------------------------------------------------
+    #
+    # Every one of these clients answers a delete request affirmatively
+    # without promising anything: qBittorrent returns 200 for a hash it does
+    # not hold, and the Transmission and Deluge RPCs likewise succeed on a
+    # no-op. Callers report the result to the user as "the file is gone", so
+    # the return value of delete_torrent() has to be checked, not assumed.
+
+    # Format: "<path as the client sees it>:<path as inspectarr sees it>",
+    # comma-separated. Unset means the payload is not reachable from this
+    # process and only the client-side checks run.
+    _PATH_MAP_ENV = "INSPECTARR_PATH_MAP"
+
+    def _local_path(self, client_path: str) -> str | None:
+        """
+        Translate a client-side path into one this process can stat. Returns
+        None when no mapping applies or the mapped root is not mounted here --
+        which means "cannot verify", never "already gone".
+        """
+        raw = os.environ.get(self._PATH_MAP_ENV, "").strip()
+        if not raw or not client_path:
+            return None
+        for pair in raw.split(","):
+            if ":" not in pair:
+                continue
+            src, dst = (p.strip() for p in pair.split(":", 1))
+            if src and dst and client_path.startswith(src):
+                root = dst.rstrip("/") or "/"
+                return client_path.replace(src, dst, 1) if os.path.isdir(root) else None
+        return None
+
+    def _payload_path(self, hash: str) -> str | None:
+        """
+        Where this torrent's data lives, as the CLIENT sees it. Subclasses
+        override; the default disables filesystem verification.
+        """
+        return None
+
+    def _torrent_present(self, hash: str) -> bool | None:
+        """True/False if known, None if the client could not be queried."""
+        try:
+            return bool(self.get_all_torrents(hash))
+        except Exception as exc:
+            log.warning("could not query %s before deleting it: %s", hash[:12], exc)
+            return None
+
+    def _precheck_delete(self, hash: str) -> bool:
+        """
+        False if we must not claim a deletion: the client does not hold this
+        torrent (so the delete is a no-op that leaves any payload orphaned on
+        disk), or we cannot tell.
+        """
+        present = self._torrent_present(hash)
+        if present is False:
+            log.error(
+                "asked to delete %s but the client does not hold that torrent "
+                "-- nothing was deleted and any payload on disk is unaccounted "
+                "for; reporting failure", hash[:12],
+            )
+            return False
+        if present is None:
+            log.error(
+                "could not confirm whether %s is in the client, so a delete "
+                "cannot be vouched for; reporting failure", hash[:12],
+            )
+            return False
+        return True
+
+    def _confirm_deleted(self, hash: str, content_path: str | None,
+                         verify_timeout: float = 20.0) -> bool:
+        """Poll until the torrent has left the client and, where visible, the
+        payload has left the disk. False if either is still there."""
+        deadline = time.monotonic() + verify_timeout
+        while True:
+            try:
+                still = bool(self.get_all_torrents(hash))
+            except Exception as exc:
+                log.error("could not verify deletion of %s: %s", hash[:12], exc)
+                return False
+            if not still:
+                break
+            if time.monotonic() >= deadline:
+                log.error(
+                    "delete of %s was accepted but the torrent is STILL in the "
+                    "client after %.0fs -- reporting failure",
+                    hash[:12], verify_timeout,
+                )
+                return False
+            time.sleep(1.0)
+
+        if not content_path:
+            return True
+        local = self._local_path(content_path)
+        if local is None:
+            log.info(
+                "delete verified for %s (client only; payload path %r is not "
+                "visible to inspectarr -- set %s to verify the filesystem too)",
+                hash[:12], content_path, self._PATH_MAP_ENV,
+            )
+            return True
+
+        # A network share caches attributes, so a stat taken immediately after
+        # the unlink can still return the old entry. Re-check briefly.
+        fs_deadline = time.monotonic() + 10.0
+        while os.path.exists(local) and time.monotonic() < fs_deadline:
+            time.sleep(1.0)
+        if os.path.exists(local):
+            log.error(
+                "torrent %s was removed but the payload is STILL on disk: %s "
+                "-- reporting failure", hash[:12], local,
+            )
+            return False
+        log.info("delete verified for %s (torrent and payload both gone)", hash[:12])
+        return True
 
     # ------------------------------------------------------------------
     # Cleanup

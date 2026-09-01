@@ -270,13 +270,32 @@ class DelugeClient(AbstractTorrentClient):
             log.warning("Deluge resume failed for %s: %s", hash[:12], exc)
             return False
 
-    def delete_torrent(self, hash: str, delete_files: bool = True) -> bool:
+    def _payload_path(self, hash: str) -> str | None:
+        try:
+            result = self._rpc("core.get_torrents_status",
+                               [{"id": [hash]}, ["name", "save_path"]])
+            if not result or not isinstance(result, dict):
+                return None
+            d = next(iter(result.values()), None)
+            if not d or not d.get("save_path") or not d.get("name"):
+                return None
+            return d["save_path"].rstrip("/") + "/" + d["name"]
+        except Exception:
+            return None
+
+    def delete_torrent(self, hash: str, delete_files: bool = True,
+                       verify: bool = True, verify_timeout: float = 20.0) -> bool:
+        """Remove a torrent from Deluge and confirm it actually went away."""
+        content_path = self._payload_path(hash) if delete_files else None
+        if verify and not self._precheck_delete(hash):
+            return False
         try:
             self._rpc("core.remove_torrent", [hash, delete_files])
-            return True
         except Exception as exc:
             log.warning("Deluge delete failed for %s: %s", hash[:12], exc)
             return False
+        return True if not verify else self._confirm_deleted(
+            hash, content_path, verify_timeout)
 
     def get_torrent_files(self, hash: str) -> list[dict]:
         result = self._rpc("web.get_torrent_files", [hash])

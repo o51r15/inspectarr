@@ -42,8 +42,14 @@ Payload verification is skipped, not assumed, when unconfigured.
 `docker-compose.yml` now mounts the download tree read-only and sets
 `INSPECTARR_PATH_MAP`.
 
-`transmission.py` and `deluge.py` still return `True` on a request that did not
-raise. Same bug, untouched here.
+The same verification now covers **all three** clients. `delete_torrent()` was
+returning `True` on any request that did not raise in `transmission.py` and
+`deluge.py` as well; the confirmation logic (`_precheck_delete`,
+`_confirm_deleted`, `_local_path`, `_payload_path`) now lives on
+`AbstractTorrentClient` and every client uses it. Verified live against real
+Transmission and Deluge daemons (real torrent deleted and confirmed gone from
+client and disk; orphan hash reported as failure where stock returned `True`),
+plus 21 stubbed cases across the three.
 
 
 ### Added — Batch Size Calibration
