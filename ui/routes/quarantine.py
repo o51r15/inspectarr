@@ -156,17 +156,23 @@ def quarantine_action():
                 "message": f"{name} was already gone from the torrent client — "
                            f"hold cleared",
             })
-        from core.scanner import _build_arr_client
-        arr_ok = False
+        from core.scanner import (ARR_CLIENT_REMOVING_ROUTES,
+                                  _build_arr_client, clear_from_client)
+        arr_ok, arr_route = False, "error"
         app_name = entry.get("arr_app") or "sonarr"
         try:
-            arr_ok = bool(_build_arr_client(app_name, cfg).blocklist(hash_))
+            arr_ok, arr_route = _build_arr_client(
+                app_name, cfg).blocklist_with_route(hash_)
         except Exception as exc:
             log.warning(f"Quarantine remediate: arr blocklist failed: {exc}")
 
         deleted = False
         try:
-            deleted = bool(client.delete_torrent(hash_, delete_files=True))
+            deleted, _how = clear_from_client(
+                client, hash_,
+                arr_removed=bool(arr_ok)
+                and arr_route in ARR_CLIENT_REMOVING_ROUTES,
+                delete_files=True)
         except Exception as exc:
             return jsonify({
                 "ok": False,

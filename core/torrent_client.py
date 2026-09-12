@@ -235,6 +235,74 @@ class AbstractTorrentClient(ABC):
         log.info("delete verified for %s (torrent and payload both gone)", hash[:12])
         return True
 
+    def ensure_deleted(self, hash: str, delete_files: bool = True,
+                       settle_timeout: float = 15.0,
+                       verify_timeout: float = 20.0) -> tuple[bool, str]:
+        """
+        Make sure this torrent is gone, WITHOUT assuming we are the one who
+        removed it. Used when Sonarr/Radarr was asked to remove the release
+        from the download client as part of blocklisting.
+
+        Returns (ok, how) where how is one of:
+          already_gone   -- the arr's removal landed; nothing left to do
+          deleted_here   -- it was still present, so we deleted it ourselves
+          delete_failed  -- our fallback delete could not be confirmed
+          payload_remains-- the torrent left the client, the data did not
+          unreachable    -- the client could not be queried at all
+
+        delete_torrent() is deliberately NOT used as the first move here. Its
+        precheck refuses to vouch for deleting a torrent the client no longer
+        holds, so calling it after the arr has already succeeded would report
+        a failure on the happy path.
+        """
+        content_path = self._payload_path(hash) if delete_files else None
+
+        deadline = time.monotonic() + settle_timeout
+        present = None
+        while True:
+            present = self._torrent_present(hash)
+            if present is False:
+                break
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(2.0)
+
+        if present is None:
+            log.error(
+                "cannot reach the torrent client, so the removal of %s cannot "
+                "be confirmed; reporting failure", hash[:12],
+            )
+            return False, "unreachable"
+
+        if present is True:
+            log.warning(
+                "%s is still in the client %.0fs after the arr was asked to "
+                "remove it -- deleting it directly",
+                hash[:12], settle_timeout,
+            )
+            ok = self.delete_torrent(hash, delete_files=delete_files,
+                                     verify_timeout=verify_timeout)
+            return ok, ("deleted_here" if ok else "delete_failed")
+
+        # Gone from the client. Check the payload too, where we can see it.
+        local = self._local_path(content_path) if content_path else None
+        if local is None:
+            log.info("%s was removed from the client by the arr", hash[:12])
+            return True, "already_gone"
+
+        fs_deadline = time.monotonic() + 10.0
+        while os.path.exists(local) and time.monotonic() < fs_deadline:
+            time.sleep(1.0)
+        if os.path.exists(local):
+            log.error(
+                "%s was removed from the client but the payload is STILL on "
+                "disk: %s -- reporting failure", hash[:12], local,
+            )
+            return False, "payload_remains"
+        log.info("%s removed by the arr (torrent and payload both gone)",
+                 hash[:12])
+        return True, "already_gone"
+
     # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------

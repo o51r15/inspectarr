@@ -23,6 +23,38 @@ def _get_logger(level: str) -> logging.Logger:
     return logger
 
 
+# Routes on which the arr removed the release from the download client
+# itself. Only DELETE /queue can do that; /history/failed cannot, and an
+# untracked release is unknown to the arr entirely.
+ARR_CLIENT_REMOVING_ROUTES = frozenset({"queue"})
+
+
+def clear_from_client(torrent_client, infohash: str, arr_removed: bool,
+                      delete_files: bool = True) -> tuple[bool, str]:
+    """
+    Make sure a blocklisted release is gone from the download client.
+
+    arr_removed=True (the queue route) means the arr was already asked to
+    remove it. The client call is then a confirmation with a fallback: wait
+    briefly for the arr's removal to land, delete directly only if it never
+    does. Deleting unconditionally would race the arr and report a failure
+    every time the arr won, because delete_torrent()'s precheck refuses to
+    vouch for deleting a torrent the client no longer holds.
+
+    arr_removed=False means no arr endpoint could touch the client, so
+    inspectarr's own verified delete is the only mechanism there is.
+
+    Returns (ok, how). A merely-failed delete comes back as ok=False rather
+    than raising; genuine transport errors still propagate.
+    """
+    if arr_removed:
+        return torrent_client.ensure_deleted(infohash,
+                                             delete_files=delete_files)
+    ok = bool(torrent_client.delete_torrent(infohash,
+                                            delete_files=delete_files))
+    return ok, ("deleted_here" if ok else "delete_failed")
+
+
 def _build_arr_client(app_name: str, config: AppConfig) -> AbstractArrClient:
     if app_name == "sonarr":
         c = config.arrs.sonarr
@@ -218,20 +250,25 @@ class Scanner:
             return True
 
         # action == "remediate"
-        arr_ok = False
+        arr_ok, arr_route = False, "error"
         try:
-            arr_ok = bool(_build_arr_client(
-                entry.get("arr_app") or "sonarr", self.config).blocklist(h))
+            arr_ok, arr_route = _build_arr_client(
+                entry.get("arr_app") or "sonarr", self.config
+            ).blocklist_with_route(h)
         except Exception as exc:
             self.log.warning(f"  Blocklist failed for {name}: {exc}")
         try:
-            deleted = bool(self.qbit.delete_torrent(h, delete_files=True))
+            deleted, _how = clear_from_client(
+                self.qbit, h,
+                arr_removed=bool(arr_ok)
+                and arr_route in ARR_CLIENT_REMOVING_ROUTES,
+                delete_files=True)
         except Exception as exc:
             self.log.error(f"  Delete failed for {name}: {exc}")
             # Stay held rather than claiming a deletion that did not happen.
             return False
         if not deleted:
-            self.log.error(f"  Client refused to delete {name} — still held")
+            self.log.error(f"  Client refused to delete {name} -- still held")
             return False
 
         self.state.record_action(h, name, entry.get("category"),
@@ -655,6 +692,7 @@ class Scanner:
         """
         arr_client  = _build_arr_client(rule.app, self.config)
         arr_success = False
+        arr_route   = "error"
 
         # Step 0 — grab attribution BEFORE blocklisting.
         # Must happen before the arr blocklist call because blocklisting adds a
@@ -681,7 +719,7 @@ class Scanner:
 
         # Step 1 — blocklist in arr
         try:
-            arr_success = arr_client.blocklist(hash)
+            arr_success, arr_route = arr_client.blocklist_with_route(hash)
             if arr_success:
                 self.log.info(f"  Blocklisted in {rule.app}: {name}")
         except Exception as exc:
@@ -714,27 +752,41 @@ class Scanner:
                     self._check_retry_limit(hash, name, count)
                 return False
 
-        # Step 2 — delete from qBittorrent
+        # Step 2 -- make sure the torrent is gone from the download client.
+        #
+        # Which mechanism is used depends on how the arr blocklisted it. On
+        # the queue route the arr was asked to remove it from the client too,
+        # so this confirms that landed and only deletes directly if it did
+        # not. On every other route no arr endpoint can touch the client, so
+        # inspectarr's own verified delete is the only mechanism.
+        arr_removed = (bool(arr_success)
+                       and arr_route in ARR_CLIENT_REMOVING_ROUTES)
         try:
-            qbit_ok = self.qbit.delete_torrent(hash, delete_files=True)
+            qbit_ok, client_how = clear_from_client(
+                self.qbit, hash, arr_removed=arr_removed, delete_files=True)
+            reason = "" if qbit_ok else ("client delete unconfirmed (%s)"
+                                         % client_how)
         except Exception as exc:
-            qbit_ok = False
-            reason  = str(exc)
-            self.log.error(f"  qBit delete failed: {reason}")
-            # The arr-failure path above writes a structured event but this
-            # one never did, so a torrent-client delete failure was invisible
-            # on the Events page -- visible only as a notification and a line
-            # in the process log. Symmetry matters here: this is a failed
-            # destructive action and must leave a trace in the action log.
+            qbit_ok, client_how = False, "error"
+            reason = str(exc)
+
+        if not qbit_ok:
+            # A False return used to fall straight through to Step 3 and be
+            # recorded as a successful deletion with client_success=0: the
+            # torrent stayed in the client while inspectarr logged
+            # "DONE -- deleted". An unconfirmed delete is now handled exactly
+            # like a raised one.
+            self.log.error(f"  Client delete failed: {reason}")
             self.state.write_log({
                 "level": "ERROR", "event": "client_delete_failed",
                 "inspection_id": inspection_id,
                 "torrent_name": name, "hash": hash,
                 "category": rule.category, "rule": rule.name,
                 "client": self.config.torrent_client,
+                "arr_route": arr_route, "outcome": client_how,
                 "reason": reason, "arr_blocklisted": arr_success,
             })
-            self.notifier.notify_error(f"qBit delete failed: {name}", reason)
+            self.notifier.notify_error(f"Client delete failed: {name}", reason)
             self.state.record_action(hash, name, rule.category, rule.name,
                                       "failed", arr_success, False)
             self._record_inspection(

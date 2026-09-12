@@ -126,13 +126,23 @@ class AbstractArrClient(ABC):
             page += 1
         return None
 
-    def blocklist_from_queue(self, queue_id: int) -> bool:
+    def blocklist_from_queue(self, queue_id: int,
+                             remove_from_client: bool = True) -> bool:
         """
         Remove from the arr queue and blocklist the release.
-        removeFromClient=false — inspectarr handles qbit deletion separately.
+
+        removeFromClient defaults to TRUE, so this is the same request the
+        arr's own "Remove -> Blocklist and Search" button sends. The arr owns
+        the download-client connection and removes the torrent through the
+        code path it uses for every other queue removal.
+
+        It used to send "false", with inspectarr deleting from the client
+        itself. That works, but it made every deletion depend on inspectarr's
+        own connection to the client being up at that exact moment, and it
+        did not match what the arr UI does.
         """
         return self._delete(f"/queue/{queue_id}", params={
-            "removeFromClient": "false",
+            "removeFromClient": "true" if remove_from_client else "false",
             "blocklist": "true",
             "skipRedownload": "false",
         })
@@ -175,22 +185,36 @@ class AbstractArrClient(ABC):
     # Orchestration
     # ------------------------------------------------------------------
 
-    def blocklist(self, infohash: str) -> bool:
+    def blocklist_with_route(self, infohash: str) -> tuple[bool, str]:
         """
-        Orchestrate blocklisting: check queue first, then history.
-        Returns True if blocklisted (or not found — caller logs the nuance).
+        Orchestrate blocklisting and report WHICH route was used, because the
+        route decides whether the download client still needs dealing with.
+
+        Returns (ok, route):
+          "queue"     -- removed via DELETE /queue, which also removed the
+                         torrent from the download client
+          "history"   -- marked failed via POST /history/failed. The release
+                         is blocklisted, but this endpoint has NO ability to
+                         touch the download client.
+          "untracked" -- the arr has never heard of this infohash (a manual
+                         client add, or history already pruned). Nothing was
+                         asked of the arr, and ok is True so the caller does
+                         not treat it as an arr failure.
         """
         queue_item = self.find_in_queue(infohash)
         if queue_item:
-            return self.blocklist_from_queue(queue_item["id"])
+            return self.blocklist_from_queue(queue_item["id"]), "queue"
 
         history_item = self.find_in_history(infohash)
         if history_item:
-            return self.blocklist_from_history(history_item["id"])
+            return self.blocklist_from_history(history_item["id"]), "history"
 
-        # Not tracked by the arr at all — may have been a manual qbit add.
-        # Return True so the caller doesn't treat this as an arr failure.
-        return True
+        return True, "untracked"
+
+    def blocklist(self, infohash: str) -> bool:
+        """Bool-only wrapper for callers that do not care about the route."""
+        ok, _route = self.blocklist_with_route(infohash)
+        return ok
 
     # ------------------------------------------------------------------
     # Per-media history (ROADMAP item 27)
