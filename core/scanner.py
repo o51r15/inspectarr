@@ -3,7 +3,7 @@ import re
 import uuid
 from datetime import datetime, timezone, timedelta
 from .config import AppConfig, Rule
-from .torrent_client import build_torrent_client
+from .torrent_client import TorrentClientError, build_torrent_client
 from .arrs.base import AbstractArrClient
 from .arrs.sonarr import SonarrClient
 from .arrs.radarr import RadarrClient
@@ -307,6 +307,32 @@ class Scanner:
             self.log.debug(f"Scanning rule '{rule.name}' (category: {rule.category})")
             try:
                 torrents = self.qbit.get_torrents_by_category(rule.category)
+            except TorrentClientError as exc:
+                # The client is not answering at all, and the client layer has
+                # already retried through a short outage before giving up. Every
+                # remaining rule would fail the same way, so stop the scan here
+                # instead of emitting one identical error per rule -- an outage
+                # that produced 18 near-identical qbit_fetch_failed events is
+                # what motivated this. Nothing is lost: the next scheduled scan
+                # picks up whatever was missed.
+                reason = str(exc)
+                self.log.error(
+                    f"Torrent client unreachable, abandoning this scan "
+                    f"after rule '{rule.name}': {reason}"
+                )
+                self.state.write_log({
+                    "level": "WARNING", "event": "scan_skipped_client_down",
+                    "client": self.config.torrent_client,
+                    "stopped_at_rule": rule.name,
+                    "rules_total": len(self.config.rules),
+                    "reason": reason,
+                })
+                if self.state.get_error_state("client_down") != reason:
+                    self.notifier.notify_error(
+                        "Torrent client unreachable -- scan skipped", reason
+                    )
+                    self.state.set_error_state("client_down", reason)
+                break
             except Exception as exc:
                 reason  = str(exc)
                 context = f"qbit_fetch:{rule.category}"
@@ -321,6 +347,11 @@ class Scanner:
                     )
                     self.state.set_error_state(context, reason)
                 continue
+
+            # The client answered, so a previous outage is over. Clear the
+            # stored reason so the next one notifies again instead of being
+            # deduped against a stale message.
+            self.state.set_error_state("client_down", None)
 
             # Fetch succeeded — clear stored error so a future failure notifies again
             self.state.set_error_state(f"qbit_fetch:{rule.category}", None)

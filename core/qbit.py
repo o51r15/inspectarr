@@ -1,9 +1,29 @@
 import logging
+import time
+
 import requests
 
 from .torrent_client import AbstractTorrentClient, TorrentClientError
 
 log = logging.getLogger("inspectarr")
+
+# How long to keep trying when qBittorrent cannot be reached at all.
+#
+# This is not a general-purpose retry. It exists for one specific, expected
+# condition: qBittorrent is routed through a VPN sidecar (the usual gluetun
+# setup puts it in the sidecar's network namespace), and every VPN reconnect
+# takes its network away for a few seconds. During that window every call
+# fails with a connection error, and a deletion that happens to land in it
+# was being reported as a hard failure.
+#
+# One delay per entry, so the total worst case is the sum plus the request
+# timeouts -- currently ~17s of waiting across four attempts.
+CONNECT_BACKOFF_SECONDS = (2.0, 5.0, 10.0)
+
+# Only these are retried. An HTTP error means qBittorrent answered and said
+# no, which retrying will not change; a connection error means nothing
+# answered at all.
+TRANSIENT_ERRORS = (requests.ConnectionError, requests.Timeout)
 
 
 class QBittorrentError(TorrentClientError):
@@ -39,6 +59,45 @@ class QBittorrentClient(AbstractTorrentClient):
         self._authenticated = True
 
     def _req(self, method: str, endpoint: str, **kwargs) -> requests.Response:
+        """
+        Perform a request, riding out a brief loss of the connection.
+
+        Every endpoint this client uses is idempotent -- listing torrents,
+        setting a category, pausing, and deleting a hash all have the same
+        effect applied twice as applied once -- so a retry cannot double up
+        an action. That is what makes retrying safe here, and it is the
+        reason not to copy this wrapper somewhere that is not idempotent.
+
+        When the attempts run out this raises QBittorrentError rather than
+        the underlying requests exception, so callers can tell "the client is
+        not there" apart from "the client refused".
+        """
+        last = None
+        attempts = len(CONNECT_BACKOFF_SECONDS) + 1
+        for attempt in range(attempts):
+            try:
+                return self._req_once(method, endpoint, **kwargs)
+            except TRANSIENT_ERRORS as exc:
+                last = exc
+                # The socket, and possibly the whole session, is gone. Force
+                # a fresh login on the next attempt rather than reusing a
+                # cookie against a connection that no longer exists.
+                self._authenticated = False
+                if attempt == attempts - 1:
+                    break
+                delay = CONNECT_BACKOFF_SECONDS[attempt]
+                log.warning(
+                    "qBittorrent unreachable (%s) -- retrying in %.0fs "
+                    "(attempt %d of %d)",
+                    exc.__class__.__name__, delay, attempt + 1, attempts,
+                )
+                time.sleep(delay)
+        raise QBittorrentError(
+            "qBittorrent unreachable after %d attempts over ~%.0fs: %s"
+            % (attempts, sum(CONNECT_BACKOFF_SECONDS), last)
+        ) from last
+
+    def _req_once(self, method: str, endpoint: str, **kwargs) -> requests.Response:
         if not self._authenticated:
             self._login()
         resp = self.session.request(
@@ -176,7 +235,7 @@ class QBittorrentClient(AbstractTorrentClient):
                 "POST", "/api/v2/torrents/delete",
                 data={"hashes": hash, "deleteFiles": str(delete_files).lower()},
             )
-        except requests.HTTPError as exc:
+        except (requests.HTTPError, TorrentClientError) as exc:
             log.warning("qBit delete failed for %s: %s", hash[:12], exc)
             return False
         return True if not verify else self._confirm_deleted(
