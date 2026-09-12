@@ -7,6 +7,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed - Bad Torrents Occasionally Surviving Deletion
+
+Blocklisting told Sonarr/Radarr *not* to remove the torrent from the download
+client (`removeFromClient=false`) and Inspectarr deleted it itself. That made
+every deletion depend on Inspectarr's own connection to the client being up at
+that exact moment.
+
+It usually is. But qBittorrent is commonly routed through a VPN sidecar - in
+the usual gluetun setup it lives inside the sidecar's network namespace - and
+every VPN reconnect takes its network away for a few seconds. Eighteen
+`Max retries exceeded` events on one live install came from exactly that.
+Sonarr's own **Remove -> Blocklist and Search** button never had the problem,
+because the arr removes the torrent through the download-client connection it
+already owns.
+
+So the arr does it now, where the arr can. Blocklisting sends
+`removeFromClient=true`, which is byte-for-byte what the arr UI button sends.
+
+That only covers releases the arr still has in its queue, and there are three
+routes, not one:
+
+| Route | What the arr can do | Who removes the torrent |
+|---|---|---|
+| Still in the queue | `DELETE /queue` | **the arr** |
+| Only in history | `POST /history/failed` | Inspectarr - the endpoint cannot touch the client |
+| Not tracked at all | nothing | Inspectarr - a manual add the arr never saw |
+
+On the queue route Inspectarr now confirms the arr's removal landed and only
+deletes directly if it did not, so nothing is left behind if the arr's
+download-client connection is the one that is broken.
+
+Transport errors are also no longer treated as fatal. A connection error or
+timeout is retried three times with 2s/5s/10s backoff, which comfortably covers
+a VPN reconnect. HTTP errors are *not* retried - qBittorrent answered and said
+no, and asking again will not change its mind.
+
+And when the client really is unreachable, one scan now logs **one** event and
+sends **one** notification, then stops, instead of repeating the same failure
+once per rule. Nothing is lost; the next scheduled scan picks it up.
+
+**Also fixed, and quieter than either:** a delete that returned `False` without
+raising fell straight through to the success path and was recorded as a
+deletion with `client_success=0`. The torrent stayed in the client while
+Inspectarr logged `DONE - deleted` and sent a notification saying so. An
+unconfirmed delete is now handled exactly like a raised one: same event, same
+notification, same retry.
+
 ### Fixed - A deletion is not a deletion until something checks
 
 `delete_torrent()` returned `True` whenever the HTTP request did not raise.
