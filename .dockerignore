@@ -17,3 +17,9 @@ SECURITY_IMPL_PLAN.md
 !CHANGELOG.md
 !LICENSE
 !CONTRIBUTING.md
+
+# Test suite and dev-only files never ship in the image
+tests/
+pytest.ini
+requirements-dev.txt
+.pytest_cache/

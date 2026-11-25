@@ -1,5 +1,14 @@
-# M-08: pin base image digest for reproducibility
-FROM python:3.12-slim@sha256:f0c6bc1ab7b1ab270bbb612a31a67a7938d6171183ddce9121f04984ab3df44e
+# M-08: pin base image digest for reproducibility.
+#
+# This must be the multi-platform INDEX digest, not one platform's image.
+# The previous pin (sha256:f0c6bc1a..., Python 3.12.2 on Debian bookworm,
+# built 2024-02) was a single amd64 manifest: it could not build for arm64,
+# and it froze the base two years behind on OS and Python security fixes.
+#
+# Pinned 2026-11-25: python:3.12-slim = 3.12.16 on Debian trixie.
+# To refresh: docker buildx imagetools inspect python:3.12-slim
+#             (use the top-level "Digest:", whose MediaType is an index).
+FROM python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
 
 # Create a non-root user for the app
 RUN groupadd -r inspectarr && useradd -r -g inspectarr -d /app inspectarr
