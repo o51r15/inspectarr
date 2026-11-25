@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, badge, empty, time %}
+{% block title %}History — inspectarr{% endblock %}
+{% block page_title %}Activity{% endblock %}
+
+{% block content %}
+{% set labels = {'all': 'All', 'removed': 'Removed', 'held': 'Held', 'recorded': 'Recorded only', 'failed': 'Failed'} %}
+<section class="card card-flush">
+  <div class="card-head flex-wrap">
+    <div>
+      <h2 class="card-title">Everything Inspectarr has caught</h2>
+      <p class="card-sub">{{ total }} {{ 'catch' if total == 1 else 'catches' }}{% if show != 'all' %} · {{ labels[show]|lower }}{% endif %}. Click a row to see exactly why.</p>
+    </div>
+    <div class="flex flex-wrap gap-4" role="group" aria-label="Filter">
+      {% for f in filters %}
+      <a href="?show={{ f }}" class="btn btn-sm {{ 'btn-primary' if f == show else 'btn-ghost' }}"{% if f == show %} aria-current="true"{% endif %}>{{ labels[f] }}</a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="table-fluid">
+      <caption class="sr-only">Inspection history</caption>
+      <thead>
+        <tr><th>Release</th><th class="hide-sm">Risk</th><th>What happened</th><th class="hide-sm">Indexer</th><th class="hide-sm">When</th></tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+        <tr class="row-click" data-action="toggle-detail" data-id="{{ r.inspection_id }}" tabindex="0" aria-expanded="false">
+          <td class="cell-truncate" title="{{ r.torrent_name }}">
+            <div class="font-medium truncate">{{ r.torrent_name }}</div>
+            <div class="text-xs text-dim">{{ r.rule_name or '—' }}{% if r.category %} · {{ r.category }}{% endif %}<span class="show-sm"> · {{ time(r.created_at) }}</span></div>
+          </td>
+          <td class="hide-sm">{{ badge((r.risk_level or 'unknown')|title, r.risk_tone) }}</td>
+          <td>{{ badge(r.outcome, r.outcome_tone) }}</td>
+          <td class="hide-sm text-sm text-muted">{{ r.indexer or '—' }}</td>
+          <td class="hide-sm nowrap text-sm">{{ time(r.created_at) }}</td>
+        </tr>
+        <tr class="detail-row" id="detail-{{ r.inspection_id }}" hidden>
+          <td colspan="5"><div class="detail-body text-sm"><span class="spinner"></span> Loading…</div></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <nav class="pagination" aria-label="Pages">
+    {% if page > 1 %}<a href="?show={{ show }}&page={{ page - 1 }}" aria-label="Previous page">‹</a>{% endif %}
+    <span class="current">{{ page }} / {{ pages }}</span>
+    {% if page < pages %}<a href="?show={{ show }}&page={{ page + 1 }}" aria-label="Next page">›</a>{% endif %}
+  </nav>
+  {% endif %}
+  {% else %}
+    {% if show == 'all' %}
+      {{ empty("Nothing caught yet",
+               "Every release your rules flag is recorded here with the reasons, whether or not it was removed.",
+               icon_name="shield-check") }}
+    {% else %}
+      {{ empty("No " ~ labels[show]|lower ~ " catches", "Try a different filter.", href="?show=all", cta="Show all", icon_name="list") }}
+    {% endif %}
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/pages/activity.js') }}?v={{ app_version }}"></script>
+{% endblock %}

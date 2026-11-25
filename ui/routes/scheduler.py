@@ -58,18 +58,61 @@ def scheduler_view():
                            scoring_info=scoring_info, retry_entries=retry_entries)
 
 
-@scheduler_bp.route("/scheduler/toggle", methods=["POST"])
-def toggle():
+PAUSED_KEY = "scheduler_paused"
+
+
+def _remember_paused(paused: bool) -> None:
+    """
+    Persist the user's last Pause/Resume so it survives a restart.
+
+    Rule (web.py main): scheduler_autostart decides the very first boot;
+    after anyone presses Pause or Resume, their last choice wins. A failed
+    write only loses that memory, so it is logged and never blocks the toggle.
+    """
+    state = current_app.config.get("STATE")
+    if not state:
+        return
+    try:
+        state.set_app_state(PAUSED_KEY, "1" if paused else "0")
+    except Exception as exc:
+        current_app.logger.warning(f"Could not persist scheduler pause: {exc}")
+
+
+def _toggle() -> tuple[bool, bool, str]:
+    """Flip the scheduler. Returns (ok, running_now, message)."""
     scheduler = current_app.config["SCHEDULER"]
     if scheduler.running:
         scheduler.stop()
-        suffix = "?toast=Scheduler+stopped&level=info"
+        _remember_paused(True)
+        return True, False, "Scheduler stopped"
+    if scheduler.start():
+        _remember_paused(False)
+        return True, True, "Scheduler started"
+    # BUG-11: previous loop still finishing a scan — did not start
+    return False, False, "Scheduler still stopping - try again shortly"
+
+
+@scheduler_bp.route("/scheduler/toggle.json", methods=["POST"])
+def toggle_json():
+    ok, running, message = _toggle()
+    return jsonify({"ok": ok, "running": running, "message": message}), (200 if ok else 409)
+
+
+@scheduler_bp.route("/scheduler/run.json", methods=["POST"])
+def run_json():
+    if current_app.config["SCHEDULER"].trigger():
+        return jsonify({"ok": True, "message": "Scan started"})
+    return jsonify({"ok": False, "message": "A scan is already running"}), 409
+
+
+@scheduler_bp.route("/scheduler/toggle", methods=["POST"])
+def toggle():
+    ok, running, message = _toggle()
+    if ok:
+        suffix = ("?toast=Scheduler+started&level=success" if running
+                  else "?toast=Scheduler+stopped&level=info")
     else:
-        if scheduler.start():
-            suffix = "?toast=Scheduler+started&level=success"
-        else:
-            # BUG-11: previous loop still finishing a scan — did not start
-            suffix = "?toast=Scheduler+still+stopping+-+try+again+shortly&level=warning"
+        suffix = "?toast=Scheduler+still+stopping+-+try+again+shortly&level=warning"
     referrer = request.referrer or url_for("dashboard.index")
     # Strip any existing toast params from referrer before appending new ones
     base = referrer.split("?")[0]

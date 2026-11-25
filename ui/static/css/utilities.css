@@ -1,0 +1,63 @@
+/* utilities.css — single-purpose classes that replace inline style="". */
+
+.stack > * + * { margin-top: var(--space-5); }
+.stack-sm > * + * { margin-top: var(--space-3); }
+
+.flex { display: flex; }
+.inline-flex { display: inline-flex; }
+.flex-col { flex-direction: column; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-1 { flex: 1; min-width: 0; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; }
+.justify-end { justify-content: flex-end; }
+.gap-4 { gap: var(--space-1); }
+.gap-8 { gap: var(--space-2); }
+.gap-12 { gap: var(--space-3); }
+.gap-16 { gap: var(--space-4); }
+.ml-auto { margin-left: auto; }
+
+.mt-0 { margin-top: 0 !important; }
+.mt-4 { margin-top: var(--space-1); }
+.mt-8 { margin-top: var(--space-2); }
+.mt-12 { margin-top: var(--space-3); }
+.mt-16 { margin-top: var(--space-4); }
+.mt-24 { margin-top: var(--space-6); }
+.mb-0 { margin-bottom: 0 !important; }
+.mb-8 { margin-bottom: var(--space-2); }
+.mb-12 { margin-bottom: var(--space-3); }
+.mb-16 { margin-bottom: var(--space-4); }
+.mb-24 { margin-bottom: var(--space-6); }
+.p-0 { padding: 0 !important; }
+
+.w-full { width: 100%; }
+.min-w-0 { min-width: 0; }
+.nowrap { white-space: nowrap; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.break-all { word-break: break-all; }
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+
+.text-xs { font-size: var(--fs-xs); }
+.text-sm { font-size: var(--fs-sm); }
+.text-lg { font-size: var(--fs-lg); }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+
+.text { color: var(--text); }
+.text-muted { color: var(--text-muted); }
+.text-dim { color: var(--text-dim); }
+.text-accent { color: var(--accent); }
+.text-ok, .text-success { color: var(--ok-fg); }
+.text-warn, .text-warning { color: var(--warn-fg); }
+.text-danger, .text-error { color: var(--danger-fg); }
+.text-info { color: var(--info-fg); }
+
+.hidden, [hidden] { display: none !important; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.scroll-y-160 { max-height: 160px; overflow-y: auto; }
+.scroll-y-320 { max-height: 320px; overflow-y: auto; }

@@ -58,9 +58,11 @@ def test_tasks_page_says_when_polling_is_off(client, config_path):
     assert "Polling disabled" in client.get("/system/tasks").get_data(as_text=True)
 
 
-def test_quarantine_nav_link_is_marked_active(client):
-    html = client.get("/quarantine").get_data(as_text=True)
-    assert 'href="/quarantine" class="active"' in html
+def test_review_queue_marks_activity_active(client):
+    # Was "the Quarantine link never highlights" (V12). The queue now lives
+    # under Activity, and the highlight comes from ui/nav.py for every page.
+    html = client.get("/activity/review").get_data(as_text=True)
+    assert 'href="/activity" class="nav-item is-active"' in html
 
 
 def test_version_is_the_running_one_and_never_fetched_from_github(client, app):

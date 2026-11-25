@@ -12,7 +12,7 @@ Three outcomes, deliberately distinct:
 """
 import logging
 
-from flask import Blueprint, render_template, current_app, request, jsonify
+from flask import Blueprint, current_app, jsonify, redirect, request
 
 from ui.routes._utils import safe_error
 
@@ -31,11 +31,9 @@ def _clients():
 
 @quarantine_bp.route("/quarantine")
 def quarantine_page():
-    state = current_app.config.get("STATE")
-    held = state.get_quarantine("held") if state else []
-    recent = [q for q in (state.get_quarantine(None, limit=50) if state else [])
-              if q.get("status") != "held"][:25]
-    return render_template("quarantine.html", held=held, recent=recent)
+    # The review queue now lives under Activity. Bookmarks and the links in
+    # older notifications keep working through this permanent redirect.
+    return redirect("/activity/review", code=301)
 
 
 @quarantine_bp.route("/quarantine/data")

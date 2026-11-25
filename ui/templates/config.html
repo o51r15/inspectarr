@@ -13,6 +13,22 @@
   <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
+{#- Phase 2.1: Settings' own tab bar. The panes used to be switched from a
+    sidebar group; the id and .nav-group-items wrapper are kept so the pane
+    JavaScript below (showPane, the update dot) works unchanged. -#}
+<nav class="subnav mb-24" id="settings-group" aria-label="Settings sections">
+  <div class="nav-group-items subnav-track">
+    <a class="subnav-item" href="/config#connections"   data-pane="connections">Connections</a>
+    <a class="subnav-item" href="/config#rules"         data-pane="rules">Rules</a>
+    <a class="subnav-item" href="/config#indexers"      data-pane="indexers">Prowlarr</a>
+    <a class="subnav-item" href="/config#ai"            data-pane="ai">AI</a>
+    <a class="subnav-item" href="/config#notifications" data-pane="notifications">Notifications</a>
+    <a class="subnav-item" href="/config#general"       data-pane="general">General</a>
+    <a class="subnav-item" href="/config#advanced"      data-pane="advanced">Advanced</a>
+    <a class="subnav-item" href="/config#backups"       data-pane="backups">Backups</a>
+  </div>
+</nav>
+
 <form method="post" action="/config/save" id="config-form">
   <input type="hidden" name="edit_mode" id="edit_mode" value="form">
 

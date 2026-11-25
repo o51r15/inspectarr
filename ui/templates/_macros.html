@@ -1,0 +1,44 @@
+{#- _macros.html — shared building blocks. Import with:
+      {% from "_macros.html" import icon, badge, empty, time %}
+    Autoescaping stays on: nothing here marks caller text |safe. -#}
+
+{% macro icon(name, cls="") -%}
+<svg class="icon {{ cls }}" aria-hidden="true" focusable="false"><use href="{{ url_for('static', filename='icons.svg') }}#{{ name }}"></use></svg>
+{%- endmacro %}
+
+{% macro badge(text, tone="neutral", title=None) -%}
+<span class="badge badge-{{ tone }}"{% if title %} title="{{ title }}"{% endif %}>{{ text }}</span>
+{%- endmacro %}
+
+{% macro empty(title, body, href=None, cta=None, icon_name="inbox") -%}
+<div class="empty">
+  {{ icon(icon_name) }}
+  <h4>{{ title }}</h4>
+  <p>{{ body }}</p>
+  {% if href %}<a class="btn btn-secondary btn-sm mt-8" href="{{ href }}">{{ cta }}</a>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- Server renders a readable UTC fallback; core.js upgrades every
+    [data-relative] to "4 min ago" with the exact local time on hover. -#}
+{% macro time(iso) -%}
+{% if iso %}<time datetime="{{ iso }}" data-relative>{{ iso[:16]|replace('T', ' ') }}</time>{% else %}<span class="text-dim">—</span>{% endif %}
+{%- endmacro %}
+
+{% macro stat(label, value, hint=None, tone=None, id=None) -%}
+<div class="card stat{% if tone %} stat-{{ tone }}{% endif %}">
+  <div class="stat-label">{{ label }}</div>
+  <div class="stat-value"{% if id %} id="{{ id }}"{% endif %}>{{ value }}</div>
+  {% if hint %}<div class="stat-hint">{{ hint }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro subnav(items, active, counts={}) -%}
+<nav class="subnav" aria-label="Section">
+  {% for it in items %}
+  <a href="{{ it.href }}" class="subnav-item{% if it.key == active %} is-active{% endif %}"{% if it.key == active %} aria-current="page"{% endif %}>
+    {{ it.label }}{% if it.badge and counts.get(it.badge) %} <span class="pill">{{ counts.get(it.badge) }}</span>{% endif %}
+  </a>
+  {% endfor %}
+</nav>
+{%- endmacro %}

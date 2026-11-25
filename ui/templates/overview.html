@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, badge, empty, time, stat %}
+{% block title %}Overview — inspectarr{% endblock %}
+{% block page_title %}Overview{% endblock %}
+
+{% block topbar_actions %}
+  <button type="button" class="btn btn-secondary btn-sm" data-action="run-now"{% if status.scanning %} disabled{% endif %}>
+    {{ icon('refresh') }} <span class="btn-label-sm-hide">Scan now</span>
+  </button>
+  {% if status.running %}
+  <button type="button" class="btn btn-secondary btn-sm" data-action="toggle-scheduler">{{ icon('pause') }} <span class="btn-label-sm-hide">Pause</span></button>
+  {% else %}
+  <button type="button" class="btn btn-primary btn-sm" data-action="toggle-scheduler">{{ icon('play') }} <span class="btn-label-sm-hide">Resume</span></button>
+  {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="stack">
+
+  {# Status hero: one sentence, the most urgent thing first (ui/overview.py) #}
+  <section class="hero hero-{{ health.tone }}" id="hero" aria-live="polite">
+    <div class="hero-mark">{{ icon(health.icon) }}</div>
+    <div class="hero-body">
+      <h2 class="hero-title" id="hero-title">{{ health.title }}</h2>
+      <p class="hero-detail" id="hero-detail">{{ health.detail }}</p>
+      <p class="hero-meta" id="hero-meta">
+        {% if status.scanning %}<span class="status-dot scanning"></span>Scanning now…
+        {% elif status.running and status.next_run %}Next check {{ time(status.next_run) }}
+        {% endif %}
+        {% if status.last_result and status.last_result.scan_end %}
+          {% if status.running or status.scanning %} · {% endif %}Last checked {{ time(status.last_result.scan_end) }}
+        {% endif %}
+      </p>
+    </div>
+    <div id="hero-action">
+      {% if health.href %}
+        <a class="btn btn-secondary" href="{{ health.href }}">{{ health.action_label }} {{ icon('arrow-right') }}</a>
+      {% elif health.action %}
+        <button type="button" class="btn btn-primary" data-action="{{ health.action }}">{{ health.action_label }}</button>
+      {% endif %}
+    </div>
+  </section>
+
+  <div class="grid grid-3">
+    {{ stat("Checked in the last scan",
+            status.last_result.torrents_checked if status.last_result else "—",
+            "downloads in your watched categories", id="stat-checked") }}
+    {{ stat("Caught in the last " ~ window_days ~ " days", numbers.caught,
+            (numbers.removed ~ " removed automatically") if numbers.removed else "nothing removed",
+            tone="warn" if numbers.caught else None) }}
+    {{ stat("Waiting for you", numbers.held,
+            "held releases to review" if numbers.held else "nothing to review",
+            tone="warn" if numbers.held else None, id="stat-held") }}
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <h3 class="card-title">Connections</h3>
+      <a class="text-sm" href="/system/status">Details</a>
+    </div>
+    <div class="chips" id="connections">
+      <span class="chip"><span class="spinner"></span> Checking…</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h3 class="card-title">Recent catches</h3>
+      <a class="text-sm" href="/activity/history">See all {{ icon('arrow-right') }}</a>
+    </div>
+    {% if recent %}
+    <div class="list">
+      {% for r in recent %}
+      <div class="list-item">
+        <div class="list-main">
+          <div class="list-title" title="{{ r.torrent_name }}">{{ r.torrent_name }}</div>
+          <div class="list-sub">{{ r.rule_name or 'No rule' }}{% if r.indexer %} · {{ r.indexer }}{% endif %} · {{ time(r.created_at) }}</div>
+        </div>
+        {% if r.risk_level %}<span class="hide-sm">{{ badge(r.risk_level|title, r.risk_tone) }}</span>{% endif %}
+        {{ badge(r.outcome, r.outcome_tone) }}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      {{ empty("Nothing caught yet",
+               "When a download contains something your rules flag — an .exe in a TV episode, say — it shows up here.",
+               icon_name="shield-check") }}
+    {% endif %}
+  </section>
+
+</div>
+<script type="application/json" id="page-data">{{ page_data|tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/pages/overview.js') }}?v={{ app_version }}"></script>
+{% endblock %}
