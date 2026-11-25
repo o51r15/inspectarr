@@ -33,8 +33,15 @@ updates:
       prefix: build
 
   # Runtime and dev dependencies in requirements*.txt.
+  #
+  # The requirements are `>=` floors, so every image build already installs
+  # the newest release. Raising a floor (">=2.31.0" -> ">=2.34.2") changes
+  # nothing that ships, and the first run opened five PRs doing only that.
+  # increase-if-necessary proposes a change only when a new release falls
+  # OUTSIDE the allowed range. Security alerts are separate and unaffected.
   - package-ecosystem: pip
     directory: "/"
+    versioning-strategy: increase-if-necessary
     schedule:
       interval: weekly
     groups:
