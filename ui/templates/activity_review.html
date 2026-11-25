@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, badge, empty, time %}
+{% block title %}Needs review — inspectarr{% endblock %}
+{% block page_title %}Activity{% endblock %}
+
+{% block content %}
+<div class="stack">
+
+  {% if held %}
+  <section class="card card-flush">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">{{ held|length }} waiting for your decision</h2>
+        <p class="card-sub">Each one is paused in your torrent client. Nothing here is deleted unless you choose to.</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <caption class="sr-only">Releases held for review</caption>
+        <thead>
+          <tr><th>Release</th><th>Risk</th><th class="hide-sm">Why it was held</th><th>Held</th><th class="text-right">Decision</th></tr>
+        </thead>
+        <tbody>
+        {% for q in held %}
+          <tr id="row-{{ q.hash }}">
+            <td class="cell-truncate" title="{{ q.torrent_name }}">
+              <div class="font-medium truncate">{{ q.torrent_name }}</div>
+              <div class="text-xs text-dim">{{ q.rule_name or '—' }}{% if q.category %} · {{ q.category }}{% endif %}</div>
+              {% if q.paused_ok == 0 %}
+                <div class="mt-4">{{ badge("Still downloading — the client refused to pause it", "warn") }}</div>
+              {% endif %}
+            </td>
+            <td>{{ badge((q.risk_level or 'unknown')|title, q.risk_tone) }}</td>
+            <td class="hide-sm text-sm text-muted">
+              {% set files = q.bad_files or [] %}
+              {% for f in files[:3] %}<code class="break-all">{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+              {% if files|length > 3 %} and {{ files|length - 3 }} more{% endif %}
+            </td>
+            <td class="nowrap text-sm">{{ time(q.quarantined_at) }}{% if q.expires_at %}<div class="text-xs text-dim">auto-removes {{ time(q.expires_at) }}</div>{% endif %}</td>
+            <td class="nowrap text-right">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="q-release" data-hash="{{ q.hash }}"
+                      data-name="{{ q.torrent_name }}" title="It's fine — resume the download">Release</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="q-keep" data-hash="{{ q.hash }}"
+                      data-name="{{ q.torrent_name }}" title="Leave it paused and stop asking">Keep paused</button>
+              <button type="button" class="btn btn-danger btn-sm" data-action="q-remediate" data-hash="{{ q.hash }}"
+                      data-name="{{ q.torrent_name }}" title="Blocklist it in Sonarr/Radarr and delete it">Delete</button>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% else %}
+  <section class="card">
+    {% if mode == 'automatic' %}
+      {{ empty("Nothing to review",
+               "In automatic mode, bad releases are removed straight away, so nothing waits here. "
+               ~ "To review lower-risk catches yourself, raise “Delete at or above” in Settings → Rules.",
+               href="/config#rules", cta="Open Rules", icon_name="check") }}
+    {% else %}
+      {{ empty("Nothing to review", "You're all caught up. New catches will appear here.", icon_name="check") }}
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if recent %}
+  <section class="card card-flush">
+    <div class="card-head"><h2 class="card-title">Recently decided</h2></div>
+    <div class="table-wrap">
+      <table>
+        <caption class="sr-only">Recently resolved holds</caption>
+        <thead><tr><th>Release</th><th>Outcome</th><th class="hide-sm">Note</th><th>When</th></tr></thead>
+        <tbody>
+        {% for q in recent %}
+          <tr>
+            <td class="cell-truncate" title="{{ q.torrent_name }}">{{ q.torrent_name }}</td>
+            <td>{{ badge(q.status|replace('remediated', 'deleted')|title,
+                         {'remediated': 'danger', 'released': 'ok', 'kept': 'neutral', 'expired': 'warn'}.get(q.status, 'neutral')) }}</td>
+            <td class="hide-sm text-sm text-muted">{{ q.resolution or '' }}</td>
+            <td class="nowrap text-sm">{{ time(q.resolved_at) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/pages/activity.js') }}?v={{ app_version }}"></script>
+{% endblock %}

@@ -290,25 +290,81 @@ class StateManager:
             log.warning(f"Failed to record inspection: {exc}")
             return False
 
-    def get_inspections(self, limit: int = 50, torrent_hash: str = None) -> list[dict]:
-        """Recent inspections, newest first; optionally for one torrent."""
+    def get_inspections(self, limit: int = 50, torrent_hash: str = None,
+                        offset: int = 0, action: str = None) -> list[dict]:
+        """
+        Recent inspections, newest first.
+
+        torrent_hash narrows to one torrent; action narrows to one outcome
+        (e.g. "deleted"). offset pages through History. All values are bound
+        parameters; nothing from the request reaches the SQL text.
+        """
+        where, args = [], []
+        if torrent_hash:
+            where.append("torrent_hash = ?")
+            args.append(torrent_hash)
+        if action:
+            where.append("action = ?")
+            args.append(action)
+        sql = "SELECT * FROM inspections"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        args += [max(1, int(limit)), max(0, int(offset))]
         try:
             with self._lock, self._conn() as conn:
-                if torrent_hash:
-                    rows = conn.execute(
-                        "SELECT * FROM inspections WHERE torrent_hash = ? "
-                        "ORDER BY created_at DESC LIMIT ?",
-                        (torrent_hash, limit),
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT * FROM inspections ORDER BY created_at DESC LIMIT ?",
-                        (limit,),
-                    ).fetchall()
+                rows = conn.execute(sql, args).fetchall()
             return [dict(r) for r in rows]
         except Exception as exc:
             log.warning(f"Failed to read inspections: {exc}")
             return []
+
+    def count_inspections(self, action: str = None, since_iso: str = None) -> int:
+        """How many inspections match; used for paging and Overview tiles."""
+        where, args = [], []
+        if action:
+            where.append("action = ?")
+            args.append(action)
+        if since_iso:
+            where.append("created_at >= ?")
+            args.append(since_iso)
+        sql = "SELECT COUNT(*) FROM inspections"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        try:
+            with self._lock, self._conn() as conn:
+                return int(conn.execute(sql, args).fetchone()[0])
+        except Exception as exc:
+            log.warning(f"Failed to count inspections: {exc}")
+            return 0
+
+    def get_inspection(self, inspection_id: str) -> dict | None:
+        try:
+            with self._lock, self._conn() as conn:
+                row = conn.execute(
+                    "SELECT * FROM inspections WHERE inspection_id = ?",
+                    (inspection_id,)).fetchone()
+            return dict(row) if row else None
+        except Exception as exc:
+            log.warning(f"Failed to read inspection {inspection_id}: {exc}")
+            return None
+
+    def count_quarantine_held(self) -> int:
+        """
+        Releases waiting on a decision; drives the nav badge on every page.
+
+        Uses idx_quarantine_status, so it is an index lookup. Returns 0 on a
+        failed read, but logs it, so a broken badge shows up in Events
+        instead of silently reading "nothing to review".
+        """
+        try:
+            with self._lock, self._conn() as conn:
+                return int(conn.execute(
+                    "SELECT COUNT(*) FROM quarantine WHERE status = 'held'"
+                ).fetchone()[0])
+        except Exception as exc:
+            log.warning(f"Failed to count held quarantine: {exc}")
+            return 0
 
     def get_inspection_reasons(self, inspection_id: str) -> list[dict]:
         """Evidence rows for one inspection, in the order they fired."""

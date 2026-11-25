@@ -1,159 +1,91 @@
+{%- from "_macros.html" import icon, subnav -%}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {#- Theme before first paint. The CSP allows this one inline script by its
+      SHA-256 hash (web.py THEME_SCRIPT_HASH, checked by tests/test_csp.py):
+      change a single character here and the test tells you to update it. -#}
+  <script>(function(){var t=null;try{t=localStorage.getItem("inspectarr-theme")}catch(e){}if(t!=="light"&&t!=="dark"){t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}document.documentElement.setAttribute("data-theme",t)})();</script>
   <title>{% block title %}inspectarr{% endblock %}</title>
-  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <meta name="color-scheme" content="dark light">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/fonts.css') }}?v={{ app_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}?v={{ app_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}?v={{ app_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}?v={{ app_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/utilities.css') }}?v={{ app_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/legacy.css') }}?v={{ app_version }}">
 </head>
 <body>
 <div class="layout">
 
-  <!-- Sidebar -->
-  <aside class="sidebar" role="complementary" aria-label="Sidebar">
-    <div class="sidebar-brand">
-      <img src="/static/logo.svg" alt="inspectarr" class="sidebar-logo-mark">
-      <div class="sidebar-brand-text">
-        <span class="sidebar-brand-name">inspectarr</span>
-        <span class="sidebar-brand-tag">&gt; watchdog</span>
-      </div>
-    </div>
-    <nav class="nav" role="navigation" aria-label="Main navigation">
-      <a href="/" class="{{ 'active' if request.path == '/' else '' }}">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="1.5" width="5" height="5" rx="1"/><rect x="9.5" y="1.5" width="5" height="5" rx="1"/><rect x="1.5" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></svg> Dashboard
+  <aside class="sidebar" aria-label="Sidebar">
+    <a class="sidebar-brand" href="/">
+      <img src="{{ url_for('static', filename='logo.svg') }}" alt="" class="sidebar-logo">
+      <span class="sidebar-name">inspectarr</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      {% for item in nav %}
+      <a href="{{ item.href }}" class="nav-item{% if item.key == nav_active %} is-active{% endif %}"{% if item.key == nav_active %} aria-current="page"{% endif %}>
+        {{ icon(item.icon) }} <span>{{ item.label }}</span>
+        {% if item.key == 'activity' and nav_counts.held %}<span class="pill" title="Releases waiting for your decision">{{ nav_counts.held }}</span>{% endif %}
       </a>
-      <a href="/scheduler" class="{{ 'active' if request.path.startswith('/scheduler') else '' }}">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><polyline points="8,4 8,8 11,10"/></svg> Scheduler
-      </a>
-      <a href="/torrents" class="{{ 'active' if request.path.startswith('/torrents') else '' }}">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9"/><polyline points="4,7 8,11 12,7"/><line x1="3" y1="14" x2="13" y2="14"/></svg> Torrents
-      </a>
-      <a href="/quarantine" class="{{ 'active' if request.path.startswith('/quarantine') else '' }}"><svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5 2.5 4v4c0 3.2 2.3 5.6 5.5 6.5 3.2-.9 5.5-3.3 5.5-6.5V4L8 1.5Z"/><line x1="8" y1="5.5" x2="8" y2="8.5"/><circle cx="8" cy="11" r="0.6" fill="currentColor"/></svg> Quarantine</a>
-      <a href="/indexers" class="{{ 'active' if request.path.startswith('/indexers') else '' }}">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="10" width="3" height="4"/><rect x="6.5" y="6" width="3" height="8"/><rect x="11" y="2" width="3" height="12"/></svg> Indexers
-      </a>
-      <div class="nav-group {{ 'open' if request.path.startswith('/system') else '' }}" id="system-group">
-        <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/system') else '' }}" onclick="toggleNavGroup('system-group')" aria-expanded="{{ 'true' if request.path.startswith('/system') else 'false' }}" aria-controls="system-group-items">
-          <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="12" height="5" rx="1"/><rect x="2" y="9" width="12" height="5" rx="1"/><circle cx="5" cy="4.5" r="0.75" fill="currentColor" stroke="none"/><circle cx="5" cy="11.5" r="0.75" fill="currentColor" stroke="none"/></svg> System
-          <span class="nav-group-caret">▸</span>
-        </button>
-        <div class="nav-group-items" id="system-group-items">
-          <a href="/system/status" class="{{ 'active' if request.path.startswith('/system/status') else '' }}">Status</a>
-          <a href="/system/tasks" class="{{ 'active' if request.path.startswith('/system/tasks') else '' }}">Tasks</a>
-          <a href="/system/notifications" class="{{ 'active' if request.path.startswith('/system/notifications') else '' }}">Notifications</a>
-          <a href="/config#backups" data-pane="backups">Backups</a>
-          <a href="/system/updates" class="{{ 'active' if request.path.startswith('/system/updates') else '' }}">Updates</a>
-          <a href="/system/events" class="{{ 'active' if request.path.startswith('/system/events') or request.path.startswith('/logs') else '' }}">Logs</a>
-        </div>
-      </div>      <div class="nav-group {{ 'open' if request.path.startswith('/config') else '' }}" id="settings-group">
-        <button type="button" class="nav-group-toggle {{ 'active' if request.path.startswith('/config') else '' }}" onclick="toggleNavGroup('settings-group')" aria-expanded="{{ 'true' if request.path.startswith('/config') else 'false' }}" aria-controls="settings-group-items">
-          <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4" x2="14" y2="4"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="12" x2="14" y2="12"/><circle cx="5" cy="4" r="1.5" fill="var(--card)" stroke="currentColor"/><circle cx="10" cy="8" r="1.5" fill="var(--card)" stroke="currentColor"/><circle cx="6" cy="12" r="1.5" fill="var(--card)" stroke="currentColor"/></svg> Settings
-          <span class="nav-group-caret">▸</span>
-        </button>
-        <div class="nav-group-items" id="settings-group-items">
-          <a href="/config#connections"   data-pane="connections">Connections</a>
-          <a href="/config#rules"         data-pane="rules">Rules</a>
-          <a href="/config#indexers"      data-pane="indexers">Prowlarr</a>
-          <a href="/config#notifications" data-pane="notifications">Notifications</a>
-          <a href="/config#ai"            data-pane="ai">AI</a>
-          <a href="/config#general"       data-pane="general">General</a>
-          <a href="/config#advanced"      data-pane="advanced">Advanced</a>
-        </div>
-      </div>
-      {% if auth_enabled %}
-      <a href="/logout">
-        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3"/><polyline points="10,5 13,8 10,11"/><line x1="13" y1="8" x2="6" y2="8"/></svg> Log out
-      </a>
-      {% endif %}
+      {% endfor %}
     </nav>
-    <a href="https://buymeacoffee.com/o51r15" target="_blank" rel="noopener"
-       class="sidebar-donate" title="Support the project">☕ Donate</a>
-    <a id="sidebar-version" href="https://github.com/o51r15/inspectarr/releases" target="_blank" rel="noopener"
-       class="sidebar-version">v{{ app_version }}</a>
-  </aside>
-  <!-- Overlay for mobile sidebar -->
-  <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
-
-  <!-- Main -->
-  <main class="main">
-    <div class="topbar">
-      <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Menu">☰</button>
-      <h2>{% block page_title %}{% endblock %}</h2>
-      <div class="flex gap-8 items-center">
-        {% block topbar_actions %}{% endblock %}
-        <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme" id="theme-btn" title="Toggle light/dark theme">🌙</button>
-      </div>
+    <div class="sidebar-foot">
+      {% if auth_enabled %}<a href="/logout">{{ icon('logout') }} Log out</a>{% endif %}
+      <a href="https://buymeacoffee.com/o51r15" target="_blank" rel="noopener">{{ icon('heart') }} Support the project</a>
+      <a href="/system/updates" title="Running version">v{{ app_version }}</a>
     </div>
-    {% if operating_mode == 'monitor' %}
-      <div class="mode-banner mode-banner-monitor" role="status">
-        <strong>Monitor mode</strong> — findings are inspected and recorded,
-        but nothing is paused, blocklisted or deleted.
-        <a href="/config#rules">Change in Settings &rarr; Rules</a>
+  </aside>
+  <button type="button" class="sidebar-overlay" id="sidebar-overlay" data-action="close-sidebar" aria-label="Close menu" tabindex="-1"></button>
+
+  <main class="main">
+    <header class="topbar">
+      <button type="button" class="btn btn-ghost btn-icon menu-btn" data-action="open-sidebar" aria-label="Open menu">{{ icon('menu') }}</button>
+      <h1 class="topbar-title">{% block page_title %}{% endblock %}</h1>
+      <div class="topbar-actions">
+        {% block topbar_actions %}{% endblock %}
+        <button type="button" class="btn btn-ghost btn-icon" id="theme-btn" data-action="toggle-theme" aria-label="Switch light or dark theme" title="Switch light / dark">{{ icon('sun') }}</button>
       </div>
-    {% elif operating_mode == 'quarantine' %}
-      <div class="mode-banner mode-banner-quarantine" role="status">
-        <strong>Quarantine mode</strong> — nothing is deleted automatically.
-        Matches are held on the <a href="/quarantine">Quarantine</a> page for
-        review. <a href="/config#rules">Change in Settings &rarr; Rules</a>
-      </div>
-    {% endif %}
+    </header>
+
     <div class="page">
+      {#- Overview's hero already states the mode, so the banner skips it. -#}
+      {% if request.path != '/' %}
+        {% if operating_mode == 'monitor' %}
+        <div class="mode-banner mode-banner-monitor" role="status">
+          {{ icon('eye') }} <span><strong>Watching only.</strong> Findings are recorded, but nothing is paused or deleted.</span>
+          <a href="/config#rules">Change</a>
+        </div>
+        {% elif operating_mode == 'quarantine' %}
+        <div class="mode-banner mode-banner-quarantine" role="status">
+          {{ icon('hand') }} <span><strong>Review mode.</strong> Nothing is deleted automatically; catches wait for you under Activity.</span>
+          <a href="/config#rules">Change</a>
+        </div>
+        {% endif %}
+      {% endif %}
+      {% if section_tabs %}<div class="mb-24">{{ subnav(section_tabs, section_tab_active, nav_counts) }}</div>{% endif %}
       {% block content %}{% endblock %}
     </div>
   </main>
-
 </div>
-<script src="/static/app.js"></script>
+
+<dialog class="dialog" id="confirm-dialog" aria-labelledby="confirm-title">
+  <form method="dialog">
+    <h2 class="dialog-title" id="confirm-title" data-title></h2>
+    <p class="dialog-body" data-body></p>
+    <div class="dialog-actions">
+      <button type="submit" class="btn btn-secondary" value="cancel">Cancel</button>
+      <button type="submit" class="btn btn-danger" value="ok" data-ok>Confirm</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast-container" aria-live="polite"></div>
+
+<script src="{{ url_for('static', filename='js/core.js') }}?v={{ app_version }}"></script>
 {% block scripts %}{% endblock %}
-<div id="toast-container"></div>
-<script>
-  // Mobile sidebar toggle
-  function toggleSidebar() {
-    document.querySelector('.sidebar').classList.toggle('open');
-    document.getElementById('sidebar-overlay').classList.toggle('visible');
-  }
-  function closeSidebar() {
-    document.querySelector('.sidebar').classList.remove('open');
-    document.getElementById('sidebar-overlay').classList.remove('visible');
-  }  // Close sidebar on nav click (mobile)
-  document.querySelectorAll('.nav a').forEach(a =>
-    a.addEventListener('click', closeSidebar));
-
-  // Expandable nav groups (System, etc.)
-  function toggleNavGroup(id) {
-    var group = document.getElementById(id);
-    group.classList.toggle('open');
-    var btn = group.querySelector('.nav-group-toggle');
-    if (btn) btn.setAttribute('aria-expanded', group.classList.contains('open'));
-  }
-
-  // Theme toggle (dark/light)
-  function toggleTheme() {
-    var html = document.documentElement;
-    var current = html.getAttribute('data-theme') || 'dark';
-    var next = current === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', next);
-    localStorage.setItem('inspectarr-theme', next);
-    document.getElementById('theme-btn').textContent = next === 'dark' ? '🌙' : '☀️';
-  }
-  // Restore saved theme
-  (function() {
-    var saved = localStorage.getItem('inspectarr-theme');
-    if (saved) {
-      document.documentElement.setAttribute('data-theme', saved);
-      var btn = document.getElementById('theme-btn');
-      if (btn) btn.textContent = saved === 'dark' ? '🌙' : '☀️';
-    }
-  })();
-
-  // The sidebar shows the RUNNING version, rendered server-side. It used to
-  // be overwritten from the GitHub API with the latest *release*, which is
-  // not what is running on a :dev image and made a browser call off the LAN
-  // on every session. System -> Updates compares versions server-side.
-</script>
 </body>
 </html>

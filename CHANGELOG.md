@@ -7,6 +7,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed - A Simpler, Calmer Interface
+
+The sidebar is down to five places: **Overview**, **Activity**, **Indexers**,
+**Settings** and **System**. Each section has its own tabs along the top, so
+nothing is hidden in a collapsing menu any more.
+
+- **Overview** replaces the Dashboard. It opens with one plain sentence about
+  your setup, the most urgent thing first: a service it can't reach, a
+  failed scan, scanning paused, releases waiting for you, then whether you
+  are protected or just watching. Below it: three numbers, a live strip
+  showing which services are reachable, and the latest catches.
+- **Activity** brings the review queue (formerly Quarantine) and a new
+  **History** together. History lists every catch with what actually
+  happened to it, including "would have been removed" in Monitor mode, and
+  a click on any row shows exactly which files and rules triggered it.
+- A badge on Activity shows how many releases are waiting for a decision,
+  on every page.
+- **Pause now survives a restart.** `scheduler_autostart` decides the very
+  first start; after that, whatever you last chose with Pause or Resume is
+  kept. Previously a restart silently resumed or stopped protection.
+- Deleting a held release asks in a proper dialog instead of a browser pop-up.
+- New look throughout: clearer type, consistent colours for "ok", "warning"
+  and "danger" everywhere, a light theme that meets contrast guidelines, and
+  a layout that works on a phone. The theme follows your system setting
+  until you pick one.
+- `/quarantine` now redirects to **Activity → Needs review**.
+
+### Changed - No More Third-Party Requests
+
+Fonts and the charting library are now served by Inspectarr itself instead
+of Google Fonts, jsDelivr and cdnjs, so the interface works on a LAN with no
+internet access and your browser no longer contacts those services.
+
+### Added - Content-Security-Policy
+
+Every page now sends a Content-Security-Policy, in report-only mode for now.
+It will be switched to enforcing once the remaining older pages are moved
+onto the new design system.
+
 ### Changed - Newer Base Image, and Images for ARM
 
 The Docker image was built on a base pinned in February 2024 (Python 3.12.2

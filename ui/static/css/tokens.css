@@ -1,0 +1,132 @@
+/* ==========================================================================
+   tokens.css — the only place colours, sizes and fonts are defined.
+
+   Every other stylesheet uses these custom properties. Change a value here
+   and every page follows; never hard-code a colour in a component.
+
+   Contrast, measured (WCAG 2.1 relative luminance; AA = 4.5 body text):
+     dark  text / card 14.5   muted / card 6.8   dim / card 4.7   dim / bg 5.2
+     dark  accent-ink / accent 9.2   accent / card 9.5
+     dark  badges (fg on tinted card): ok 8.3 warn 7.2 danger 5.6 info 5.9
+     light text / white 15.7  muted 5.8   dim 4.8   dim / bg 4.5
+     light accent-ink / accent 5.5 (#0d9488 + white was 3.7 and failed)
+     light badges: ok 4.6 warn 6.6 danger 5.8 info 6.1 violet 5.7 neutral 5.2
+     solid buttons: danger 4.8 / 6.5, warn 8.7 / 5.0, ok 7.5 / 5.0
+   Re-run G:\temp\inspectarr-review\contrast.py style checks when changing.
+   ========================================================================== */
+
+:root {
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 28px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", monospace;
+
+  --sidebar-w: 232px;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+}
+
+/* Dark is the default. The theme script in <head> sets data-theme before
+   first paint; with no JS at all, plain :root still resolves to dark. */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0c0d0f;
+  --surface: #121418;
+  --card: #16191e;
+  --card-hover: #1b1f25;
+  --inset: #0f1114;
+  --border: rgba(255, 255, 255, .08);
+  --border-strong: rgba(255, 255, 255, .16);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .25);
+
+  --text: #e6e9ee;
+  --text-muted: #9aa1ab;
+  --text-dim: #7d8590;
+
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-ink: #04201c;
+  --accent-soft: rgba(45, 212, 191, .12);
+
+  --ok-fg: #4ade80;      --ok-bg: rgba(74, 222, 128, .10);    --ok-border: rgba(74, 222, 128, .28);
+  --warn-fg: #f0a54a;    --warn-bg: rgba(240, 165, 74, .10);  --warn-border: rgba(240, 165, 74, .30);
+  --danger-fg: #f87171;  --danger-bg: rgba(248, 113, 113, .10); --danger-border: rgba(248, 113, 113, .30);
+  --info-fg: #60a5fa;    --info-bg: rgba(96, 165, 250, .10);  --info-border: rgba(96, 165, 250, .30);
+  --neutral-fg: #9aa1ab; --neutral-bg: rgba(255, 255, 255, .05); --neutral-border: rgba(255, 255, 255, .12);
+  --violet-fg: #a5b4fc;  --violet-bg: rgba(129, 140, 248, .12); --violet-border: rgba(129, 140, 248, .30);
+
+  --danger-solid: #dc2626; --danger-ink: #ffffff;
+  --warn-solid: #f0a54a;   --warn-ink: #241300;
+  --ok-solid: #22c55e;     --ok-ink: #04210f;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f9fafb;
+  --inset: #f3f4f6;
+  --border: rgba(15, 23, 42, .10);
+  --border-strong: rgba(15, 23, 42, .20);
+  --shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 8px 24px rgba(15, 23, 42, .06);
+
+  --text: #1b2430;
+  --text-muted: #5b6776;
+  --text-dim: #6b7280;
+
+  --accent: #0f766e;
+  --accent-hover: #115e59;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(15, 118, 110, .10);
+
+  --ok-fg: #15803d;      --ok-bg: rgba(22, 163, 74, .08);    --ok-border: rgba(22, 163, 74, .30);
+  --warn-fg: #92400e;    --warn-bg: rgba(202, 138, 4, .10);  --warn-border: rgba(202, 138, 4, .35);
+  --danger-fg: #b91c1c;  --danger-bg: rgba(220, 38, 38, .07); --danger-border: rgba(220, 38, 38, .30);
+  --info-fg: #1d4ed8;    --info-bg: rgba(37, 99, 235, .07);  --info-border: rgba(37, 99, 235, .28);
+  --neutral-fg: #5b6776; --neutral-bg: rgba(15, 23, 42, .05); --neutral-border: rgba(15, 23, 42, .14);
+  --violet-fg: #4f46e5;  --violet-bg: rgba(79, 70, 229, .07); --violet-border: rgba(79, 70, 229, .28);
+
+  --danger-solid: #b91c1c; --danger-ink: #ffffff;
+  --warn-solid: #b45309;   --warn-ink: #ffffff;
+  --ok-solid: #15803d;     --ok-ink: #ffffff;
+}
+
+/* --------------------------------------------------------------------------
+   Compatibility aliases for templates not yet migrated. They point the old
+   names at the new tokens, so an unmigrated page already gets the new
+   palette. Removed when the last template stops using them.
+   -------------------------------------------------------------------------- */
+:root {
+  --success: var(--ok-fg);
+  --warning: var(--warn-fg);
+  --error: var(--danger-fg);
+  --dry-run: var(--violet-fg);
+  --info: var(--info-fg);
+  --accent-dim: var(--accent-soft);
+  --accent-glow: var(--accent-soft);
+  --border-muted: var(--border);
+  --border-active: var(--border-strong);
+  --font-display: var(--font);
+  /* indexers.html used this name without ever defining it, so it always
+     fell back to a hard-coded dark grey -- wrong in light theme. */
+  --surface-alt: var(--inset);
+}

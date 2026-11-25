@@ -35,6 +35,20 @@ from ui.routes.webhooks import webhooks_bp
 from ui.routes.llm_logs import llm_logs_bp
 from ui.routes.api import api_bp
 from ui.routes.quarantine import quarantine_bp
+from ui.routes.activity import activity_bp
+
+
+# The one inline script allowed by the CSP: the theme picker in base.html's
+# <head>, which must run before first paint. tests/test_csp.py recomputes
+# this hash from base.html, so editing that script without updating the hash
+# fails the build instead of silently breaking theming.
+THEME_SCRIPT_HASH = "sha256-PPoTuvlWA0XNVpQ6rJx1Ht/QDS3rc3k6k+EMCxYxZtY="
+CSP_ENFORCE = False
+CSP = ("default-src 'self'; "
+       f"script-src 'self' '{THEME_SCRIPT_HASH}'; "
+       "style-src 'self'; img-src 'self' data:; font-src 'self'; "
+       "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; "
+       "form-action 'self'; object-src 'none'")
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,6 +76,11 @@ def create_app(config_path: str) -> Flask:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # Phase 1.13: report-only until every template is migrated off inline
+        # style/script; then CSP_ENFORCE flips and violations are blocked.
+        header = ("Content-Security-Policy" if CSP_ENFORCE
+                  else "Content-Security-Policy-Report-Only")
+        response.headers[header] = CSP
         return response
 
     app.config["SCHEDULER"]   = Scheduler(config_path)
@@ -100,14 +119,27 @@ def create_app(config_path: str) -> Flask:
         except Exception:
             return "automatic"
 
+    app.config["READ_OPERATING_MODE"] = _read_operating_mode
+
     @app.context_processor
     def inject_globals():
         from core import __version__
+        from flask import request
+        from ui.nav import NAV, active_key, active_subnav
         auth = read_auth_block(config_path)
+        state = app.config.get("STATE")
+        held = state.count_quarantine_held() if state else 0
+        tabs, tab_active = active_subnav(request.path)
         return {
             "auth_enabled": auth.get("enabled", False),
             "app_version": __version__,
             "operating_mode": _read_operating_mode(),
+            "nav": NAV,
+            "nav_active": active_key(request.path),
+            "section_tabs": tabs,
+            "section_tab_active": tab_active,
+            "nav_counts": {"held": held},
+            "scheduler_running": bool(app.config["SCHEDULER"].running),
         }
 
     @app.template_filter("datetimeformat")
@@ -122,14 +154,11 @@ def create_app(config_path: str) -> Flask:
 
     @app.route("/logout")
     def logout():
+        # A template rather than an inline <style> string, so the CSP's
+        # style-src 'self' does not strip it once enforced.
+        from flask import render_template
         return Response(
-            """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Logged out — inspectarr</title>
-<style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;
-height:100vh;margin:0;background:#0f1117;color:#e2e8f0}
-.box{text-align:center;padding:40px}.box a{color:#60a5fa;text-decoration:none}
-.box a:hover{text-decoration:underline}</style></head>
-<body><div class="box"><h2>Logged out</h2><p><a href="/">Log back in</a></p></div></body></html>""",
+            render_template("logged_out.html"),
             401,
             {"WWW-Authenticate": 'Basic realm="Inspectarr"', "Content-Type": "text/html"},
         )
@@ -150,6 +179,7 @@ height:100vh;margin:0;background:#0f1117;color:#e2e8f0}
     app.register_blueprint(llm_logs_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(quarantine_bp)
+    app.register_blueprint(activity_bp)
 
     return app
 
@@ -188,15 +218,29 @@ def main():
 
     app = create_app(config_path)
 
-    if scheduler_autostart:
+    print(f"inspectarr web UI → http://0.0.0.0:{port}")
+    print(f"Config: {config_path}")
+
+    # Phase 2.5: scheduler_autostart decides the first boot only. Once someone
+    # presses Pause or Resume, their last choice is stored and wins, so a
+    # restart neither silently stops protection nor silently resumes it.
+    state = app.config.get("STATE")
+    paused = None
+    try:
+        paused = state.get_app_state("scheduler_paused") if state else None
+    except Exception as exc:
+        print(f"WARNING: could not read saved pause state ({exc})")
+    if paused == "1":
+        print("Scheduler is PAUSED — it was paused from the UI before this restart. "
+              "Resume it from Overview.")
+    elif paused == "0" or (paused is None and scheduler_autostart):
         app.config["SCHEDULER"].start()
-        print(f"inspectarr web UI → http://0.0.0.0:{port}")
-        print(f"Config: {config_path}")
-        print("Scheduler started automatically (scheduler_autostart: true)")
+        why = ("resumed from the UI before this restart" if paused == "0"
+               else "scheduler_autostart: true")
+        print(f"Scheduler started ({why})")
     else:
-        print(f"inspectarr web UI → http://0.0.0.0:{port}")
-        print(f"Config: {config_path}")
-        print("Scheduler is OFF at startup — enable it from the dashboard.")
+        print("Scheduler is OFF at startup (scheduler_autostart: false) — "
+              "start it from Overview.")
 
     # Use waitress (production WSGI) if available, fall back to Flask dev server
     try:

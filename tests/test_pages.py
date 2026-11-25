@@ -9,7 +9,8 @@ import re
 import pytest
 
 PAGES = [
-    "/", "/scheduler", "/torrents", "/quarantine",
+    "/", "/activity/review", "/activity/history", "/torrents",
+    "/scheduler",
     "/indexers", "/indexers/stats", "/indexers/ai-scoring",
     "/config",
     "/system/status", "/system/tasks", "/system/notifications",
@@ -17,10 +18,11 @@ PAGES = [
     "/logs",
 ]
 
-# Old URLs kept alive as permanent redirects (folded into Indexers in v1.6.0).
+# Old URLs kept alive as permanent redirects.
 REDIRECTS = {
-    "/stats": "/indexers/stats",
-    "/system/llm-logs": "/indexers/ai-scoring",
+    "/stats": "/indexers/stats",                 # v1.6.0
+    "/system/llm-logs": "/indexers/ai-scoring",  # v1.6.0
+    "/quarantine": "/activity/review",           # Phase 2
 }
 
 

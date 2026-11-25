@@ -1,0 +1,60 @@
+/* legacy.css — page-specific rules carried over from style.css for pages
+   not yet migrated (Settings, Indexers). Phase 1 empties this file. */
+
+/* Model validation states (Settings > AI) */
+.ms-none { color: var(--text); }
+.ms-bad  { color: var(--danger-fg); }
+.ms-warn { color: var(--warn-fg); }
+.ms-good { color: var(--ok-fg); }
+select.model-opt { color: var(--text); }
+option.model-opt { background: var(--card); }
+
+/* Settings layout */
+.settings-content { min-width: 0; }
+.settings-pane { display: none; }
+.settings-pane.active { display: block; }
+.settings-savebar {
+  position: sticky; top: 72px; z-index: 40;
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4); margin-bottom: var(--space-5);
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.settings-savebar .pane-name { font-weight: 600; font-size: var(--fs-md); color: var(--text); }
+.settings-savebar .save-actions { display: flex; align-items: center; gap: 10px; }
+.settings-savebar .dirty-flag { font-size: var(--fs-xs); font-weight: 500; color: var(--warn-fg); opacity: 0; transition: opacity .15s; }
+.settings-savebar.dirty .dirty-flag { opacity: 1; }
+.settings-savebar .btn-primary { opacity: .45; pointer-events: none; }
+.settings-savebar.dirty .btn-primary { opacity: 1; pointer-events: auto; }
+
+.conn-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; margin-bottom: 18px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card); font-size: var(--fs-sm);
+}
+.conn-banner.connected { border-color: var(--ok-border); }
+.conn-banner.disconnected { border-color: var(--danger-border); }
+.conn-banner .conn-text { color: var(--text-muted); }
+.conn-banner.connected .conn-text { color: var(--ok-fg); }
+.conn-banner.disconnected .conn-text { color: var(--danger-fg); }
+.rules-disabled .rule-card { opacity: .5; pointer-events: none; }
+
+.rule-card {
+  position: relative;
+  padding: var(--space-4); margin-bottom: var(--space-3);
+  background: var(--inset); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.rule-card .rule-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--space-3); }
+.rule-remove { color: var(--danger-fg); background: none; border: none; font-size: 18px; line-height: 1; }
+
+.ext-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ext-tag {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+}
+.ext-tag button { background: none; border: none; color: var(--accent); font-size: 14px; line-height: 1; padding: 0; }
+
+.theme-toggle { display: none; }
