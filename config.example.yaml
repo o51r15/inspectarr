@@ -229,7 +229,7 @@ remediation:
 # Dry run
 # true  = log and notify matches but do NOT delete or blocklist anything
 # false = live mode (default)
-# Can also be set at runtime with: python watchdog.py --dry-run
+# Can also be set at runtime with: python inspectarr.py --dry-run
 # ---------------------------------------------------------------------------
 dry_run: false
 
@@ -296,6 +296,11 @@ prowlarr:
     # applies its own default (4096 for most models) and silently truncates
     # past it -- the model then loses the scoring instructions and answers
     # with confident invented numbers rather than an error.
+    #
+    # Measured on a real 37-indexer payload: the prompt is ~3,000 tokens in
+    # the compact format used now. Larger indexer lists are split into
+    # several calls automatically. Raise this only if your model genuinely
+    # supports more (8192 and 16384 are common).
     context_window: 4096
 
     # max_indexers_per_call is a property of the MODEL AND THE HOST, not of
@@ -305,6 +310,10 @@ prowlarr:
     #   gemma:latest     at 25 per call -> 24 of 39 scored, 15 dropped
     #   gemma:latest     at 10 per call -> 39 of 39
     #   phi4-mini:latest at 25 per call -> 37 of 39, and SLOWER than 10
+    #
+    # It is a separate, much lower limit than the token budget above: on
+    # qwen2.5-coder:7b, 30 indexers made the model echo its input back with
+    # the window barely half full.
     #
     # Nothing errors when indexers are dropped. They quietly keep their
     # deterministic score, and if auto_manage is on they can be disabled on
@@ -325,45 +334,6 @@ prowlarr:
     # never sends anything about your setup. Set false if the machine is
     # air-gapped or you would simply rather it did not.
     auto_update_check: true
-
-    # The context window to budget the scoring prompt against, and the value
-    # sent to Ollama as num_ctx.
-    #
-    # 4096 matches Ollama's own default for most models. Budgeting for more
-    # than Ollama actually applies is worse than useless: it truncates at its
-    # default and the model loses the scoring instructions, then answers with
-    # confident invented numbers instead of an error.
-    #
-    # Measured on a real 37-indexer payload: the prompt is ~5,500 tokens in
-    # the old pretty-printed format, ~3,000 with the compact short-keyed one
-    # used now. Above roughly 40 indexers Inspectarr splits the scoring into
-    # several calls automatically and merges the results -- you do not need
-    # to do anything, it just takes a little longer.
-    #
-    # Raise this if your model genuinely supports more (8192 and 16384 are
-    # common) and everything fits in one call again.
-    context_window: 4096
-
-    # Hard cap on how many indexers go in one scoring call, separate from
-    # the token budget above.
-    #
-    # These are different limits and the second is much lower. Measured on
-    # qwen2.5-coder:7b:
-    #
-    #   25 indexers  -> all 25 scored correctly
-    #   30 indexers  -> echoes the input back instead of scoring, in 3
-    #                   seconds, with the window barely half full
-    #   37 indexers  -> in a window twice as large, returns perfectly
-    #                   well-formed JSON that silently omits five of them
-    #
-    # That last one is why this exists. It looks exactly like success:
-    # nothing errors, the JSON parses, and the missing indexers quietly keep
-    # their deterministic score.
-    #
-    # This is a property of your MODEL, not of Inspectarr. A larger model
-    # handles more. Raise it and re-run validation on the AI settings page
-    # to find out whether yours copes.
-    max_indexers_per_call: 25
   # Automated indexer management
   # When enabled, indexers that drop below disable_threshold for consecutive_runs
   # scoring cycles are automatically disabled in Prowlarr, then re-enabled after
