@@ -7,6 +7,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed - Newer Base Image, and Images for ARM
+
+The Docker image was built on a base pinned in February 2024 (Python 3.12.2
+on Debian bookworm), so two years of operating-system and Python security
+fixes never reached it. It now uses Python 3.12.16 on Debian 13 (trixie).
+
+Images are now published for `linux/arm64` as well as `linux/amd64`, so
+Inspectarr runs on a Raspberry Pi or an ARM-based NAS. Nothing changes for
+existing installs: pull the image as usual.
+
+Dependabot now proposes updates for the base image, the GitHub Actions and
+the Python dependencies, so the base can no longer quietly fall behind.
+
+### Added - Automated Tests
+
+A test suite now runs before any image is published. It renders every page
+with login on and off, follows every internal link, and checks that saving
+Settings without changing anything leaves `config.yaml` exactly as it was.
+A failing test stops the release.
+
+### Fixed - Smaller Issues
+
+- **System -> Tasks** showed a legacy scan interval that could differ from
+  the one actually in use. It now shows the real interval, or says that
+  polling is off.
+- The version in the sidebar and on **System -> Status** was the latest
+  GitHub *release*, fetched by your browser, rather than the version that is
+  running. It is now the running version, and the browser no longer
+  contacts GitHub.
+- The **Quarantine** link in the sidebar now highlights on its own page.
+- The Scheduler page pointed at a settings path that does not exist; it now
+  links to **Settings -> General**.
+- `config.example.yaml` listed `context_window` and `max_indexers_per_call`
+  twice. YAML silently keeps the second copy, so editing the first did
+  nothing. Each now appears once.
+
 ### Fixed - Bad Torrents Occasionally Surviving Deletion
 
 Blocklisting told Sonarr/Radarr *not* to remove the torrent from the download
