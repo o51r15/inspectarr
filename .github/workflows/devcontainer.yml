@@ -68,5 +68,9 @@ jobs:
         with:
           imageName: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}
           cacheFrom: ${{ env.GHCR_REGISTRY }}/${{ env.IMAGE_NAME }}:devcontainer
-          push: always
+          # Publish only from main. `always` also pushed on pull requests,
+          # so an unmerged branch could overwrite :devcontainer.
+          push: filter
+          refFilterForPush: refs/heads/main
+          eventFilterForPush: push
           imageTag: devcontainer
