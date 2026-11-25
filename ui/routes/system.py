@@ -122,7 +122,12 @@ def system_tasks():
         # 1. Torrent Scan
         tasks.append({
             "name":          "Torrent Scan",
-            "interval":      f"Every {cfg.poll_interval_seconds}s",
+            # The interval the scheduler actually uses (Scheduler._get_interval),
+            # not the legacy top-level poll_interval_seconds, which a
+            # hand-edited config can leave out of step with it.
+            "interval":      f"Every {cfg.scanning.polling.interval_seconds}s"
+                             if cfg.scanning.polling.enabled
+                             else "Polling disabled (webhooks only)",
             "last_execution": status.get("last_run"),
             "next_execution": status.get("next_run"),
             "state":         "running" if status.get("scanning") else

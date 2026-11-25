@@ -11,7 +11,7 @@
     <div class="card-title">About</div>
     <table style="width:100%">
       <tbody>
-        <tr><td class="text-muted" style="width:45%">Version</td><td id="about-version" class="mono">—</td></tr>
+        <tr><td class="text-muted" style="width:45%">Version</td><td id="about-version" class="mono">v{{ app_version }}</td></tr>
         <tr><td class="text-muted">Python</td><td class="mono">{{ info.python_version }}</td></tr>
         <tr><td class="text-muted">Platform</td><td class="mono">{{ info.platform }}</td></tr>
       </tbody>
@@ -84,15 +84,6 @@
 
 {% block scripts %}
 <script>
-  // Version — reuse the GitHub release lookup, fall back to sidebar value
-  (function() {
-    const el = document.getElementById('about-version');
-    const cached = sessionStorage.getItem('inspectarr_version');
-    if (cached) { el.textContent = cached; return; }
-    const sidebar = document.getElementById('sidebar-version');
-    if (sidebar) el.textContent = sidebar.textContent;
-  })();
-
   // Connection health — fetched async so the page renders immediately
   fetch('/system/status/data')
     .then(r => r.json())

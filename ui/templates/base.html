@@ -32,7 +32,7 @@
       <a href="/torrents" class="{{ 'active' if request.path.startswith('/torrents') else '' }}">
         <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9"/><polyline points="4,7 8,11 12,7"/><line x1="3" y1="14" x2="13" y2="14"/></svg> Torrents
       </a>
-      <a href="/quarantine"><svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5 2.5 4v4c0 3.2 2.3 5.6 5.5 6.5 3.2-.9 5.5-3.3 5.5-6.5V4L8 1.5Z"/><line x1="8" y1="5.5" x2="8" y2="8.5"/><circle cx="8" cy="11" r="0.6" fill="currentColor"/></svg> Quarantine</a>
+      <a href="/quarantine" class="{{ 'active' if request.path.startswith('/quarantine') else '' }}"><svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5 2.5 4v4c0 3.2 2.3 5.6 5.5 6.5 3.2-.9 5.5-3.3 5.5-6.5V4L8 1.5Z"/><line x1="8" y1="5.5" x2="8" y2="8.5"/><circle cx="8" cy="11" r="0.6" fill="currentColor"/></svg> Quarantine</a>
       <a href="/indexers" class="{{ 'active' if request.path.startswith('/indexers') else '' }}">
         <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="10" width="3" height="4"/><rect x="6.5" y="6" width="3" height="8"/><rect x="11" y="2" width="3" height="12"/></svg> Indexers
       </a>
@@ -150,22 +150,10 @@
     }
   })();
 
-  // Dynamic version — fetch latest GitHub release, cache per session
-  (function() {
-    const el = document.getElementById('sidebar-version');
-    if (!el) return;
-    const cached = sessionStorage.getItem('inspectarr_version');
-    if (cached) { el.textContent = cached; return; }
-    fetch('https://api.github.com/repos/o51r15/inspectarr/releases/latest')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d && d.tag_name) {
-          el.textContent = d.tag_name;
-          sessionStorage.setItem('inspectarr_version', d.tag_name);
-        }
-      })
-      .catch(() => {});  // silent fail — hardcoded fallback stays
-  })();
+  // The sidebar shows the RUNNING version, rendered server-side. It used to
+  // be overwritten from the GitHub API with the latest *release*, which is
+  // not what is running on a :dev image and made a browser call off the LAN
+  // on every session. System -> Updates compares versions server-side.
 </script>
 </body>
 </html>
