@@ -126,8 +126,13 @@ def _thinking_of(show: dict, caps: list) -> tuple[str, list]:
 def recommended_think(profile: dict | None):
     """The `think` value to send: False where it can be turned off, the
     lowest level where it cannot, or None (send nothing) for models that do
-    not think. Sending `think` to a model that does not support it is an
-    error in Ollama, so None means the field is left out entirely."""
+    not think. Ollama 0.40 accepts `think: false` for a model that does not
+    think, but older versions refused it, so None means the field is left
+    out entirely.
+
+    gpt-oss cannot be switched off at all: sent `false`, it still thinks
+    briefly and answers exactly as at "low" (measured), so "low" is the
+    honest value to send."""
     if not profile:
         return None
     mode, levels = profile.get("thinking", "none"), profile.get("think_levels") or []
