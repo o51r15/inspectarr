@@ -169,7 +169,22 @@ def test_scoring_never_sends_more_context_than_the_model_has(ollama):
 def test_models_that_must_think_get_room_to_think(ollama):
     _score("gpt-oss:20b")
     assert ollama.sent[0]["think"] == "low"
-    assert ollama.sent[0]["options"]["num_predict"] == llm_client.answer_budget(1, thinks=True)
+    # A thinking model gets the room the context has left, not a fixed cap.
+    budget = ollama.sent[0]["options"]["num_predict"]
+    assert 6000 < budget < 8192
+
+
+def test_thinking_on_gets_the_room_too(ollama):
+    llm_client.ollama_score_indexers([{"indexer_id": 1}], URL, "gemma4:latest", 30,
+                                     context_window=16384, think=True)
+    assert ollama.sent[0]["think"] is True
+    assert ollama.sent[0]["options"]["num_predict"] > 14000
+
+
+def test_a_stored_think_value_is_not_sent_to_a_model_that_cannot_think(ollama):
+    llm_client.ollama_score_indexers([{"indexer_id": 1}], URL, "llama3-groq-tool-use:8b", 30,
+                                     think="medium")
+    assert "think" not in ollama.sent[0]
 
 
 def test_old_server_that_refuses_the_schema_falls_back_to_plain_json(ollama):
@@ -206,18 +221,6 @@ def test_warmup_loads_at_the_test_context_with_thinking_off(ollama):
     assert p["options"]["num_ctx"] == 8192 and p["think"] is False
 
 
-def test_calibration_skips_the_fixed_25_per_call_test(ollama, monkeypatch):
-    monkeypatch.setattr(model_validator, "_calibrate_batch",
-                        lambda *a, **k: {"name": "Batch calibration", "passed": True,
-                                         "max_safe_batch": 10})
-    monkeypatch.setattr(model_validator, "run_quality_test",
-                        lambda *a, **k: {"name": "Quality", "passed": True, "score": 90.0,
-                                         "sec_per_indexer": 0.5, "elapsed_s": 7.0})
-    out = model_validator.validate_model(URL, "gemma4:latest", indexer_count=37,
-                                         calibration="deep")
-    names = [t["name"] for t in out["tests"]]
-    assert not any(n.startswith("Context capacity") for n in names)
-    assert out["passed"] and out["calibrated"] and out["max_safe_batch"] == 10
 
 
 def test_batch_search_starts_at_the_real_count_and_is_not_capped_by_the_slider(ollama, monkeypatch):

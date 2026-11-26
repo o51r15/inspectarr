@@ -44,7 +44,11 @@ log = logging.getLogger("inspectarr")
 
 TOLERANCE = 8          # either side of the table's answer, for exact cases
 NEAR = 10              # "near miss" distance for half marks
-PASS_SCORE = 60        # below this a model is not fit to score indexers
+PASS_SCORE = 70        # below this a model is not fit to score indexers
+# A model whose scores sit this close to Inspectarr's own (non-AI) score on
+# average is mostly copying the reference it is given, not judging. Measured:
+# llama3-groq-tool-use and mistral:7b returned it almost to the decimal.
+FOLLOWS_REFERENCE_WITHIN = 4.0
 CASE_ID_BASE = 9300
 
 WEIGHT_ACCURACY, WEIGHT_ORDER, WEIGHT_REASONS = 60, 25, 15
@@ -225,7 +229,7 @@ def grade(result: dict) -> dict:
     against CASES. Pure: no I/O, so it is tested directly."""
     result = result or {}
     cases, accuracy, reasons = [], 0.0, 0
-    got_scores, mids = [], []
+    got_scores, mids, ref_gaps = [], [], []
     for c in CASES:
         iid = c["row"]["indexer_id"]
         entry = result.get(iid) or result.get(str(iid))
@@ -250,6 +254,9 @@ def grade(result: dict) -> dict:
                 item["note"] = f"said {score:.0f}, expected {lo}-{hi}"
             got_scores.append(score)
             mids.append((lo + hi) / 2)
+            ref = c["row"].get("deterministic_health_score")
+            if ref is not None:
+                ref_gaps.append(abs(score - ref))
             if _valid_reason(entry.get("reasoning")):
                 reasons += 1
             else:
@@ -279,12 +286,18 @@ def grade(result: dict) -> dict:
         "invented": invented,
         "complete": missing == 0 and invented == 0,
         "cases": cases,
+        # How far, on average, from Inspectarr's own score. Small means the
+        # model mostly repeats the reference: its "AI score" adds little.
+        "reference_gap": round(sum(ref_gaps) / len(ref_gaps), 1) if ref_gaps else None,
     }
+    out["follows_reference"] = (out["reference_gap"] is not None
+                                and out["reference_gap"] <= FOLLOWS_REFERENCE_WITHIN)
     out["passed"] = out["complete"] and out["score"] >= PASS_SCORE
     return out
 
 
-def run_quality_test(url: str, model: str, timeout: int, context_window: int) -> dict:
+def run_quality_test(url: str, model: str, timeout: int, context_window: int,
+                     think=None, stats: list | None = None) -> dict:
     """Score the test indexers in one call and grade the answer. Never raises.
 
     One call, all fourteen: quality is measured separately from batch size
@@ -296,7 +309,8 @@ def run_quality_test(url: str, model: str, timeout: int, context_window: int) ->
         result = ollama_score_indexers(rows, url, model, timeout,
                                        custom_prompt=SYSTEM_PROMPT,
                                        context_window=context_window,
-                                       max_indexers_per_call=len(rows))
+                                       max_indexers_per_call=len(rows),
+                                       think=think, stats=stats)
     except Exception as exc:                 # ollama_score_indexers should not raise
         log.warning(f"Quality test crashed for {model}: {exc}")
         result = {}
@@ -317,4 +331,7 @@ def run_quality_test(url: str, model: str, timeout: int, context_window: int) ->
                          f"order {out['order']:+.2f}, reasons {out['reasons_pct']}%)"
                          + ("; " + "; ".join(f"{c['case']}: {c['note']}" for c in worst)
                             if worst else ""))
+        if out["follows_reference"]:
+            out["detail"] += ("; mostly repeats Inspectarr's own score "
+                              f"(within {out['reference_gap']:.0f} points on average)")
     return out

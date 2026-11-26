@@ -562,10 +562,16 @@ def _score_one_batch(
             "context_window if this model supports more.", est, context_window)
 
     settings = request_settings(ollama_url, model, context_window, think=think)
-    settings["options"]["num_predict"] = answer_budget(
-        # Any thinking at all shares the answer budget: a level ("low") or
-        # plain True (gemma4 with thinking on).
-        len(indexer_data), thinks=settings.get("think") not in (None, False))
+    if settings.get("think") not in (None, False):
+        # Thinking shares the answer budget, and how long a model thinks is
+        # a property of the model, not of the batch: measured on 14
+        # indexers, gemma4:latest thought ~2k tokens, gemma4:12b ran past
+        # 10k. So a thinking model gets whatever room the context has left,
+        # and the context size (chosen by calibration) is the real limit.
+        room = settings["options"]["num_ctx"] - est - 128
+        settings["options"]["num_predict"] = max(answer_budget(len(indexer_data)), room)
+    else:
+        settings["options"]["num_predict"] = answer_budget(len(indexer_data))
     payload = {
         "model": model,
         "prompt": prompt,

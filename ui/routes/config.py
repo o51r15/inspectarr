@@ -1,4 +1,5 @@
 from flask import Blueprint, render_template, current_app, request, redirect, url_for, jsonify
+import json
 import yaml
 import os
 import logging
@@ -470,14 +471,31 @@ def _validation_worker(app, config_path, url, model, timeout, context_window,
         with _validation_lock:
             _validation_state.update(stage=stage, done=done, total=total)
 
+    from core.ai_turn import ai_turn
+    from core.ollama_models import unload
+
     try:
-        result = validate_model(url, model, timeout=timeout,
-                                indexer_count=indexer_count,
-                                system_prompt=system_prompt,
-                                progress_cb=progress,
-                                context_window=context_window,
-                                calibration=calibration,
-                                max_indexers_per_call=max_indexers_per_call)
+        # One job on the AI at a time: wait for a scoring round to finish,
+        # then hold the AI for the whole calibration so live scoring cannot
+        # load models or change the context underneath the measurements.
+        progress("Waiting for the AI to be free", 0, 1)
+        with ai_turn("calibration", model, wait=None):
+            result = validate_model(url, model, timeout=timeout,
+                                    indexer_count=indexer_count,
+                                    system_prompt=system_prompt,
+                                    progress_cb=progress,
+                                    context_window=context_window,
+                                    calibration=calibration,
+                                    max_indexers_per_call=max_indexers_per_call)
+            # Free the memory unless this is the model in use (DockLlama's
+            # rule): a calibration should not leave a 13 GB model loaded.
+            try:
+                active = ((_load_raw(config_path).get("prowlarr") or {})
+                          .get("ollama") or {}).get("model")
+            except Exception:
+                active = None
+            if model != active:
+                unload(url, model)
         digest = _ollama_digest(url, model)
         state = app.config.get("STATE")
         if state:
@@ -507,6 +525,77 @@ def _validation_worker(app, config_path, url, model, timeout, context_window,
 # "which build is this" rather than two that can drift.
 _ollama_digest = _ollama_local_digest
 
+
+
+def _calibrated_settings(record: dict | None) -> dict | None:
+    """The settings a calibration chose, from its stored result."""
+    if not record or not record.get("calibrated"):
+        return None
+    try:
+        res = json.loads(record.get("results_json") or "{}") or {}
+    except (TypeError, ValueError):
+        res = {}
+    settings = res.get("settings")
+    if isinstance(settings, dict) and settings.get("context_window"):
+        return settings
+    # Calibrated before Calibrate chose settings (the old batch-only search):
+    # it measured a batch size at a context, nothing else. Marked legacy so
+    # applying it does not pretend to know a timeout or thinking choice.
+    if record.get("max_safe_batch"):
+        return {"context_window": res.get("context_window"),
+                "max_indexers_per_call": record.get("max_safe_batch"),
+                "legacy": True}
+    return None
+
+
+def _apply_model_settings(ollama: dict, record, url: str, model: str) -> dict:
+    """Write a model's settings into the ollama config block (in place).
+
+    Calibrated: its measured context, batch, timeout and thinking.
+    Otherwise: the context resets to 8K, or the model's maximum if smaller,
+    and the stored thinking choice is cleared (it belonged to another model).
+    Returns what was applied, for the page to show.
+    """
+    from core.ollama_models import context_for_model, model_profile, valid_think
+    settings = _calibrated_settings(record)
+    if settings and settings.get("legacy"):
+        ctx = context_for_model((model_profile(url, model) or {}).get("max_context"))
+        ollama["context_window"] = ctx
+        _clear_think(ollama)
+        applied = {"context_window": ctx, "calibrated": False}
+        if settings.get("context_window") in (None, ctx):
+            ollama["max_indexers_per_call"] = int(settings["max_indexers_per_call"])
+            applied["max_indexers_per_call"] = ollama["max_indexers_per_call"]
+        return applied
+    if settings:
+        applied = {"context_window": int(settings["context_window"]),
+                   "max_indexers_per_call": int(settings["max_indexers_per_call"]),
+                   "timeout": int(settings["timeout"])}
+        think = settings.get("think")
+        ollama.update(applied)
+        if think is None or not valid_think(think):
+            _clear_think(ollama)
+        else:
+            ollama["think"] = think
+            applied["think"] = think
+        applied["calibrated"] = True
+        return applied
+    ctx = context_for_model((model_profile(url, model) or {}).get("max_context"))
+    ollama["context_window"] = ctx
+    _clear_think(ollama)
+    return {"context_window": ctx, "calibrated": False}
+
+
+def _clear_think(ollama: dict) -> None:
+    """Back to the recommended thinking setting.
+
+    Saving MERGES into the file (lossless round-trip), so a key dropped from
+    the dict would survive on disk; null is how "recommended" is written.
+    Only written when the key is there, so files that never had it stay
+    unchanged.
+    """
+    if "think" in ollama:
+        ollama["think"] = None
 
 
 @config_bp.route("/config/ai/model", methods=["POST"])
@@ -548,6 +637,7 @@ def ai_set_model():
         prowlarr = dict(raw.get("prowlarr", {}) or {})
         ollama = dict(prowlarr.get("ollama", {}) or {})
         ollama["model"] = model
+        applied = _apply_model_settings(ollama, record, current_url, model)
         prowlarr["ollama"] = ollama
         raw["prowlarr"] = prowlarr
         _save_raw(config_path, raw)
@@ -560,6 +650,7 @@ def ai_set_model():
         return jsonify({
             "ok": True,
             "forced": not validated,
+            "applied": applied,
             "message": (f"{model} applied without validation"
                         if not validated else f"{model} applied"),
         })
@@ -590,8 +681,16 @@ def ai_calibration():
     url = (ollama.get("url") or "").strip()
     record = state.get_validation(model, url) if (state and model and url) else None
 
-    calibrated = bool(record and record.get("calibrated"))
+    settings = _calibrated_settings(record)
+    # The measured batch size holds for the context it was measured at. If
+    # the context has been changed since, it is not a measurement any more.
+    current_ctx = _int(ollama.get("context_window"), DEFAULT_CONTEXT)
+    measured_at = (settings or {}).get("context_window")
+    calibrated = bool(settings and (measured_at is None or int(measured_at) == current_ctx))
+    stale = bool(settings) and not calibrated
     return jsonify({
+        "settings": settings,
+        "stale": stale,
         "ok": True,
         "model": model,
         "host": url,
@@ -782,6 +881,16 @@ def ai_validations():
             "max_safe_batch": v.get("max_safe_batch"),
             "gpu_offload_pct": v.get("gpu_offload_pct"),
             "tok_per_s": v.get("tok_per_s"),
+            # Calibrate's results: what the ranking and the model list use.
+            "quality_score": res.get("quality_score"),
+            "quality_runs": res.get("quality_runs"),
+            "quality_spread": res.get("quality_spread"),
+            "follows_reference": bool(res.get("follows_reference")),
+            "sec_per_indexer": res.get("sec_per_indexer"),
+            "total_s": res.get("total_s"),
+            "settings": res.get("settings"),
+            "explanation": res.get("explanation"),
+            "thinking_tried": res.get("thinking_tried"),
             "tests": [{"name": t.get("name"), "passed": t.get("passed"),
                        "detail": t.get("detail", "")}
                       for t in (res.get("tests") or [])],

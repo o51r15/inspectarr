@@ -125,25 +125,13 @@ def test_rank_correlation():
 
 # --- wired into Calibrate -----------------------------------------------------------
 
-def test_calibrate_runs_the_quality_test_and_gates_the_search(monkeypatch):
-    monkeypatch.setattr(model_validator, "_warmup", lambda *a, **k: {})
-    monkeypatch.setattr(model_validator, "run_quality_test",
-                        lambda *a, **k: {"name": "Quality", "passed": False, "score": 41.0,
-                                         "sec_per_indexer": 0.6, "elapsed_s": 8.4})
-    called = []
-    monkeypatch.setattr(model_validator, "_calibrate_batch",
-                        lambda *a, **k: called.append(1) or {"passed": True})
-    out = model_validator.validate_model("http://x", "m", calibration="deep")
-    assert [t["name"] for t in out["tests"]] == ["Quality"]
-    assert out["quality_score"] == 41.0 and not out["passed"]
-    assert called == []              # no batch search for a model that cannot score
 
 
 def test_quality_test_uses_the_built_in_prompt_and_one_call(monkeypatch):
     seen = {}
 
     def fake(rows, url, model, timeout, custom_prompt="", context_window=0,
-             max_indexers_per_call=0):
+             max_indexers_per_call=0, think=None, stats=None):
         seen.update(prompt=custom_prompt, batch=max_indexers_per_call, n=len(rows))
         return {}
     monkeypatch.setattr(q, "ollama_score_indexers", fake)
@@ -151,3 +139,20 @@ def test_quality_test_uses_the_built_in_prompt_and_one_call(monkeypatch):
     from core.llm_client import SYSTEM_PROMPT
     assert seen == {"prompt": SYSTEM_PROMPT, "batch": len(q.CASES), "n": len(q.CASES)}
     assert not out["passed"] and "nothing" in out["detail"]
+
+
+def test_a_model_that_repeats_the_reference_is_labelled():
+    copy = {c["row"]["indexer_id"]: {"health_score": c["row"]["deterministic_health_score"],
+                                     "reasoning": "Matches the reference health score."}
+            for c in q.CASES}
+    g = q.grade(copy)
+    assert g["follows_reference"] and g["reference_gap"] < 1
+
+
+def test_a_model_that_judges_is_not_labelled():
+    g = q.grade(_answer(_mid))
+    assert not g["follows_reference"]
+
+
+def test_pass_mark_is_70():
+    assert q.PASS_SCORE == 70

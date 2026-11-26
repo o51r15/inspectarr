@@ -500,6 +500,12 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
         out["error"] = "Ollama URL and model are both required."
         return out
 
+    if calibration == "deep":
+        # Calibrate: the full search for the best way to run this model
+        # here (thinking, context, batch, timeout). See core/calibration.py.
+        from .calibration import calibrate
+        return calibrate(ollama_url, model, indexer_count, progress=progress_cb)
+
     indexer_count = max(1, min(int(indexer_count or 20), 200))
     out["indexer_count"] = indexer_count
 

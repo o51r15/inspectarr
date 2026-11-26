@@ -234,6 +234,15 @@ def effective_context(url: str, model: str, configured: int) -> int:
     return request_settings(url, model, configured)["options"]["num_ctx"]
 
 
+def unload(url: str, model: str) -> None:
+    """Free the model's memory now (keep_alive 0). Best effort: never raises."""
+    try:
+        requests.post(f"{_norm(url)}/api/generate",
+                      json={"model": model, "keep_alive": 0}, timeout=LOOKUP_TIMEOUT)
+    except Exception as exc:
+        log.debug(f"unload({model}) failed: {exc}")
+
+
 def forget_cache() -> None:
     """For tests, and after a model is pulled (its limit may change)."""
     with _cache_lock:
