@@ -7,6 +7,58 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v2.1.0] - 2026-11-26
+
+### Added - Notifications, the DockLlama way
+
+Settings -> Notifications now lists **places to send messages**, each with its
+own events, so removals can go to your phone and the summary to email.
+
+- Add a place by picking a service and filling in one or two fields:
+  **ntfy** (recommended: Inspectarr makes a private topic and shows a QR code
+  to scan), Discord, Telegram, Gotify, Pushover, email, or any Apprise URL.
+  **Send test** before saving.
+- Each place shows when it last sent a message, or why the last one failed,
+  in plain words ("Discord turned the message down (HTTP 401): the token is
+  probably wrong"). Pause or remove it there.
+- **Stopped and stopped unexpectedly** messages: Inspectarr says when it is
+  stopped, and after a crash, power cut or out-of-memory kill the next start
+  says it "restarted after an unexpected stop". Part of the "Inspectarr
+  started, stopped, or stopped unexpectedly" event.
+- Your existing setup carries over: each address in `notifications.apprise.urls`
+  becomes a place with the events you had ticked (and the summary, if it was
+  on). `config.yaml` is rewritten once, the first time the web app starts.
+- Tokens and passwords are masked in the config file editor and never sent to
+  the browser.
+
+### Added - What a health score is made of
+
+Click an indexer's health score on the Indexers page to see its parts:
+**Speed**, **Searches**, **Downloads** and **Safety**, each out of 100 with
+its share of the score, plus any adjustment (Prowlarr paused it, getting
+better or worse lately). The score itself is calculated as before.
+
+### Changed - The AI advises; it can't switch an indexer off on its own
+
+- Auto-disable now needs Inspectarr's own score below the line as well as the
+  AI's. On a live install every model scored below Inspectarr's rules on
+  average (gemma4 by 12.5 points), so an AI score alone could turn off a
+  borderline indexer. Ordering still uses the AI's score.
+- The health score breakdown shows what the AI changed, Inspectarr's own
+  score, the AI's reason, and when the limit held it back.
+- The limit on how far the AI may move a score is now in Settings -> AI
+  (Advanced). The default is unchanged (30 points either way).
+
+### Changed
+
+- **Releases held for review** settings only show when something can be held:
+  always with "Hold for my review", never with "Watch only", and with "Remove
+  automatically" only when the strictness settings send milder catches to
+  review.
+- `docker stop` now shuts Inspectarr down cleanly at once. Before, the stop
+  signal was ignored and Docker killed the process after 10 seconds.
+- New dependency: `segno` (draws the ntfy QR code; no dependencies of its own).
+
 ### Added - Your own scoring instructions
 
 Settings -> AI -> **Scoring instructions** (Advanced) works like DockLlama:
