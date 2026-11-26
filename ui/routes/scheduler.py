@@ -1,61 +1,13 @@
-from flask import Blueprint, render_template, current_app, request, redirect, url_for, jsonify
+from flask import Blueprint, current_app, request, redirect, url_for, jsonify
 
 scheduler_bp = Blueprint("scheduler", __name__)
 
 
 @scheduler_bp.route("/scheduler")
 def scheduler_view():
-    scheduler = current_app.config["SCHEDULER"]
-    status    = scheduler.get_status()
-    try:
-        from core.config import load_config
-        config   = load_config(current_app.config["CONFIG_PATH"])
-        interval = config.scanning.polling.interval_seconds
-    except Exception:
-        interval = 300
-
-    # Prowlarr scoring schedule info
-    scoring_info = None
-    try:
-        from core.config import load_config as _lc
-        cfg = _lc(current_app.config["CONFIG_PATH"])
-        if cfg.prowlarr.enabled:
-            from ui.routes.config import _get_state
-            from datetime import datetime, timedelta
-            state = _get_state(cfg)
-            last_iso = state.get_app_state("last_prowlarr_reorder")
-            last_reorder = None
-            next_reorder = None
-            if last_iso:
-                try:
-                    last_reorder = last_iso[:19].replace("T", " ")
-                    last_dt = datetime.fromisoformat(last_iso)
-                    next_dt = last_dt + timedelta(hours=cfg.prowlarr.reorder_interval_hours)
-                    next_reorder = next_dt.isoformat()[:19].replace("T", " ")
-                except ValueError:
-                    pass
-            scoring_info = {
-                "interval_hours": cfg.prowlarr.reorder_interval_hours,
-                "last_reorder": last_reorder,
-                "next_reorder": next_reorder,
-                "auto_manage": cfg.prowlarr.auto_manage.enabled,
-            }
-    except Exception:
-        pass
-
-    # Retry queue entries
-    retry_entries = []
-    try:
-        from core.config import load_config as _lc2
-        cfg2 = _lc2(current_app.config["CONFIG_PATH"])
-        from ui.routes.config import _get_state as _gs2
-        state2 = _gs2(cfg2)
-        retry_entries = state2.get_all_unresolved_retries()
-    except Exception:
-        pass
-
-    return render_template("scheduler.html", status=status, interval=interval,
-                           scoring_info=scoring_info, retry_entries=retry_entries)
+    # Its content (schedules, retry queue, recent scans) now lives on
+    # System > Tasks. The POST/JSON endpoints below keep their URLs.
+    return redirect("/system/tasks", code=301)
 
 
 PAUSED_KEY = "scheduler_paused"

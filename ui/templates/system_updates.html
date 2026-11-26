@@ -1,64 +1,31 @@
 {% extends "base.html" %}
+{% from "_macros.html" import icon %}
 {% block title %}Updates — inspectarr{% endblock %}
-{% block page_title %}Updates{% endblock %}
+{% block page_title %}System{% endblock %}
 
 {% block topbar_actions %}
-  <button class="btn btn-ghost btn-sm" onclick="checkUpdates()">Check for Updates</button>
+  <button type="button" class="btn btn-secondary btn-sm" data-action="check-updates">{{ icon('refresh') }} <span class="btn-label-sm-hide">Check now</span></button>
 {% endblock %}
 
 {% block content %}
-<div class="form-section" style="max-width:640px">
-  <div id="update-loading" class="hint">Checking for updates…</div>
-  <div id="update-result" style="display:none">
-    <div class="form-row" style="margin-bottom:1rem">
-      <div class="form-group">
-        <label>Installed Version</label>
-        <span id="ver-current" style="font-family:var(--font-mono);font-size:14px"></span>
-      </div>
-      <div class="form-group">
-        <label>Latest Release</label>
-        <span id="ver-latest" style="font-family:var(--font-mono);font-size:14px"></span>
-      </div>
-    </div>
-    <div id="update-badge" style="margin-bottom:1rem"></div>
-    <div id="release-notes" style="display:none">
-      <label style="font-size:13px;color:var(--text-dim);margin-bottom:6px;display:block">Release Notes</label>
-      <pre id="release-body" style="font-size:12px;font-family:var(--font-mono);white-space:pre-wrap;color:var(--text);background:var(--bg-card);padding:12px;border-radius:6px;max-height:300px;overflow-y:auto"></pre>
+<section class="card">
+  <h2 class="card-title">Updates</h2>
+  <p id="update-loading" class="text-sm text-muted"><span class="spinner"></span> Checking GitHub for the latest release…</p>
+
+  <div id="update-result" hidden>
+    <dl class="kv">
+      <dt>Running</dt><dd id="ver-current" class="mono"></dd>
+      <dt>Latest release</dt><dd id="ver-latest" class="mono"></dd>
+    </dl>
+    <div id="update-badge" class="mt-16"></div>
+    <div id="release-notes" class="mt-16" hidden>
+      <h3 class="text-sm font-semibold mb-8">Release notes</h3>
+      <pre id="release-body" class="code-block"></pre>
     </div>
   </div>
-</div>
+</section>
+{% endblock %}
 
-<script>
-function checkUpdates() {
-  document.getElementById('update-loading').style.display = 'block';
-  document.getElementById('update-result').style.display = 'none';
-  fetch('/system/updates/check')
-    .then(r => r.json())
-    .then(d => {
-      document.getElementById('update-loading').style.display = 'none';
-      document.getElementById('update-result').style.display = 'block';
-      document.getElementById('ver-current').textContent = d.current || '?';
-      document.getElementById('ver-latest').textContent = d.latest || d.current || '?';
-      const badge = document.getElementById('update-badge');
-      if (!d.ok) {
-        badge.innerHTML = '<span style="color:var(--error)">Failed to check: ' + esc(d.message||'unknown error') + '</span>';
-        return;
-      }
-      if (d.up_to_date) {
-        badge.innerHTML = '<span style="color:var(--success)">✓ You are running the latest version</span>';
-      } else {
-        badge.innerHTML = '<span style="color:var(--warning)">⬆ Update available: ' + esc(d.latest) + '</span>' +
-          (d.url ? ' — <a href="'+esc(d.url)+'" target="_blank" rel="noopener" style="color:var(--accent)">View release</a>' : '');
-      }
-      if (d.release_notes) {
-        document.getElementById('release-notes').style.display = 'block';
-        document.getElementById('release-body').textContent = d.release_notes;
-      }
-    })
-    .catch(() => {
-      document.getElementById('update-loading').textContent = 'Failed to reach GitHub';
-    });
-}
-checkUpdates();
-</script>
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/pages/system_updates.js') }}?v={{ app_version }}"></script>
 {% endblock %}

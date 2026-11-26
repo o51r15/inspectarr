@@ -144,17 +144,30 @@ def system_tasks():
             "state":         "idle" if cfg.retry.enabled else "disabled",
         })
 
-        # 3. Prowlarr Auto-Reorder
+        # 3. Prowlarr scoring + reorder. Read from the database
+        # (app_state.last_prowlarr_reorder) rather than the scheduler's
+        # in-memory last_reorder, which is None after every restart and so
+        # used to show "—" until the next cycle.
         prowlarr_enabled = cfg.prowlarr.enabled
-        last_reorder = None
-        if scheduler.last_reorder:
-            last_reorder = scheduler.last_reorder.isoformat()
+        state = current_app.config.get("STATE")
+        last_reorder = next_reorder = None
+        if prowlarr_enabled and state:
+            try:
+                from datetime import datetime, timedelta
+                last_reorder = state.get_app_state("last_prowlarr_reorder")
+                if last_reorder:
+                    next_reorder = (datetime.fromisoformat(last_reorder)
+                                    + timedelta(hours=cfg.prowlarr.reorder_interval_hours)
+                                    ).isoformat()
+            except (ValueError, TypeError):
+                pass
         tasks.append({
-            "name":          "Prowlarr Auto-Reorder",
+            "name":          "Prowlarr scoring and reorder",
             "interval":      f"Every {cfg.prowlarr.reorder_interval_hours}h"
+                             + (", auto-manage on" if cfg.prowlarr.auto_manage.enabled else "")
                              if prowlarr_enabled else "Disabled",
             "last_execution": last_reorder,
-            "next_execution": None,  # calculated relative to last_reorder
+            "next_execution": next_reorder,
             "state":         "idle" if prowlarr_enabled else "disabled",
         })
 
@@ -168,9 +181,21 @@ def system_tasks():
         })
 
     except Exception as exc:
-        return render_template("system_tasks.html", tasks=[], error=str(exc))
+        return render_template("system_tasks.html", tasks=[], error=str(exc),
+                               status=status, retry_entries=[])
 
-    return render_template("system_tasks.html", tasks=tasks, error=None)
+    # Torrents whose blocklist/delete failed and are waiting to be retried
+    # (formerly on the Scheduler page, which now redirects here).
+    retry_entries = []
+    state = current_app.config.get("STATE")
+    if state:
+        try:
+            retry_entries = state.get_all_unresolved_retries()
+        except Exception:
+            retry_entries = []
+
+    return render_template("system_tasks.html", tasks=tasks, error=None,
+                           status=status, retry_entries=retry_entries)
 
 
 @system_bp.route("/system/updates")

@@ -1,59 +1,104 @@
 {% extends "base.html" %}
-{% block title %}System Tasks — inspectarr{% endblock %}
-{% block page_title %}Tasks{% endblock %}
+{% from "_macros.html" import icon, badge, time, empty %}
+{% block title %}Tasks — inspectarr{% endblock %}
+{% block page_title %}System{% endblock %}
 
 {% block content %}
+<div class="stack">
 
 {% if error %}
-  <div class="form-section">
-    <p class="text-error">{{ error }}</p>
-  </div>
+  <div class="alert alert-danger">{{ icon('alert') }} <span>Couldn't read the configuration: {{ error }}</span></div>
 {% else %}
 
-<div class="form-section">
-  <div class="form-section-title">Scheduled Tasks</div>
-  <p class="hint" style="margin-bottom:0.75rem">
-    Internal jobs managed by the inspectarr scheduler. Start the scheduler from the
-    <a href="/scheduler">Scheduler</a> page to activate queued tasks.
-  </p>
-  <table style="width:100%;border-collapse:collapse">
-    <thead>
-      <tr style="text-align:left;border-bottom:1px solid var(--border)">
-        <th style="padding:8px">Name</th>
-        <th style="padding:8px">Interval</th>
-        <th style="padding:8px">Last Execution</th>
-        <th style="padding:8px">Next Execution</th>
-        <th style="padding:8px">State</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for task in tasks %}
-      <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:8px;font-weight:500">{{ task.name }}</td>
-        <td style="padding:8px" class="mono">{{ task.interval }}</td>
-        <td style="padding:8px" class="mono">
-          {{ task.last_execution[:19].replace('T',' ') if task.last_execution else '—' }}
-        </td>
-        <td style="padding:8px" class="mono">
-          {{ task.next_execution[:19].replace('T',' ') if task.next_execution else '—' }}
-        </td>
-        <td style="padding:8px">
-          {% if task.state == 'running' %}
-            <span class="status-dot running"></span> Running
-          {% elif task.state == 'queued' %}
-            <span class="status-dot running" style="opacity:0.6"></span> Queued
-          {% elif task.state == 'disabled' %}
-            <span class="text-muted">Disabled</span>
-          {% else %}
-            <span class="status-dot stopped"></span> Idle
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+  <section class="card card-flush">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">Scheduled tasks</h2>
+        <p class="card-sub">The jobs Inspectarr runs on its own.{% if not status.running %} Scanning is paused, so none of them will run until you resume it on Overview.{% endif %}</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table-fluid">
+        <caption class="sr-only">Scheduled tasks</caption>
+        <thead><tr><th>Task</th><th class="hide-sm">How often</th><th>Last ran</th><th class="hide-sm">Next</th><th>State</th></tr></thead>
+        <tbody>
+        {% for task in tasks %}
+          <tr>
+            <td><div class="font-medium">{{ task.name }}</div><div class="text-xs text-dim show-sm">{{ task.interval }}</div></td>
+            <td class="hide-sm text-sm">{{ task.interval }}</td>
+            <td class="text-sm nowrap">{{ time(task.last_execution) }}</td>
+            <td class="hide-sm text-sm nowrap">{{ time(task.next_execution) }}</td>
+            <td>
+              {% if task.state == 'running' %}<span class="state"><span class="status-dot scanning"></span> Running</span>
+              {% elif task.state == 'queued' %}<span class="state"><span class="status-dot running dim"></span> Scheduled</span>
+              {% elif task.state == 'disabled' %}<span class="text-dim text-sm">Off</span>
+              {% else %}<span class="state"><span class="status-dot stopped"></span> Idle</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% if retry_entries %}
+  <section class="card card-flush">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">Retry queue · {{ retry_entries|length }} waiting</h2>
+        <p class="card-sub">Removals that failed part-way (for example the arr app was down) and will be tried again.</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="table-fluid">
+        <caption class="sr-only">Torrents waiting to be retried</caption>
+        <thead><tr><th>Release</th><th>Attempts</th><th class="hide-sm">Next try</th><th class="hide-sm">Why it failed</th></tr></thead>
+        <tbody>
+        {% for r in retry_entries %}
+          <tr>
+            <td class="cell-truncate" title="{{ r.torrent_name }}"><div class="truncate font-medium">{{ r.torrent_name }}</div><div class="text-xs text-dim">{{ r.rule_name }}</div></td>
+            <td class="num">{{ r.attempt_count }}</td>
+            <td class="hide-sm text-sm nowrap">{{ time(r.next_attempt) }}</td>
+            <td class="hide-sm text-sm text-muted cell-truncate" title="{{ r.failure_reason }}">{{ r.failure_reason }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="card card-flush">
+    <div class="card-head">
+      <div>
+        <h2 class="card-title">Recent scans</h2>
+        <p class="card-sub">How often scans run is set in <a href="/config#general">Settings → General</a>.</p>
+      </div>
+    </div>
+    {% if status.run_history %}
+    <div class="table-wrap">
+      <table class="table-fluid">
+        <caption class="sr-only">Recent scans</caption>
+        <thead><tr><th>Started</th><th class="num">Checked</th><th class="num">Flagged</th><th class="num hide-sm">Removed</th><th class="num hide-sm">Took</th><th>Result</th></tr></thead>
+        <tbody>
+        {% for r in status.run_history %}
+          <tr>
+            <td class="text-sm nowrap">{{ time(r.scan_start) }}</td>
+            <td class="num">{{ r.torrents_checked }}</td>
+            <td class="num">{{ r.flagged }}</td>
+            <td class="num hide-sm">{{ r.actioned }}</td>
+            <td class="num hide-sm text-muted">{{ r.duration_seconds }}s</td>
+            <td>{% if r.error %}{{ badge('Error', 'danger', title=r.error) }}{% else %}{{ badge('OK', 'ok') }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      {{ empty("No scans yet", "Scans appear here once the scheduler has run.", icon_name="clock") }}
+    {% endif %}
+  </section>
 
 {% endif %}
-
+</div>
 {% endblock %}

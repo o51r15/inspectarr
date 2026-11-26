@@ -1,107 +1,74 @@
 {% extends "base.html" %}
+{% from "_macros.html" import badge, time, empty %}
 {% block title %}Notifications — inspectarr{% endblock %}
-{% block page_title %}Notifications{% endblock %}
+{% block page_title %}System{% endblock %}
 
 {% block content %}
-
-<div class="form-section">
-  <div class="form-section-title">Notification history</div>
-  <p class="hint" style="margin-bottom:0.75rem">
-    Every notification inspectarr tried to send, and whether it got through.
-    <strong>Suppressed</strong> and <strong>failed</strong> rows are shown alongside
-    delivered ones — those are usually the answer when nobody was told about something.
-    A <em>sent</em> row means Apprise accepted the message, not that the service delivered it.
-    The most recent {{ counts.values() | sum }} are kept.
-  </p>
-
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-    {% set order = [('sent','ms-good'),('failed','ms-bad'),('suppressed','ms-warn'),('recorded','ms-none')] %}
-    {% for key, cls in order %}
-      {% if counts.get(key) %}
-        <span class="{{ cls }}" style="font-family:var(--font-mono);font-size:.8rem">
-          {{ counts.get(key) }} {{ key }}
-        </span>
+{% set tones = {'sent': 'ok', 'failed': 'danger', 'suppressed': 'warn', 'recorded': 'neutral'} %}
+{% set filters = [('All', {}), ('Failed', {'status': 'failed'}), ('Suppressed', {'status': 'suppressed'}),
+                  ('System events', {'channel': 'system'}), ('Pushes', {'channel': 'push'})] %}
+<section class="card card-flush">
+  <div class="card-head flex-wrap">
+    <div>
+      <h2 class="card-title">Notification history</h2>
+      <p class="card-sub">
+        Everything Inspectarr tried to tell you, and whether it got through. When nobody was told
+        about something, the answer is usually a <strong>suppressed</strong> or <strong>failed</strong> row.
+        “Sent” means Apprise accepted it, not that it arrived.
+      </p>
+      {% if counts %}
+      <div class="flex flex-wrap gap-8 mt-8">
+        {% for key in ['sent', 'failed', 'suppressed', 'recorded'] %}
+          {% if counts.get(key) %}{{ badge(counts.get(key) ~ ' ' ~ key, tones[key]) }}{% endif %}
+        {% endfor %}
+      </div>
       {% endif %}
+    </div>
+  </div>
+
+  <div class="flex flex-wrap gap-4 px-card mb-12" role="group" aria-label="Filter">
+    {% for label, q in filters %}
+      {% set active = (q.get('status') == status and q.get('channel') == channel) %}
+      <a class="btn btn-sm {{ 'btn-primary' if active else 'btn-ghost' }}"
+         href="/system/notifications{% if q %}?{{ q|urlencode }}{% endif %}"{% if active %} aria-current="true"{% endif %}>{{ label }}</a>
     {% endfor %}
   </div>
 
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if not status and not channel else '' }}"
-       href="/system/notifications">All</a>
-    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if status == 'failed' else '' }}"
-       href="/system/notifications?status=failed">Failed</a>
-    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if status == 'suppressed' else '' }}"
-       href="/system/notifications?status=suppressed">Suppressed</a>
-    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if channel == 'system' else '' }}"
-       href="/system/notifications?channel=system">System events</a>
-    <a class="btn btn-ghost btn-sm {{ 'btn-primary' if channel == 'push' else '' }}"
-       href="/system/notifications?channel=push">Pushes</a>
-  </div>
-
   {% if not notices %}
-    <p class="hint">
-      {% if status or channel %}
-        Nothing matches that filter.
-      {% else %}
-        Nothing recorded yet. Notifications appear here as they are sent.
-      {% endif %}
-    </p>
+    {% if status or channel %}
+      {{ empty("Nothing matches that filter", "Try another filter.", href="/system/notifications", cta="Show all", icon_name="list") }}
+    {% else %}
+      {{ empty("No notifications yet", "Every notification Inspectarr sends, or decides not to, is listed here.", icon_name="inbox") }}
+    {% endif %}
   {% else %}
-  <div style="overflow-x:auto">
-    <table style="width:100%;border-collapse:collapse;font-size:.87rem">
-      <thead>
-        <tr style="text-align:left;border-bottom:1px solid var(--border)">
-          <th style="padding:8px;white-space:nowrap">When</th>
-          <th style="padding:8px">Status</th>
-          <th style="padding:8px">Event</th>
-          <th style="padding:8px">Message</th>
-        </tr>
-      </thead>
+  <div class="table-wrap">
+    <table class="table-fluid">
+      <caption class="sr-only">Notification history</caption>
+      <thead><tr><th>When</th><th>Status</th><th class="hide-sm">Event</th><th>Message</th></tr></thead>
       <tbody>
-        {% for n in notices %}
-        {% set cls = 'ms-good' if n.status == 'sent'
-                     else ('ms-bad' if n.status == 'failed'
-                     else ('ms-warn' if n.status == 'suppressed' else 'ms-none')) %}
-        <tr style="border-bottom:1px solid var(--border-muted);vertical-align:top">
-          <td style="padding:8px;font-family:var(--font-mono);white-space:nowrap">
-            {{ (n.created_at or '')[:19] | replace('T', ' ') }}
-          </td>
-          <td style="padding:8px;white-space:nowrap" class="{{ cls }}">
-            {{ n.status }}
-            {% if n.channel == 'system' %}<br><span class="hint">system</span>{% endif %}
-          </td>
-          <td style="padding:8px;font-family:var(--font-mono);white-space:nowrap">
-            {{ n.event or '—' }}
-          </td>
-          <td style="padding:8px">
-            <strong>{{ n.title or '' }}</strong>
-            {% if n.body %}
-              <div class="hint" style="margin-top:2px;white-space:pre-wrap">{{ n.body[:400] }}{% if n.body|length > 400 %}…{% endif %}</div>
-            {% endif %}
-            {% if n.detail %}
-              <div class="hint {{ cls }}" style="margin-top:4px">{{ n.detail }}</div>
-            {% endif %}
+      {% for n in notices %}
+        <tr class="align-top">
+          <td class="text-sm nowrap">{{ time(n.created_at) }}</td>
+          <td>{{ badge(n.status, tones.get(n.status, 'neutral')) }}{% if n.channel == 'system' %}<div class="text-xs text-dim mt-4">system</div>{% endif %}</td>
+          <td class="hide-sm mono text-xs">{{ n.event or '—' }}</td>
+          <td>
+            <div class="font-medium">{{ n.title or '' }}</div>
+            {% if n.body %}<div class="text-sm text-muted pre-wrap mt-4">{{ n.body[:400] }}{% if n.body|length > 400 %}…{% endif %}</div>{% endif %}
+            {% if n.detail %}<div class="text-sm text-{{ tones.get(n.status, 'neutral') if tones.get(n.status) != 'neutral' else 'muted' }} mt-4">{{ n.detail }}</div>{% endif %}
           </td>
         </tr>
-        {% endfor %}
+      {% endfor %}
       </tbody>
     </table>
   </div>
-
-  <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
-    {% set qs = [] %}
-    {% if status %}{% set _ = qs.append('status=' + status) %}{% endif %}
-    {% if channel %}{% set _ = qs.append('channel=' + channel) %}{% endif %}
-    {% set base = '/system/notifications?' + (qs | join('&')) + ('&' if qs else '') %}
-    {% if page > 1 %}
-      <a class="btn btn-ghost btn-sm" href="{{ base }}page={{ page - 1 }}">← Newer</a>
-    {% endif %}
-    <span class="hint">Page {{ page }}</span>
-    {% if has_more %}
-      <a class="btn btn-ghost btn-sm" href="{{ base }}page={{ page + 1 }}">Older →</a>
-    {% endif %}
-  </div>
+  {% set q = {} %}
+  {% if status %}{% set _ = q.update({'status': status}) %}{% endif %}
+  {% if channel %}{% set _ = q.update({'channel': channel}) %}{% endif %}
+  <nav class="pagination" aria-label="Pages">
+    {% if page > 1 %}<a href="?{{ dict(q, page=page - 1)|urlencode }}" aria-label="Newer">‹</a>{% endif %}
+    <span class="current">{{ page }}</span>
+    {% if has_more %}<a href="?{{ dict(q, page=page + 1)|urlencode }}" aria-label="Older">›</a>{% endif %}
+  </nav>
   {% endif %}
-</div>
-
+</section>
 {% endblock %}

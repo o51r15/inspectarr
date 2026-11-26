@@ -1,117 +1,62 @@
 {% extends "base.html" %}
+{% from "_macros.html" import time %}
 {% block title %}System Status — inspectarr{% endblock %}
-{% block page_title %}System Status{% endblock %}
+{% block page_title %}System{% endblock %}
 
 {% block content %}
+<div class="grid grid-2 items-start">
 
-<div class="grid grid-2" style="align-items:start">
+  <section class="card">
+    <h2 class="card-title">About</h2>
+    <dl class="kv">
+      <dt>Version</dt><dd id="about-version" class="mono">v{{ app_version }}</dd>
+      <dt>Python</dt><dd class="mono">{{ info.python_version }}</dd>
+      <dt>Platform</dt><dd class="mono">{{ info.platform }}</dd>
+    </dl>
+  </section>
 
-  <!-- About -->
-  <div class="card">
-    <div class="card-title">About</div>
-    <table style="width:100%">
-      <tbody>
-        <tr><td class="text-muted" style="width:45%">Version</td><td id="about-version" class="mono">v{{ app_version }}</td></tr>
-        <tr><td class="text-muted">Python</td><td class="mono">{{ info.python_version }}</td></tr>
-        <tr><td class="text-muted">Platform</td><td class="mono">{{ info.platform }}</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <section class="card">
+    <h2 class="card-title">Scheduler</h2>
+    <dl class="kv">
+      <dt>State</dt>
+      <dd>{% if info.scheduler.running %}<span class="state"><span class="status-dot running"></span> Running</span>
+          {% else %}<span class="state"><span class="status-dot stopped"></span> Paused</span>{% endif %}</dd>
+      <dt>Last run</dt><dd>{{ time(info.scheduler.last_run) }}</dd>
+      <dt>Next run</dt><dd>{{ time(info.scheduler.next_run) }}</dd>
+    </dl>
+  </section>
 
-  <!-- Scheduler -->
-  <div class="card">
-    <div class="card-title">Scheduler</div>
-    <table style="width:100%">
-      <tbody>
-        <tr>
-          <td class="text-muted" style="width:45%">State</td>
-          <td>
-            {% if info.scheduler.running %}
-              <span class="status-dot running"></span> Running
-            {% else %}
-              <span class="status-dot stopped"></span> Stopped
-            {% endif %}
-          </td>
-        </tr>
-        <tr>
-          <td class="text-muted">Last run</td>
-          <td class="mono">{{ info.scheduler.last_run[:19].replace('T',' ') if info.scheduler.last_run else '—' }}</td>
-        </tr>
-        <tr>
-          <td class="text-muted">Next run</td>
-          <td class="mono">{{ info.scheduler.next_run[:19].replace('T',' ') if info.scheduler.next_run else '—' }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Storage -->
-  <div class="card">
-    <div class="card-title">Storage</div>
+  <section class="card">
+    <h2 class="card-title">Storage</h2>
     {% if storage.error %}
-      <p class="text-error" style="font-size:13px">{{ storage.error }}</p>
+      <p class="text-danger text-sm">{{ storage.error }}</p>
     {% else %}
-    <table style="width:100%">
-      <tbody>
-        <tr><td class="text-muted" style="width:45%">Database</td><td class="mono">{{ storage.db_size }}</td></tr>
-        <tr><td class="text-muted">Event log</td><td class="mono">{{ storage.log_size }}</td></tr>
-        <tr><td class="text-muted">Disk free</td><td class="mono">{{ storage.disk_free }} / {{ storage.disk_total }}</td></tr>
-      </tbody>
-    </table>
-    <div style="margin-top:10px">
-      <div style="background:var(--border);border-radius:4px;height:6px;overflow:hidden">
-        <div style="width:{{ storage.disk_pct }}%;height:100%;border-radius:4px;
-                    background:{{ 'var(--error)' if storage.disk_pct > 90 else 'var(--accent)' }}"></div>
+    <dl class="kv">
+      <dt>Database</dt><dd class="mono">{{ storage.db_size }}</dd>
+      <dt>Event log</dt><dd class="mono">{{ storage.log_size }}</dd>
+      <dt>Disk free</dt><dd class="mono">{{ storage.disk_free }} / {{ storage.disk_total }}</dd>
+    </dl>
+    <div class="mt-12">
+      {#- Width comes from a data attribute set via CSSOM in core.js
+          ([data-pct]), so no inline style is needed. -#}
+      <div class="progress-track{% if storage.disk_pct > 90 %} is-danger{% endif %}">
+        <div class="progress-bar" data-pct="{{ storage.disk_pct }}"></div>
       </div>
-      <div class="hint" style="margin-top:4px">{{ storage.disk_used }} used ({{ storage.disk_pct }}%)</div>
+      <div class="hint mt-4">{{ storage.disk_used }} used ({{ storage.disk_pct }}%)</div>
     </div>
     {% endif %}
-  </div>
+  </section>
 
-  <!-- Connections -->
-  <div class="card">
-    <div class="card-title">Connections</div>
-    <table style="width:100%" id="conn-table">
-      <tbody>
-        <tr><td colspan="2" class="text-muted" style="font-size:13px">Checking connections…</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <section class="card">
+    <h2 class="card-title">Connections</h2>
+    <dl class="kv" id="conn-list">
+      <dt>Checking…</dt><dd><span class="spinner"></span></dd>
+    </dl>
+  </section>
 
 </div>
-
 {% endblock %}
 
 {% block scripts %}
-<script>
-  // Connection health — fetched async so the page renders immediately
-  fetch('/system/status/data')
-    .then(r => r.json())
-    .then(d => {
-      const tbody = document.querySelector('#conn-table tbody');
-      if (!d.ok) {
-        // SEC-2: escape server-provided message (esc from app.js)
-        tbody.innerHTML = `<tr><td colspan="2" class="text-error">${esc(d.message || 'Check failed')}</td></tr>`;
-        return;
-      }
-      tbody.innerHTML = '';
-      d.connections.forEach(c => {
-        let cell;
-        if (!c.configured) {
-          cell = '<span class="status-dot stopped"></span> <span class="text-muted">Not configured</span>';
-        } else if (c.ok) {
-          cell = '<span class="status-dot running"></span> Connected';
-        } else {
-          cell = '<span class="status-dot stopped"></span> <span class="text-error">Unreachable</span>';
-        }
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td class="text-muted" style="width:45%">${esc(c.name)}</td><td>${cell}</td>`;   // SEC-2
-        tbody.appendChild(tr);
-      });
-    })
-    .catch(() => {
-      document.querySelector('#conn-table tbody').innerHTML =
-        '<tr><td colspan="2" class="text-error">Connection check failed</td></tr>';
-    });
-</script>
+<script src="{{ url_for('static', filename='js/pages/system_status.js') }}?v={{ app_version }}"></script>
 {% endblock %}

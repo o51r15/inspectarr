@@ -10,7 +10,6 @@ import pytest
 
 PAGES = [
     "/", "/activity/review", "/activity/history", "/torrents",
-    "/scheduler",
     "/indexers", "/indexers/stats", "/indexers/ai-scoring",
     "/config",
     "/system/status", "/system/tasks", "/system/notifications",
@@ -23,6 +22,7 @@ REDIRECTS = {
     "/stats": "/indexers/stats",                 # v1.6.0
     "/system/llm-logs": "/indexers/ai-scoring",  # v1.6.0
     "/quarantine": "/activity/review",           # Phase 2
+    "/scheduler": "/system/tasks",               # Phase 2
 }
 
 
