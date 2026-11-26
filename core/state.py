@@ -650,6 +650,12 @@ class StateManager:
                      result.get("max_safe_batch"),
                      1 if result.get("calibrated") else 0),
                 )
+                conn.execute(
+                    "INSERT INTO calibration_history "
+                    "(model, ollama_url, run_at, passed, results_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (model, url, _now_iso(), 1 if result.get("passed") else 0,
+                     _json.dumps(result)))
                 conn.commit()
             return True
         except Exception as exc:
@@ -706,6 +712,33 @@ class StateManager:
             return [dict(r) for r in rows]
         except Exception as exc:
             log.warning(f"Failed to read validations: {exc}")
+            return []
+
+    def get_calibration_history(self, model: str, ollama_url: str,
+                                limit: int = 10) -> list[dict]:
+        """Earlier calibrations of this model on this server, newest first."""
+        import json as _json
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT run_at, passed, results_json FROM calibration_history "
+                    "WHERE model = ? AND ollama_url = ? ORDER BY run_at DESC LIMIT ?",
+                    (model, normalize_ollama_url(ollama_url) or "", int(limit))).fetchall()
+            out = []
+            for r in rows:
+                try:
+                    res = _json.loads(r["results_json"] or "{}")
+                except (TypeError, ValueError):
+                    res = {}
+                out.append({"run_at": r["run_at"], "passed": bool(r["passed"]),
+                            "quality_score": res.get("quality_score"),
+                            "quality_runs": res.get("quality_runs"),
+                            "total_s": res.get("total_s"),
+                            "settings": res.get("settings"),
+                            "explanation": res.get("explanation")})
+            return out
+        except Exception as exc:
+            log.warning(f"Failed to read calibration history for {model}: {exc}")
             return []
 
     def delete_validation(self, model: str, ollama_url: str) -> bool:
@@ -1012,6 +1045,22 @@ class StateManager:
                     calibrated      INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (model, ollama_url)
                 )
+            """)
+            # Every calibration ever run, so Results can show how a model did
+            # before (validated_models keeps only the latest per server).
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS calibration_history (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model         TEXT NOT NULL,
+                    ollama_url    TEXT NOT NULL,
+                    run_at        TEXT NOT NULL,
+                    passed        INTEGER NOT NULL DEFAULT 0,
+                    results_json  TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_calhist_model
+                ON calibration_history (ollama_url, model, run_at DESC)
             """)
             # replacements -- did the thing we rejected get replaced, and
             # was the replacement any good? (ROADMAP item 27)

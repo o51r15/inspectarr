@@ -75,6 +75,20 @@ def _lower(v):
     return v.lower()
 
 
+def _think(v):
+    """Form value -> stored think value. "" = recommended (null)."""
+    v = (v or "").strip().lower()
+    if v in ("", "recommended", "auto"):
+        return None
+    if v in ("off", "false"):
+        return False
+    if v in ("on", "true"):
+        return True
+    if v in ("low", "medium", "high"):
+        return v
+    raise FieldError("How the model thinks: choose recommended, off, on, low, medium or high")
+
+
 def _url_tidy(v):
     # A trailing slash turns f"{url}/api/tags" into a 404.
     return v.strip().rstrip("/")
@@ -165,6 +179,8 @@ FIELDS: list[Field] = [
     # calibration exists to prevent.
     F("ollama_max_indexers_per_call", ("prowlarr", "ollama", "max_indexers_per_call"), "int",
       lo=1, hi=100, clamp=True),
+    F("ollama_think", ("prowlarr", "ollama", "think"), "str", label="How the model thinks",
+      clean=_think),
     F("ollama_context_window", ("prowlarr", "ollama", "context_window"), "int",
       lo=512, hi=262144, clamp=True),
     # --- Interface, security, data -----------------------------------------

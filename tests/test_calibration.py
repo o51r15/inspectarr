@@ -23,7 +23,7 @@ def test_even_splits():
     assert all(b <= cal.MAX_BATCH for b in cal.even_splits(200))
 
 
-@pytest.mark.parametrize("worst, expected", [(40, 80), (10, 60), (1000, 900), (None, 300)])
+@pytest.mark.parametrize("worst, expected", [(60, 150), (10, 120), (1000, 900), (None, 300)])
 def test_timeout_is_twice_the_slowest_call_within_limits(worst, expected):
     assert cal.suggested_timeout(worst) == expected
 
@@ -120,7 +120,7 @@ def test_calibrate_picks_thinking_on_and_the_largest_reliable_even_split(monkeyp
     assert s["think"] is True and s["max_indexers_per_call"] == 19
     # Found at 16K (thinking's starting size), then confirmed at 8K: the
     # model, not the room, was the limit, so the smaller context wins.
-    assert s["context_window"] == 8192 and 60 <= s["timeout"] <= 900
+    assert s["context_window"] == 8192 and 120 <= s["timeout"] <= 900
     assert out["quality_score"] == 93.0 and out["quality_runs"] == [93.0, 93.0]
     assert "dropped or invented indexers above 19" in out["explanation"]
     assert [t["name"] for t in out["tests"]] == ["Quality", "Best settings"]
