@@ -3,8 +3,13 @@
 {% block page_title %}Settings{% endblock %}
 
 {% block topbar_actions %}
-  <button class="btn btn-ghost btn-sm" id="mode-form-btn" data-action="call" data-fn="setEditMode" data-args='["form"]'>Form</button>
-  <button class="btn btn-ghost btn-sm" id="mode-yaml-btn" data-action="call" data-fn="setEditMode" data-args='["yaml"]'>Raw YAML</button>
+  {#- Basic/Advanced. Advanced panes and sections carry data-level="advanced"
+      and stay hidden until this is on; the choice is remembered per browser.
+      Hidden fields are still submitted, which is safe: saving only writes
+      what changed (ui/settings_schema.py). -#}
+  <button type="button" class="btn btn-ghost btn-sm" id="advanced-toggle"
+          aria-pressed="false" data-action="call" data-fn="toggleAdvanced"
+          title="Show settings most people never need to change">Show advanced</button>
 {% endblock %}
 
 {% block content %}
@@ -13,80 +18,73 @@
   <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
-{#- Phase 2.1: Settings' own tab bar. The panes used to be switched from a
-    sidebar group; the id and .nav-group-items wrapper are kept so the pane
-    JavaScript below (showPane, the update dot) works unchanged. -#}
+<div class="settings-root" id="settings-root">
+
+{#- The id and .nav-group-items wrapper are what settings.js's showPane and
+    the AI update dot look for. -#}
 <nav class="subnav mb-24" id="settings-group" aria-label="Settings sections">
   <div class="nav-group-items subnav-track">
     <a class="subnav-item" href="/config#connections"   data-pane="connections">Connections</a>
-    <a class="subnav-item" href="/config#rules"         data-pane="rules">Rules</a>
-    <a class="subnav-item" href="/config#indexers"      data-pane="indexers">Prowlarr</a>
-    <a class="subnav-item" href="/config#ai"            data-pane="ai">AI</a>
+    <a class="subnav-item" href="/config#protection"    data-pane="protection">Protection</a>
+    <a class="subnav-item" href="/config#scanning"      data-pane="scanning">Scanning</a>
     <a class="subnav-item" href="/config#notifications" data-pane="notifications">Notifications</a>
-    <a class="subnav-item" href="/config#general"       data-pane="general">General</a>
-    <a class="subnav-item" href="/config#advanced"      data-pane="advanced">Advanced</a>
-    <a class="subnav-item" href="/config#backups"       data-pane="backups">Backups</a>
+    <a class="subnav-item" href="/config#security"      data-pane="security">Security</a>
+    <a class="subnav-item" href="/config#data"          data-pane="data">Data &amp; backups</a>
+    <a class="subnav-item" href="/config#indexers"      data-pane="indexers" data-level="advanced">Indexers</a>
+    <a class="subnav-item" href="/config#ai"            data-pane="ai"       data-level="advanced">AI</a>
+    <a class="subnav-item" href="/config#server"        data-pane="server"   data-level="advanced">Server &amp; logs</a>
+    <a class="subnav-item" href="/config#file"          data-pane="file"     data-level="advanced">Config file</a>
   </div>
 </nav>
 
 <form method="post" action="/config/save" id="config-form">
   <input type="hidden" name="edit_mode" id="edit_mode" value="form">
 
-  <!-- ============================================================ -->
-  <!-- FORM VIEW — panes driven by the sidebar Settings group       -->
-  <!-- ============================================================ -->
-  <div id="form-view">
+  <div class="settings-content">
 
-    <div class="settings-content">
-
-      <!-- Sticky save bar -->
-      <div class="settings-savebar" id="savebar">
-        <span class="pane-name" id="active-pane-name">Connections</span>
-        <div class="save-actions">
-          <span class="dirty-flag">Unsaved changes</span>
-          <button type="submit" class="btn btn-primary btn-sm">Save Configuration</button>
-        </div>
+    <!-- Sticky save bar (hidden on the Config file pane, which has its own) -->
+    <div class="settings-savebar" id="savebar">
+      <span class="pane-name" id="active-pane-name">Connections</span>
+      <div class="save-actions">
+        <span class="dirty-flag">Unsaved changes</span>
+        <button type="submit" class="btn btn-primary btn-sm">Save Configuration</button>
       </div>
+    </div>
 
 {% include "settings/_connections.html" %}
 
-{% include "settings/_rules.html" %}
+{% include "settings/_protection.html" %}
+
+{% include "settings/_scanning.html" %}
+
+{% include "settings/_notifications.html" %}
+
+{% include "settings/_security.html" %}
+
+{% include "settings/_data.html" %}
 
 {% include "settings/_indexers.html" %}
 
 {% include "settings/_ai.html" %}
 
+{% include "settings/_server.html" %}
 
-{% include "settings/_notifications.html" %}
-
-{% include "settings/_general.html" %}
-
-{% include "settings/_advanced.html" %}
-
-{% include "settings/_backups.html" %}
-
-    </div><!-- /settings-content -->
-  </div><!-- /form-view -->
-
-  <!-- ============================================================ -->
-  <!-- YAML VIEW                                                     -->
-  <!-- ============================================================ -->
-  <div class="d-none" id="yaml-view">
-    <div class="form-group">
-      <textarea class="minh-500" name="raw_yaml" rows="40">{{ raw_yaml }}</textarea>
-    </div>
-    <div class="flex gap-8 mt-16">
-      <button type="submit" class="btn btn-primary">Save Configuration</button>
-      <a href="/config" class="btn btn-ghost">Cancel</a>
-    </div>
-  </div>
-
+  </div><!-- /settings-content -->
 </form>
+
+{#- Outside #config-form on purpose: forms cannot nest, and this editor is the
+    whole file, saved on its own. -#}
+{% include "settings/_file.html" %}
+
+</div><!-- /settings-root -->
 
 {% endblock %}
 
 {% block scripts %}
-<script type="application/json" id="settings-data">{{ {'rule_count': cfg.get('rules', [])|length}|tojson }}</script>
+<script type="application/json" id="settings-data">{{ {
+  'rule_count': cfg.get('rules', [])|length,
+  'initial_pane': 'file' if edit_mode == 'yaml' else ''
+}|tojson }}</script>
 <script src="{{ url_for('static', filename='js/pages/settings-bridge.js') }}?v={{ app_version }}"></script>
 <script src="{{ url_for('static', filename='js/pages/settings.js') }}?v={{ app_version }}"></script>
 {% endblock %}

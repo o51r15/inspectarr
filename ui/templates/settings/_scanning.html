@@ -1,30 +1,5 @@
-      <!-- PANE: General -->
-      <div class="settings-pane" data-pane="general">
-        <div class="form-section">
-          <div class="form-section-title">Behavior</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>On Arr Failure</label>
-              <select name="on_arr_failure">
-                <option value="delete" {{ 'selected' if cfg.get('on_arr_failure','delete') == 'delete' else '' }}>Delete from qBit anyway</option>
-                <option value="abort"  {{ 'selected' if cfg.get('on_arr_failure') == 'abort' else '' }}>Abort — skip deletion</option>
-              </select>
-            </div>
-          </div>
-          <div class="toggle-row">
-            <input type="hidden" name="_rendered" value="dry_run">
-            <input type="checkbox" name="dry_run" id="dry_run"
-                   {{ 'checked' if cfg.get('dry_run') else '' }}>
-            <label for="dry_run">Dry Run — flag matches but take no action</label>
-          </div>
-          <div class="toggle-row">
-            <input type="hidden" name="_rendered" value="scheduler_autostart">
-            <input type="checkbox" name="scheduler_autostart" id="scheduler_autostart"
-                   {{ 'checked' if cfg.get('web',{}).get('scheduler_autostart') else '' }}>
-            <label for="scheduler_autostart">Auto-start scheduler on launch</label>
-          </div>
-        </div>
-
+      <!-- PANE: Scanning -->
+      <div class="settings-pane" data-pane="scanning">
         <div class="form-section">
           <div class="form-section-title">Scan Triggers</div>
           <p class="hint mb-12">
@@ -81,7 +56,7 @@
           </div>
         </div>
 
-        <div class="form-section">
+        <div class="form-section" data-level="advanced">
           <div class="form-section-title">Retry</div>
           <div class="toggle-row">
             <input type="hidden" name="_rendered" value="retry_enabled">
@@ -99,40 +74,5 @@
               <input type="number" name="retry_interval_seconds" value="{{ cfg.get('retry',{}).get('interval_seconds', 600) }}" min="60">
             </div>
           </div>
-        </div>
-
-        <div class="form-section">
-          <div class="form-section-title">Indexer Scoring Schedule</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Reorder interval (hours)</label>
-              <input type="number" name="prowlarr_reorder_interval" id="prowlarr_reorder_interval" min="1"
-                     value="{{ cfg.get('prowlarr',{}).get('reorder_interval_hours', 24) }}">
-              <span class="hint">How often to automatically rescore and reorder Prowlarr indexers</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="form-section-title">Web UI Authentication</div>
-          <div class="toggle-row">
-            <input type="hidden" name="_rendered" value="auth_enabled">
-            <input type="checkbox" name="auth_enabled" id="auth_enabled"
-                   {{ 'checked' if cfg.get('web',{}).get('auth',{}).get('enabled') else '' }}>
-            <label for="auth_enabled">Require login to access the web UI</label>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Username</label>
-              <input type="text" name="auth_username" autocomplete="off"
-                     value="{{ cfg.get('web',{}).get('auth',{}).get('username','admin') }}">
-            </div>
-            <div class="form-group">
-              <label>Password</label>
-              <input type="password" name="auth_password" autocomplete="new-password"
-                     value="{{ cfg.get('web',{}).get('auth',{}).get('password','') }}">
-            </div>
-          </div>
-          <div class="hint">Changes take effect immediately — no restart required.</div>
         </div>
       </div>

@@ -546,3 +546,19 @@ dialog.dialog::backdrop { background: rgba(0, 0, 0, .55); }
   .btn-label-sm-hide { display: none; }
 }
 @media (min-width: 769px) { .show-sm { display: none; } }
+
+/* ---- Settings: Basic / Advanced (Phase 3.5) ------------------------------
+   Anything marked data-level="advanced" (a tab, a whole pane, or one section
+   of a pane) is hidden until the topbar toggle adds .show-advanced. Hidden
+   fields still submit; saving writes only what changed, so that is safe. */
+.settings-root:not(.show-advanced) [data-level="advanced"] { display: none !important; }
+.settings-root.show-advanced .subnav-item[data-level="advanced"] { font-style: italic; }
+/* The Config file pane has its own Save button. Two classes, so this beats
+   legacy.css's later `.settings-savebar { display:flex }` without making the
+   global .d-none utility !important. */
+.settings-savebar.d-none { display: none; }
+#advanced-toggle[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--surface-alt);
+  border-color: var(--border);
+}
