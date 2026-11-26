@@ -16,9 +16,8 @@
     "openConfigFile", "sumWeights", "toggleTorrentPanes", "testConnection", "addRule", "removeRule",
     "addExt", "removeExt", "addPattern", "removePattern", "describeBands",
     "testProwlarr", "resetScoringDefaults", "syncAiEnabled", "testOllama", "pullModel",
-    "renderValidationDetail", "paintSelectedModel", "loadOllamaModels", "validateModel",
-    "applyOllamaModel", "resetSystemPrompt", "saveSystemPrompt", "onBatchInput",
-    "onBatchCommit", "testApprise", "createBackup", "deleteBackup", "clearValidation",
+    "loadOllamaModels", "resetSystemPrompt", "saveSystemPrompt", "onBatchInput",
+    "onBatchCommit", "testApprise", "createBackup", "deleteBackup",
   ]);
 
   function call(name, args) {
@@ -45,7 +44,6 @@
   }
 
   Actions["delete-backup"] = (el) => call("deleteBackup", [el.dataset.name]);
-  Actions["clear-validation"] = (el) => call("clearValidation", [el.dataset.model]);
   Actions["show-ollama-update"] = () => { const i = document.getElementById("ollama-update-info"); if (i) i.style.display = "block"; };
   Actions["hide-ollama-update"] = () => { const i = document.getElementById("ollama-update-info"); if (i) i.style.display = "none"; };
 

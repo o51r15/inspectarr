@@ -941,10 +941,80 @@ def ollama_models():
         resp = req.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        models = sorted(m.get("name", "") for m in data.get("models", []) if m.get("name"))
-        return jsonify({"ok": True, "models": models, "current": current_model})
+        tags = {m.get("name"): m for m in data.get("models", []) if m.get("name")}
+        models = sorted(tags)
+        # Each model's limits and abilities, for the model list. Fetched
+        # concurrently and cached (core/ollama_models.py); a model whose
+        # lookup failed is still listed, with nothing known about it.
+        from core.ollama_models import list_models
+        profiles = {p["name"]: p for p in (list_models(ollama_url) or [])}
+        details = []
+        for name in models:
+            tag, prof = tags[name], profiles.get(name, {})
+            info = tag.get("details") or {}
+            details.append({
+                "name": name,
+                "size_gb": round((tag.get("size") or 0) / 2**30, 1),
+                "parameter_size": info.get("parameter_size") or "",
+                "family": info.get("family") or "",
+                "max_context": prof.get("max_context"),
+                "thinking": prof.get("thinking", "none"),
+                "think_levels": prof.get("think_levels", []),
+                "can_score": prof.get("can_score", True),
+            })
+        return jsonify({"ok": True, "models": models, "details": details,
+                        "current": current_model})
     except Exception as exc:
         return jsonify({"ok": False, "message": safe_error(exc), "models": [], "current": current_model})
+
+
+# What the machine running Ollama has. Ollama cannot say how much graphics
+# memory there is, so the user is asked once per server (DockLlama's
+# question and figures). Only a starting guess: calibration measures where a
+# model actually sits, and that is what the ranking uses.
+HARDWARE = {
+    "none":    {"label": "No graphics card", "gib": 8, "cpu": True},
+    "gpu4":    {"label": "4-6 GB graphics card", "gib": 4.5, "cpu": False},
+    "gpu8":    {"label": "8 GB graphics card", "gib": 8, "cpu": False},
+    "gpu12":   {"label": "12 GB graphics card", "gib": 12, "cpu": False},
+    "gpu16":   {"label": "16 GB graphics card", "gib": 16, "cpu": False},
+    "gpu24":   {"label": "24 GB or more", "gib": 24, "cpu": False},
+    "apple":   {"label": "Apple Silicon (shared memory)", "gib": 12, "cpu": True},
+    "unknown": {"label": "Not sure", "gib": 8, "cpu": True},
+}
+
+
+def _hardware_key(url: str) -> str:
+    from core.state import normalize_ollama_url
+    return "ollama_hardware::" + (normalize_ollama_url(url) or "")
+
+
+@config_bp.route("/config/ai/hardware", methods=["GET", "POST"])
+def ai_hardware():
+    """The graphics-card answer for the connected Ollama server."""
+    state = current_app.config.get("STATE")
+    url = _saved_ollama_url(current_app.config["CONFIG_PATH"])
+    if request.method == "POST":
+        choice = ((request.get_json(silent=True) or {}).get("hardware") or "").strip()
+        if choice not in HARDWARE:
+            return jsonify({"ok": False, "message": "Unknown choice"}), 400
+        if not (state and url):
+            return jsonify({"ok": False, "message": "Connect an Ollama server first"}), 400
+        state.set_app_state(_hardware_key(url), choice)
+    choice = (state.get_app_state(_hardware_key(url)) if (state and url) else None) or ""
+    return jsonify({"ok": True, "server": url, "hardware": choice,
+                    "options": [{"value": k, **v} for k, v in HARDWARE.items()]})
+
+
+@config_bp.route("/config/ai/history", methods=["GET"])
+def ai_history():
+    """Earlier calibrations of one model on the connected server."""
+    state = current_app.config.get("STATE")
+    model = (request.args.get("model") or "").strip()
+    url = _saved_ollama_url(current_app.config["CONFIG_PATH"])
+    if not (state and url and model):
+        return jsonify({"ok": True, "history": []})
+    return jsonify({"ok": True, "history": state.get_calibration_history(model, url)})
 
 
 @config_bp.route("/config/ollama/model", methods=["POST"])

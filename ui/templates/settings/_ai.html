@@ -43,16 +43,27 @@
           {% endif %}
         </div>
 
-        {#- 3. The model: pick, see its result right here, act. -#}
+        {#- 3. Every model on this server, best first (DockLlama's list). -#}
         <div class="form-section">
-          <div class="form-section-title flex items-center gap-8">
-            Model
-            <span id="ollama-update-badge" class="badge badge-warning d-none pointer"
-                  data-action="show-ollama-update"
-                  title="A newer build of this model is published">Update available</span>
+          <div class="form-section-title flex items-center justify-between gap-8 flex-wrap">
+            <span>Models on this server</span>
+            <span class="flex gap-8 items-center">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="ai-refresh"
+                      title="Read the list from the server again">↻ Refresh</button>
+            </span>
           </div>
+
+          <div class="form-group mb-12" id="ai-hardware-row">
+            <label for="ai-hardware">What does the machine running Ollama have?</label>
+            <select id="ai-hardware" class="mw-320">
+              <option value="">Choose…</option>
+            </select>
+            <span class="hint">Only used to flag models that probably will not fit. Calibrate
+              measures where a model really runs, and that is what the ranking uses.</span>
+          </div>
+
           <div id="ollama-update-info" class="hint d-none mb-8 callout">
-            A newer build of this model is published. Pulling it replaces the installed
+            A newer build of the model in use is published. Pulling it replaces the installed
             copy (it can be several gigabytes); scoring keeps using the current build
             until it finishes. <strong>The new build is not checked</strong>: run
             Calibrate again afterwards.
@@ -68,68 +79,29 @@
             </div>
           </div>
 
-          <div class="form-group">
-            <label for="ollama-model-select">Models on this server</label>
-            <div class="flex gap-8 items-center">
-              <select id="ollama-model-select" class="model-opt flex-1"
-                      data-on-change="renderValidationDetail paintSelectedModel" disabled>
-                <option value="">Loading…</option>
-              </select>
-              <button type="button" class="btn btn-ghost btn-sm" data-action="call"
-                      data-fn="loadOllamaModels" title="Reload the list from the server">↻</button>
-            </div>
-            <span class="hint" id="ollama-in-use">
-              {%- if ai.get('model') %}In use: <code>{{ ai.get('model') }}</code>{% else %}No model in use yet.{% endif -%}
-            </span>
+          <p class="hint mb-8" id="ai-run-note" role="status"></p>
+          <div id="ai-model-list" class="model-list" aria-live="polite">
+            <p class="hint">Loading models…</p>
           </div>
+          <span id="ollama-update-badge" class="badge badge-warning pointer d-none mt-8"
+                data-action="show-ollama-update" title="About the newer build">Update available</span>
+          <span class="sr-only" id="ollama-in-use">{{ ai.get('model') or '' }}</span>
 
-          <div id="validation-detail" class="panel-sm mb-12" role="status">
-            Pick a model to see whether it has been checked on this server.
-          </div>
-
-          <div class="d-none mb-12" id="validation-progress">
-            <div class="flex items-center gap-8">
-              <span class="spinner" aria-hidden="true"></span>
-              <span id="validation-stage">Starting…</span>
-            </div>
-            <p class="hint mt-4">This runs in the background; you can leave the page.</p>
-          </div>
-
-          <div class="flex gap-8 items-center flex-wrap">
-            <button type="button" class="btn btn-ghost btn-sm" id="ollama-calibrate-btn"
-                    data-action="call" data-fn="validateModel" data-args='["deep"]'
-                    title="Checks this model scores correctly, then finds how many indexers it handles per call on this server. Several minutes.">Calibrate</button>
-            <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn"
-                    data-action="call" data-fn="applyOllamaModel" disabled>Use this model</button>
-            <span id="ollama-model-status" class="hint" role="status"></span>
-          </div>
-          <p class="hint mt-8 m-0">
-            A model has to pass <strong>Calibrate</strong> on this server before it is
-            used. It checks the model scores correctly and measures how many indexers
-            it can score in one request.
-          </p>
-        </div>
-
-        {#- 4. Results for this server only (others are kept, not shown). -#}
-        <div class="form-section">
-          <div class="form-section-title">Results on this server</div>
-          <p class="hint mb-12" id="validation-empty">No model has been checked on this server yet.</p>
-          <div class="overflow-x-auto">
-            <table class="data-table d-none" id="validation-table">
-              <caption class="sr-only">Check results for models on this Ollama server</caption>
-              <thead>
-                <tr>
-                  <th>Model</th><th>Result</th>
-                  <th title="Can it tell a good indexer from a bad one?">Ranks correctly</th>
-                  <th title="Does it answer in the expected format?">Format</th>
-                  <th title="Can it handle a prompt with all of your indexers?">Full list</th>
-                  <th title="Largest batch that scored cleanly twice">Batch</th>
-                  <th>Avg reply</th><th>Checked</th><th><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody id="validation-tbody"></tbody>
-            </table>
-          </div>
+          <details class="hint mt-12">
+            <summary>How models are tested and ranked</summary>
+            <p class="m-0 mt-8">
+              <strong>Calibrate</strong> scores 14 test indexers whose right answers are known,
+              twice, with thinking off and on where the model can think, and grades the answers
+              out of 100. It then finds how many of your indexers the model handles in one
+              request, the context size it needs, and a timeout. Several minutes per model;
+              the AI is not used for anything else while it runs.
+            </p>
+            <p class="m-0 mt-8">
+              Ranking: the highest score wins; among models within 2 points of it, the one
+              that fits on the graphics card and answers fastest. <strong>Use this model</strong>
+              applies the settings Calibrate chose. Nothing switches by itself.
+            </p>
+          </details>
         </div>
 
         {#- 5-6. Tuning, for people who need it. -#}
@@ -154,7 +126,22 @@
         </div>
 
         <div class="form-section" data-level="advanced">
-          <div class="form-section-title">Scoring behaviour</div>
+          <div class="form-section-title">Settings for the model in use</div>
+          <p class="hint mb-12">Calibrate sets these when you choose a model. Change them only
+            if you know why; moving the context or batch away from what was measured marks the
+            model for re-calibration.</p>
+          <div class="form-group">
+            <label for="ollama-context-slider">
+              Context size <output id="ollama-context-value" for="ollama-context-slider">{{ ((ai.get('context_window', 8192)|int) // 1024) }}K</output>
+            </label>
+            <input type="range" id="ollama-context-slider" min="0" max="7" step="1" value="2"
+                   aria-describedby="ollama-context-hint">
+            <input type="hidden" name="ollama_context_window" id="ollama_context_window"
+                   value="{{ ai.get('context_window', 8192) }}">
+            <span class="hint" id="ollama-context-hint">How much the model reads and writes in
+              one request. Default 8K; the slider stops at what the model supports. Bigger uses
+              more graphics memory.</span>
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label for="ollama_timeout">Timeout (seconds)</label>
@@ -177,11 +164,19 @@
               <span class="hint">0 turns the check off.</span>
             </div>
             <div class="form-group">
-              <label for="ollama_context_window">Context window (tokens)</label>
-              <input type="number" name="ollama_context_window" id="ollama_context_window"
-                     min="512" max="262144" step="512"
-                     value="{{ ai.get('context_window',8192) }}">
-              <span class="hint">Sent to Ollama as <code>num_ctx</code>. Default 8K. Never sent above what the model supports: a larger value is capped at the model's own limit.</span>
+              <label for="ollama-think">How the model thinks</label>
+              {%- set th = ai.get('think') %}
+              {%- set thv = '' if th is none else ('on' if th is sameas true else ('off' if th is sameas false else th)) %}
+              <select name="ollama_think" id="ollama-think">
+                <option value="" {{ 'selected' if thv == '' else '' }}>Recommended (off, or the lowest level)</option>
+                <option value="off" {{ 'selected' if thv == 'off' else '' }}>Off</option>
+                <option value="on" {{ 'selected' if thv == 'on' else '' }}>On</option>
+                <option value="low" {{ 'selected' if thv == 'low' else '' }}>Low</option>
+                <option value="medium" {{ 'selected' if thv == 'medium' else '' }}>Medium</option>
+                <option value="high" {{ 'selected' if thv == 'high' else '' }}>High</option>
+              </select>
+              <span class="hint">Thinking first is slower but usually scores better. Calibrate
+                sets this; only the choices the model supports are offered.</span>
             </div>
           </div>
           <div class="form-group">

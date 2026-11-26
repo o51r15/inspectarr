@@ -80,5 +80,6 @@
   'initial_pane': 'file' if edit_mode == 'yaml' else ''
 }|tojson }}</script>
 <script src="{{ url_for('static', filename='js/pages/settings-bridge.js') }}?v={{ app_version }}"></script>
+<script src="{{ url_for('static', filename='js/pages/ai-models.js') }}?v={{ app_version }}"></script>
 <script src="{{ url_for('static', filename='js/pages/settings.js') }}?v={{ app_version }}"></script>
 {% endblock %}

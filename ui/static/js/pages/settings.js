@@ -21,10 +21,8 @@
   // hide, so the capability stays discoverable and it is obvious what
   // unlocks it.
   const AI_FIELDS = ['ollama_timeout', 'ollama_cache_ttl_hours',
-                     'ollama_update_check_hours', 'ollama-model-select',
-                     'ollama-apply-btn',
-                     'ollama-calibrate-btn', 'ollama_context_window',
-                     'ollama_max_indexers_per_call',
+                     'ollama_update_check_hours', 'ai-hardware', 'ollama-think',
+                     'ollama-context-slider', 'ollama_max_indexers_per_call',
                      'ollama-system-prompt'];
 
   function aiEnabled() {
@@ -702,36 +700,6 @@
     }
   };
 
-  // ---- Ollama model selection ----
-  function loadOllamaModels() {
-    const sel = document.getElementById('ollama-model-select');
-    const btn = document.getElementById('ollama-apply-btn');
-    const st  = document.getElementById('ollama-model-status');
-    sel.disabled = true; btn.disabled = true;
-    sel.innerHTML = '<option value="">Loading…</option>';
-    st.textContent = ''; st.style.color = '';
-    fetch('/config/ollama/models')
-      .then(r => r.json())
-      .then(d => {
-        if (!d.ok) {
-          sel.innerHTML = '<option value="">' + (d.message || 'Unavailable') + '</option>';
-          return;
-        }
-        if (!d.models.length) {
-          sel.innerHTML = '<option value="">No models found</option>';
-          return;
-        }
-        sel.innerHTML = d.models.map(m =>
-          `<option value="${esc(m)}"${m === d.current ? ' selected' : ''}>${esc(m)}</option>`
-        ).join('');
-        sel.disabled = false; btn.disabled = false;
-        decorateModelOptions();
-        renderValidationDetail();
-      })
-      .catch(() => {
-        sel.innerHTML = '<option value="">Failed to fetch models</option>';
-      });
-  }
 
   function describeBands() {
     const el = document.getElementById('band-explainer');
@@ -786,8 +754,6 @@
   }
 
   // ---- Model validation ---------------------------------------------------
-  let _validations = {};      // model -> record
-  let _validationPoll = null;
 
   // One place decides what a model's state IS, so the dropdown, the detail
   // box and the table can never disagree about it.
@@ -804,86 +770,14 @@
   //                not trustworthy either, so it sits with the red group.
   // Results are stored per server and only the connected server's are
   // loaded, so there is no "passed somewhere else" state to show.
-  const MODEL_STATES = {
-    untested:   {cls: 'ms-none', text: '\u2014 not checked'},
-    failed:     {cls: 'ms-bad',  text: '\u2717 failed'},
-    forced:     {cls: 'ms-bad',  text: '\u26a0 forced'},
-    validated:  {cls: 'ms-warn', text: '\u2713 passed'},
-    calibrated: {cls: 'ms-good', text: '\u2713 calibrated'},
-  };
 
-  function modelStateKey(rec) {
-    if (!rec) return 'untested';
-    if (rec.status === 'failed') return 'failed';
-    if (rec.status === 'forced') return 'forced';
-    if (rec.status !== 'supported') return 'untested';
-    return rec.calibrated ? 'calibrated' : 'validated';
-  }
 
-  function modelState(rec) {
-    return MODEL_STATES[modelStateKey(rec)] || MODEL_STATES.untested;
-  }
 
   // Kept for the detail box, which describes the RECORD rather than the
   // model's usable state.
-  const VAL_MARK = {supported: '✓ passed', failed: '✗ failed',
-                    forced: '⚠ used without passing'};
 
-  // Colour AND text on every option.
-  //
-  // Chrome, Edge and Firefox honour a colour set on an <option>; the macOS
-  // native popup and most mobile pickers do not. The text is therefore the
-  // guaranteed channel and the colour is the fast one -- dropping the text
-  // would make this pane unreadable on the platforms that ignore the colour.
-  function decorateModelOptions() {
-    const sel = document.getElementById('ollama-model-select');
-    if (!sel) return;
-    Array.from(sel.options).forEach(function (opt) {
-      const base = opt.dataset.baseLabel || opt.textContent.trim();
-      opt.dataset.baseLabel = base;
-      if (!opt.value) return;              // the placeholder row
-      const st = modelState(_validations[opt.value]);
-      opt.textContent = base + '  ' + st.text;
-      opt.className = 'model-opt ' + st.cls;
-    });
-    paintSelectedModel();
-  }
 
-  // The closed select shows only the selected row, and a <select> does not
-  // inherit the chosen option's colour, so it is applied to the control too.
-  function paintSelectedModel() {
-    const sel = document.getElementById('ollama-model-select');
-    if (!sel) return;
-    sel.classList.remove('ms-none', 'ms-bad', 'ms-warn', 'ms-good');
-    sel.classList.add(modelState(_validations[sel.value]).cls);
-  }
 
-  function renderValidationDetail() {
-    const sel = document.getElementById('ollama-model-select');
-    const box = document.getElementById('validation-detail');
-    if (!sel || !box) return;
-    const model = sel.value;
-    if (!model) { box.textContent = 'Pick a model to see whether it has been checked on this server.'; return; }
-    const rec = _validations[model];
-    if (!rec) {
-      box.innerHTML = '<strong>' + escapeHtml(model) + '</strong> has not been checked on ' +
-                      'this server. Run <strong>Calibrate</strong>.';
-      return;
-    }
-    let rows = (rec.tests || []).map(function (t) {
-      return '<li>' + (t.passed ? '✓ ' : '✗ ') +
-             escapeHtml(t.name) + ' — ' + escapeHtml(t.detail || '') + '</li>';
-    }).join('');
-    const when = rec.validated_at ? rec.validated_at.replace('T', ' ').slice(0, 16) : '';
-    box.innerHTML =
-      '<strong>' + escapeHtml(model) + '</strong> — ' +
-      (VAL_MARK[rec.status] || rec.status) +
-      (rec.calibrated && rec.max_safe_batch ? ', up to ' + rec.max_safe_batch + ' indexers per call' : '') +
-      (rec.indexer_count ? ', tested with ' + rec.indexer_count + ' indexers' : '') +
-      (rec.avg_response_ms ? ', avg ' + Math.round(rec.avg_response_ms / 1000) + 's' : '') +
-      (when ? ', ' + when : '') +
-      (rows ? '<ul class="reason-ul">' + rows + '</ul>' : '');
-  }
 
   function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -892,32 +786,7 @@
     });
   }
 
-  function loadValidations() {
-    return fetch('/config/ai/validations')
-      .then(r => r.json())
-      .then(function (d) {
-        _validations = {};
-        (d.validations || []).forEach(function (v) { _validations[v.model] = v; });
-        decorateModelOptions();
-        renderValidationDetail();
-        renderValidationTable(d.validations || []);
-        renderServerNote(d.server || '', d.other_servers || 0);
-      })
-      .catch(function () { /* status display only -- never block the pane */ });
-  }
 
-  // Which server everything below the URL describes, and that results from
-  // other servers are kept rather than lost.
-  function renderServerNote(server, others) {
-    const note = document.getElementById('ollama-server-note');
-    if (!note) return;
-    if (!server) return;            // the template already says "add one under Connections"
-    note.innerHTML = 'Models and check results below are for <code>' + escapeHtml(server) +
-      '</code>.' + (others
-        ? ' Results from ' + others + ' other server' + (others === 1 ? '' : 's') +
-          ' are kept and come back when you switch to ' + (others === 1 ? 'it' : 'one') + '.'
-        : '');
-  }
 
   // "Save to switch": the model list and results follow the SAVED url, so a
   // typed-but-unsaved url must not look as if it were already in use.
@@ -929,78 +798,8 @@
     box.style.display = norm(input.value) !== norm(input.dataset.savedUrl) ? '' : 'none';
   }
 
-  function renderValidationTable(list) {
-    const tbl = document.getElementById('validation-table');
-    const body = document.getElementById('validation-tbody');
-    const empty = document.getElementById('validation-empty');
-    if (!tbl || !body) return;
-    if (empty) empty.style.display = list.length ? 'none' : '';
-    if (!list.length) { tbl.style.display = 'none'; return; }
-    tbl.style.display = '';
-    function cell(t) {
-      if (!t) return '<td class="mono">—</td>';
-      return '<td class="mono" title="' + escapeHtml(t.detail || '') + '">' +
-             (t.passed ? '✓' : '✗') + '</td>';
-    }
-    body.innerHTML = list.map(function (v) {
-      const byName = {};
-      (v.tests || []).forEach(function (t) {
-        if (/^Discrimination/.test(t.name)) byName.disc = t;
-        else if (/^Schema/.test(t.name)) byName.schema = t;
-        else if (/^Context/.test(t.name)) byName.ctx = t;
-      });
-      const st = modelState(v);
 
-      // Calibrated shows the MEASURED ceiling, because "yes" on its own is
-      // not the useful part -- the number is what the slider is set from.
-      const calCell = v.calibrated
-        ? '<td class="mono ms-good" title="Largest batch that scored cleanly '
-          + 'twice in a row">\u2713 ' + (v.max_safe_batch || '?') + '/call</td>'
-        : '<td class="mono ms-warn" title="Passed, but its batch size was never '
-          + 'measured. Run Calibrate.">\u2014</td>';
 
-      return '<tr>' +
-        '<td class="mono">' + escapeHtml(v.model) + '</td>' +
-        '<td class="' + st.cls + '">' + st.text + '</td>' +
-        cell(byName.disc) + cell(byName.schema) + cell(byName.ctx) +
-        calCell +
-        '<td class="mono">' + (v.avg_response_ms
-            ? Math.round(v.avg_response_ms / 1000) + 's' : '—') + '</td>' +
-        '<td class="mono">' + escapeHtml((v.validated_at || '')
-            .replace('T', ' ').slice(0, 16)) + '</td>' +
-        '<td><button type="button" class="btn btn-ghost btn-sm" ' +
-            'data-action="clear-validation" data-model="' + escapeHtml(v.model) + '" ' +
-            'title="Forget this result so the model shows as untested">' +
-            'Clear</button></td>' +
-      '</tr>';
-    }).join('');
-  }
-
-  function clearValidation(model) {
-    // Retracts a stored verdict. The model itself is untouched -- it simply
-    // shows as untested again, and Apply will warn as it does for any
-    // unvalidated model.
-    fetch('/config/ai/validation/delete', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: model}),
-    })
-      .then(r => r.json())
-      .then(function () { loadValidations(); });
-  }
-
-  // Show the progress row and start polling. Used both when we start a run
-  // and when we discover one already in flight -- a validation takes a
-  // couple of minutes and survives a page reload, so the UI has to be able
-  // to rejoin one it did not start.
-  function attachToValidation(model) {
-    const prog = document.getElementById('validation-progress');
-    const stage = document.getElementById('validation-stage');
-    if (stage) {
-      stage.textContent = 'Starting…' + (model ? ' — ' + model : '');
-    }
-    if (prog) prog.style.display = '';
-    pollValidation();
-  }
 
   // ---- batch size slider -------------------------------------------------
   //
@@ -1075,136 +874,9 @@
       .catch(function () { onBatchInput(); });
   }
 
-  function validateModel(mode) {
-    const sel = document.getElementById('ollama-model-select');
-    const model = sel ? sel.value : '';
-    if (!model) return;
-    const deep = (mode === 'deep');
-    if (deep) {
-      if (!confirm(
-          'Calibration scores test indexers repeatedly at several '
-          + 'batch sizes, and each size has to come back clean twice before '
-          + 'it is accepted \u2014 one clean run is not evidence, because '
-          + 'dropped indexers happen intermittently.\n\n'
-          + 'On a slow or CPU-only host with a lot of indexers this can take '
-          + '20-40 minutes. It runs in the background and you can keep '
-          + 'working.\n\nStart calibration?')) {
-        return;
-      }
-    }
-    // A finished calibration changes the slider's ceiling, so re-read it
-    // once the run reports done rather than leaving the old zone painted.
-    window.__afterValidation = loadBatchCalibration;
-    // Immediate feedback: the request itself can take a moment, and silence
-    // reads as a dead button.
-    attachToValidation(model);
-    fetch('/config/ai/validate', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: model, calibration: deep ? 'deep' : 'quick'}),
-    })
-      .then(r => r.json().then(d => ({code: r.status, d: d})))
-      .then(function (res) {
-        if (res.d.ok) return;                 // polling already attached
-        if (res.code === 409) {
-          // Something else is already validating. Follow that run rather
-          // than reporting an error, but say so -- otherwise the progress
-          // row appears to be for the model the user just clicked, and it
-          // is not. Only one run at a time: concurrent runs against one
-          // Ollama host make both slower and the timings meaningless.
-          const el = document.getElementById('validation-detail');
-          if (el) {
-            el.textContent = (res.d.message || 'Already running') +
-              '. Showing that run — another model is still being validated, ' +
-              'so this one has not started. Try again once it finishes.';
-          }
-          return;
-        }
-        if (_validationPoll) { clearInterval(_validationPoll); _validationPoll = null; }
-        const prog = document.getElementById('validation-progress');
-        if (prog) prog.style.display = 'none';
-        document.getElementById('validation-detail').textContent =
-          res.d.message || 'Could not start validation';
-      })
-      .catch(function (e) {
-        if (_validationPoll) { clearInterval(_validationPoll); _validationPoll = null; }
-        const prog = document.getElementById('validation-progress');
-        if (prog) prog.style.display = 'none';
-        document.getElementById('validation-detail').textContent = 'Request failed: ' + e;
-      });
-  }
 
-  // On load, rejoin a validation that is already running -- otherwise a
-  // reload during a two-minute run leaves it invisible, and the next click
-  // just reports "already running" with nothing on screen to explain it.
-  function resumeValidationIfRunning() {
-    fetch('/config/ai/validate/status')
-      .then(r => r.json())
-      .then(function (s) {
-        if (s && s.running) attachToValidation(s.model);
-      })
-      .catch(function () { /* status only -- never block the pane */ });
-  }
 
-  function pollValidation() {
-    if (_validationPoll) clearInterval(_validationPoll);
-    _validationPoll = setInterval(function () {
-      fetch('/config/ai/validate/status').then(r => r.json()).then(function (s) {
-        const stage = document.getElementById('validation-stage');
-        if (stage) {
-          stage.textContent = (s.stage || 'Working') +
-            ' (' + (s.done || 0) + '/' + (s.total || 3) + ')' +
-            (s.model ? ' — ' + s.model : '');
-        }
-        if (!s.running) {
-          clearInterval(_validationPoll); _validationPoll = null;
-          document.getElementById('validation-progress').style.display = 'none';
-          if (s.interrupted && s.error) {
-            document.getElementById('validation-detail').textContent = s.error;
-          }
-          loadValidations();
-        }
-      }).catch(function () {
-        clearInterval(_validationPoll); _validationPoll = null;
-        document.getElementById('validation-progress').style.display = 'none';
-      });
-    }, 2000);
-  }
 
-  // Apply never starts a validation run. On an unvalidated model it explains
-  // the situation and offers Cancel or Apply anyway; validation is always an
-  // explicit, separate action via the Validate button.
-  function applyOllamaModel() {
-    const sel = document.getElementById('ollama-model-select');
-    const status = document.getElementById('ollama-model-status');
-    const model = sel ? sel.value : '';
-    if (!model) return;
-    _applyModel(model, false).then(function (res) {
-      if (res.code === 409 && res.d.needs_validation) {
-        showApplyAnywayDialog(model, res.d);
-        return;
-      }
-      if (status) {
-        status.textContent = (res.d.ok ? '\u2713 ' : '\u2717 ') + res.d.message;
-        status.className = 'hint ' + (res.d.ok ? 'ms-good' : 'ms-bad');
-      }
-      if (res.d.ok) {
-        const inUse = document.getElementById('ollama-in-use');
-        if (inUse) inUse.innerHTML = 'In use: <code>' + escapeHtml(model) + '</code>';
-        // A validated-but-uncalibrated model applies cleanly -- it scores
-        // correctly, only its batch ceiling is unmeasured. That does not
-        // warrant a dialog; it warrants a sentence. Blocking it would put a
-        // model that works behind the same barrier as one that failed, and
-        // a dialog people learn to dismiss is worse than no dialog.
-        if (modelStateKey(_validations[model]) === 'validated' && status) {
-          status.className = 'hint ms-warn';
-          status.textContent =
-            '\u2713 applied. Batch size is not calibrated on this host, so '
-            + 'scoring uses the default. Run Calibrate to measure it.';
-        }
-        loadValidations();
-      }
-    });
-  }
 
   function _applyModel(model, force) {
     return fetch('/config/ai/model', {
@@ -1229,7 +901,7 @@
       known: 'This model was tested and <strong>failed</strong>. It did not '
              + 'score correctly on this server.',
       advice: 'Choosing a different model is usually the right move. The '
-              + 'failure detail is in the table below.',
+              + 'failure detail is under Results in the list.',
     },
     forced: {
       title: 'Use an unchecked model again?',
@@ -1288,9 +960,13 @@
     document.getElementById('apply-anyway-go').onclick = function () {
       close();
       _applyModel(model, true).then(function (res) {
-        const status = document.getElementById('ollama-model-status');
-        if (status) status.textContent = (res.d.ok ? '⚠ ' : '✗ ') + res.d.message;
-        loadValidations();
+        const note = document.getElementById('ai-run-note');
+        if (note) note.textContent = (res.d.ok ? '⚠ ' : '✗ ') + res.d.message;
+        if (res.d.ok && typeof window.aiAfterApply === 'function') {
+          window.aiAfterApply(model, res.d.applied);
+        } else {
+          loadValidations();
+        }
       });
     };
     document.getElementById('apply-anyway-go').focus();
@@ -1333,30 +1009,6 @@
   // ---- Pull the newer build (ROADMAP item 17) ----
   let _pullPoll = null;
 
-  function pullModel() {
-    const sel = document.getElementById('ollama-model-select');
-    const model = sel ? sel.value : '';
-    if (!confirm('Download the newer build of ' + (model || 'this model') +
-                 '?\n\nThis can be several gigabytes and will replace the ' +
-                 'installed copy. Scoring keeps using the current build until ' +
-                 'it finishes.')) return;
-
-    setPullUI('Starting…', 0, true);
-    fetch('/config/ollama/pull', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: model})
-    })
-      .then(r => r.json().then(d => ({status: r.status, d: d})))
-      .then(res => {
-        // 409 means one is already running -- follow it rather than
-        // reporting an error, the same reasoning as the validation UI.
-        if (res.status === 409) setPullUI(res.d.message, 0, true);
-        else if (!res.d.ok) { setPullUI(res.d.message, 0, false); return; }
-        pollPull();
-      })
-      .catch(e => setPullUI('Could not start: ' + e, 0, false));
-  }
 
   function setPullUI(text, percent, running) {
     const row = document.getElementById('pull-progress');

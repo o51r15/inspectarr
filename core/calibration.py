@@ -22,7 +22,7 @@ rather than guessing:
        same batch. Batch sizes are sized from the tokens Ollama actually
        reported, not from an estimate.
   4. What timeout?
-       Twice the slowest call measured, kept between 60 and 900 seconds.
+       2.5 times the slowest call measured, kept between 120 and 900 seconds.
 
 The answer is a settings dict that "Use this model" applies, plus enough of
 the evidence to show why. Never raises.
@@ -48,7 +48,9 @@ CONTEXT_STEPS = (4096, 8192, 16384, 32768)
 MAX_BATCH, MIN_BATCH = 50, 5
 BATCH_PASSES = 2            # silent omission is intermittent: a size must pass twice
 ROOM_MARGIN = 0.9           # a batch must need at most 90% of the context
-TIMEOUT_FACTOR, TIMEOUT_FLOOR, TIMEOUT_CEILING = 2.0, 60, 900
+# Thinking makes call times vary run to run (gemma4:latest: 34 s and 45 s for
+# the same batch), so the margin is generous; 120 s is DockLlama's default.
+TIMEOUT_FACTOR, TIMEOUT_FLOOR, TIMEOUT_CEILING = 2.5, 120, 900
 SAME_SPEED = 0.10           # within 10% counts as the same speed: smaller context wins
 
 
