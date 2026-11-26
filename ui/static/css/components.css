@@ -667,3 +667,19 @@ dialog.dialog::backdrop { background: rgba(0, 0, 0, .55); }
 .ntfy-sub { display: flex; gap: var(--space-3); align-items: flex-start; margin: var(--space-2) 0; flex-wrap: wrap; }
 .ntfy-sub img { background: #fff; border-radius: var(--radius-sm); }
 .ml-8 { margin-left: 8px; }
+
+/* Indexers -> Health: what a score is made of (js/pages/indexers.js) */
+.score-toggle { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; display: inline-flex; align-items: center; gap: 4px; }
+.score-toggle:hover span:first-child, .score-toggle:focus-visible span:first-child { text-decoration: underline; }
+.score-detail-row > td { background: var(--inset); }
+.score-breakdown { padding: var(--space-2) 0; }
+.score-parts { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-3); }
+.score-part-head { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.score-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.score-bar-fill { display: block; height: 100%; }
+.score-bar-fill.tone-ok { background: var(--ok-fg); }
+.score-bar-fill.tone-warn { background: var(--warn-fg); }
+.score-bar-fill.tone-danger { background: var(--danger-fg); }
+.score-notes { margin: var(--space-2) 0 0; padding-left: 1.2em; }
+.score-notes li { margin-top: 4px; }
+.ml-4 { margin-left: 4px; }
