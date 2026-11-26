@@ -135,6 +135,7 @@
         <div class="form-section">
           <div class="form-section-title">Sonarr</div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="sonarr_enabled">
             <input type="checkbox" name="sonarr_enabled" id="sonarr_enabled"
                    {{ 'checked' if cfg.get('arrs',{}).get('sonarr',{}).get('enabled') else '' }}>
             <label for="sonarr_enabled">Enabled</label>
@@ -158,6 +159,7 @@
         <div class="form-section">
           <div class="form-section-title">Radarr</div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="radarr_enabled">
             <input type="checkbox" name="radarr_enabled" id="radarr_enabled"
                    {{ 'checked' if cfg.get('arrs',{}).get('radarr',{}).get('enabled') else '' }}>
             <label for="radarr_enabled">Enabled</label>
@@ -181,6 +183,7 @@
         <div class="form-section">
           <div class="form-section-title">Lidarr</div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="lidarr_enabled">
             <input type="checkbox" name="lidarr_enabled" id="lidarr_enabled"
                    {{ 'checked' if cfg.get('arrs',{}).get('lidarr',{}).get('enabled') else '' }}>
             <label for="lidarr_enabled">Enabled</label>
@@ -213,6 +216,7 @@
           <div class="form-section-title mb-0 border-0 p-0">Rules</div>
           <button type="button" class="btn btn-ghost btn-sm" id="add-rule-btn" data-action="call" data-fn="addRule">+ Add Rule</button>
         </div>
+        <input type="hidden" name="_rendered" value="rules">
         <div class="mt-12" id="rules-container">
           {% for rule in cfg.get('rules', []) %}
           {% set idx = loop.index0 %}
@@ -401,6 +405,7 @@
             View scores and reorder indexers on the <a href="/indexers">Indexers</a> page.
           </p>
           <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="prowlarr_enabled">
             <input type="checkbox" name="prowlarr_enabled" id="prowlarr_enabled"
                    {{ 'checked' if cfg.get('prowlarr',{}).get('enabled') else '' }}>
             <label for="prowlarr_enabled">Enable Prowlarr indexer health scoring</label>
@@ -519,6 +524,7 @@
             <a href="/indexers">Indexers</a> page.
           </p>
           <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="prowlarr_auto_manage_enabled">
             <input type="checkbox" name="prowlarr_auto_manage_enabled" id="prowlarr_auto_manage_enabled"
                    {{ 'checked' if cfg.get('prowlarr',{}).get('auto_manage',{}).get('enabled') else '' }}>
             <label for="prowlarr_auto_manage_enabled">Enable automatic disable/re-enable</label>
@@ -556,6 +562,7 @@
         <div class="form-section">
           <div class="form-section-title">AI Features</div>
           <div class="toggle-row mb-8">
+            <input type="hidden" name="_rendered" value="ollama_enabled">
             <input type="checkbox" name="ollama_enabled" id="ollama_enabled"
                    data-on-change="syncAiEnabled"
                    {{ 'checked' if cfg.get('prowlarr',{}).get('ollama',{}).get('enabled', (cfg.get('prowlarr',{}).get('ollama',{}).get('url') or '') != '') else '' }}>
@@ -765,6 +772,7 @@
           </p>
           {% set appr = cfg.get('notifications',{}).get('apprise',{}) %}
           <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="apprise_enabled">
             <input type="checkbox" name="apprise_enabled" id="apprise_enabled"
                    {{ 'checked' if appr.get('enabled') else '' }}>
             <label for="apprise_enabled">Enabled</label>
@@ -782,6 +790,7 @@
           <div class="form-group mb-16">
             <label>Notify On</label>
             <div class="flex gap-8 flex-wrap mt-4">
+              <input type="hidden" name="_rendered" value="notify_on">
               {% for evt in ['action','quarantine','error','startup','dry_run'] %}
               <label class="flex items-center gap-8 text-sm text">
                 <input type="checkbox" name="notify_on" value="{{ evt }}"
@@ -796,11 +805,13 @@
           <div class="form-section-title">Notification Digest</div>
           {% set dig = cfg.get('notifications',{}).get('digest',{}) %}
           <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="digest_enabled">
             <input type="checkbox" name="digest_enabled" id="digest_enabled"
                    {{ 'checked' if dig.get('enabled') else '' }}>
             <label for="digest_enabled">Batch notifications into a single digest per scan</label>
           </div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="digest_use_ollama">
             <input type="checkbox" name="digest_use_ollama" id="digest_use_ollama"
                    {{ 'checked' if dig.get('use_ollama') else '' }}>
             <label for="digest_use_ollama">Use Ollama to generate digest summaries</label>
@@ -810,6 +821,7 @@
           <div class="form-section-title">Periodic Summary</div>
           {% set summ = cfg.get('notifications',{}).get('summary',{}) %}
           <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="summary_enabled">
             <input type="checkbox" name="summary_enabled" id="summary_enabled"
                    {{ 'checked' if summ.get('enabled') else '' }}>
             <label for="summary_enabled">Generate periodic activity summaries</label>
@@ -824,6 +836,7 @@
             </div>
           </div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="summary_use_ollama">
             <input type="checkbox" name="summary_use_ollama" id="summary_use_ollama"
                    {{ 'checked' if summ.get('use_ollama', True) else '' }}>
             <label for="summary_use_ollama">Use Ollama for natural-language summaries</label>
@@ -845,11 +858,13 @@
             </div>
           </div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="dry_run">
             <input type="checkbox" name="dry_run" id="dry_run"
                    {{ 'checked' if cfg.get('dry_run') else '' }}>
             <label for="dry_run">Dry Run — flag matches but take no action</label>
           </div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="scheduler_autostart">
             <input type="checkbox" name="scheduler_autostart" id="scheduler_autostart"
                    {{ 'checked' if cfg.get('web',{}).get('scheduler_autostart') else '' }}>
             <label for="scheduler_autostart">Auto-start scheduler on launch</label>
@@ -866,6 +881,7 @@
             <div class="panel">
               <div class="font-semibold mb-8">Polling</div>
               <div class="toggle-row mb-12">
+                <input type="hidden" name="_rendered" value="polling_enabled">
                 <input type="checkbox" name="polling_enabled" id="polling_enabled"
                        {{ 'checked' if cfg.get('scanning',{}).get('polling',{}).get('enabled', True) else '' }}>
                 <label for="polling_enabled">Enabled</label>
@@ -882,6 +898,7 @@
             <div class="panel">
               <div class="font-semibold mb-8">Event-Driven (Webhooks)</div>
               <div class="toggle-row mb-12">
+                <input type="hidden" name="_rendered" value="webhooks_enabled">
                 <input type="checkbox" name="webhooks_enabled" id="webhooks_enabled"
                        {{ 'checked' if cfg.get('scanning',{}).get('webhooks',{}).get('enabled') else '' }}>
                 <label for="webhooks_enabled">Enabled</label>
@@ -913,6 +930,7 @@
         <div class="form-section">
           <div class="form-section-title">Retry</div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="retry_enabled">
             <input type="checkbox" name="retry_enabled" id="retry_enabled"
                    {{ 'checked' if cfg.get('retry',{}).get('enabled', True) else '' }}>
             <label for="retry_enabled">Enabled</label>
@@ -944,6 +962,7 @@
         <div class="form-section">
           <div class="form-section-title">Web UI Authentication</div>
           <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="auth_enabled">
             <input type="checkbox" name="auth_enabled" id="auth_enabled"
                    {{ 'checked' if cfg.get('web',{}).get('auth',{}).get('enabled') else '' }}>
             <label for="auth_enabled">Require login to access the web UI</label>
