@@ -5,9 +5,9 @@ import logging
 import threading
 from datetime import datetime
 
-from werkzeug.security import generate_password_hash
 from ui.routes._utils import safe_error
 from core import config_store
+from ui import settings_schema
 
 # Model identity and update checking live in core/, not here -- the scorer
 # needs them too, and one implementation cannot drift from itself.
@@ -153,15 +153,23 @@ def config_save():
         config_store.save_document(config_path, doc)
         return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
 
-    # Form mode: merge the form's values into the document, then validate
-    # the merged result -- exactly what will be written -- before saving.
-    doc = config_store.load_document(config_path)
-    config_store.merge_into(doc.data, _form_to_config(request.form, config_store.to_plain(doc.data)))
-    err = _validation_error(config_store.to_plain(doc.data))
-    if err:
+    # Form mode: the schema turns the form into ONLY the keys it contains;
+    # the store merges them in and leaves everything else as it was. The
+    # merged document -- exactly what will be written -- is validated first.
+    def _reject(message):
         return render_template("config.html", cfg=_load_raw(config_path),
                                raw_yaml=_file_text(config_path),
-                               error=f"Config invalid — not saved: {err}")
+                               error=f"Not saved: {message}")
+
+    try:
+        updates = settings_schema.form_to_updates(request.form)
+    except settings_schema.FieldError as e:
+        return _reject(str(e))
+    doc = config_store.load_document(config_path)
+    config_store.merge_into(doc.data, updates)
+    err = _validation_error(config_store.to_plain(doc.data))
+    if err:
+        return _reject(f"config invalid — {err}")
     config_store.save_document(config_path, doc)
     return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
 
@@ -270,231 +278,6 @@ def qbit_categories():
         return jsonify({"ok": True, "categories": categories})
     except Exception as exc:
         return jsonify({"ok": False, "categories": [], "message": safe_error(exc)})
-
-
-def _hash_if_new(raw_password: str, existing: dict) -> str:
-    """
-    H-01: Hash the password before saving to config.yaml.
-    If the submitted value is already a werkzeug hash (user didn't change the
-    password field), return it as-is to avoid double-hashing.
-    """
-    if raw_password.startswith(("pbkdf2:", "scrypt:")):
-        return raw_password  # already hashed — user didn't change it
-    return generate_password_hash(raw_password)
-
-
-def _form_to_config(form, existing: dict) -> dict:
-    """Rebuild the config dict from submitted form data."""
-    # Parse rules (dynamic fields: rule_name_0, rule_category_0, etc.)
-    # Indices may be non-contiguous after the user deletes a rule in the UI
-    # (e.g. 0, 1, 3), so collect all present indices rather than stopping at
-    # the first gap — otherwise rules after a gap would be silently dropped.
-    rule_indices = sorted({
-        int(k.rsplit("_", 1)[1])
-        for k in form.keys()
-        if k.startswith("rule_name_") and k.rsplit("_", 1)[1].isdigit()
-    })
-    rules = []
-    for i in rule_indices:
-        exts     = [e.strip() for e in form.get(f"rule_extensions_{i}", "").split(",") if e.strip()]
-        patterns = [p.strip() for p in form.get(f"rule_patterns_{i}", "").split(",") if p.strip()]
-        min_size_raw = form.get(f"rule_min_size_mb_{i}", "").strip()
-        conditions = {
-            "match_mode":     form.get(f"rule_match_mode_{i}", "any"),
-            "bad_extensions": exts,
-        }
-        if patterns:
-            conditions["bad_filename_patterns"] = patterns
-        if min_size_raw:
-            try:
-                conditions["min_file_size_mb"] = int(min_size_raw)
-            except ValueError:
-                pass
-        rules.append({
-            "name":       form.get(f"rule_name_{i}", ""),
-            "category":   form.get(f"rule_category_{i}", ""),
-            "app":        form.get(f"rule_app_{i}", "sonarr"),
-            "conditions": conditions,
-        })
-
-    notify_on = form.getlist("notify_on")
-
-    # Fold Prowlarr's visible fields into the unified save WITHOUT clobbering
-    # the nested `scoring` block (which has no form fields). Start from whatever
-    # is already in the file and overwrite only the keys the form controls.
-    prowlarr_block = dict(existing.get("prowlarr", {}) or {})
-    if "prowlarr_url" in form:  # the Prowlarr pane was rendered/submitted
-        prowlarr_block.update({
-            "enabled":                  "prowlarr_enabled" in form,
-            "url":                      form.get("prowlarr_url", ""),
-            "api_key":                  form.get("prowlarr_api_key", ""),
-            "base_priority":            _int(form.get("prowlarr_base_priority"), 10),
-            "reorder_interval_hours":   _int(form.get("prowlarr_reorder_interval"), 24),
-            "history_window_days":      _int(form.get("prowlarr_history_window"), 90),
-            "min_grabs_before_scoring": _int(form.get("prowlarr_min_grabs"), 10),
-        })
-        # Save scoring weights from form fields if present, otherwise preserve existing
-        if "scoring_response_time_weight" in form:
-            prowlarr_block["scoring"] = {
-                "response_time_weight":      _float(form.get("scoring_response_time_weight"), 0.25),
-                "failure_rate_weight":       _float(form.get("scoring_failure_rate_weight"), 0.30),
-                "malicious_weight":          _float(form.get("scoring_malicious_weight"), 0.20),
-                "grab_success_weight":       _float(form.get("scoring_grab_success_weight"), 0.25),
-                "backoff_penalty":           _float(form.get("scoring_backoff_penalty"), 20.0),
-                "malicious_penalty_per_hit": _float(form.get("scoring_malicious_penalty_per_hit"), 10.0),
-                "auth_failure_mult":         _float(form.get("scoring_auth_failure_mult"), 3.0),
-                "grab_failure_mult":         _float(form.get("scoring_grab_failure_mult"), 2.0),
-                "query_failure_mult":        _float(form.get("scoring_query_failure_mult"), 1.0),
-                "rss_failure_mult":          _float(form.get("scoring_rss_failure_mult"), 0.5),
-            }
-        elif "scoring" in (existing.get("prowlarr") or {}):
-            prowlarr_block["scoring"] = existing["prowlarr"]["scoring"]
-        # AI (Ollama) settings from the AI pane. Merge INTO the existing
-        # sub-block: `model` and `system_prompt` are written by their own
-        # endpoints and have no field here, so a wholesale replace would wipe
-        # both on every save (same clobber class as BUG-10/BUG-11).
-        if "ollama_url" in form:
-            ollama_block = dict(prowlarr_block.get("ollama", {}) or {})
-            ollama_block.update({
-                # Master switch. Checkbox absence means unchecked, which is
-                # exactly the semantics we want: unticking it disables AI.
-                "enabled":            "ollama_enabled" in form,
-                # Normalise once here rather than at each call site doing
-                # f"{url}/api/tags" -- a trailing slash yields a 404.
-                "url":                form.get("ollama_url", "").strip().rstrip("/"),
-                "timeout":            _int(form.get("ollama_timeout"), 120),
-                "cache_ttl_hours":    _int(form.get("ollama_cache_ttl_hours"), 24),
-                "update_check_hours": _int(form.get("ollama_update_check_hours"), 24),
-                # Clamped rather than trusted. This arrives from a range
-                # input, but a hand-posted 0 would make _batch_size fall back
-                # to "all of them", which is the exact failure calibration
-                # exists to prevent, and a huge value would do it slowly.
-                "max_indexers_per_call": max(1, min(
-                    _int(form.get("ollama_max_indexers_per_call"), 25), 100)),
-                "context_window":     max(512, min(
-                    _int(form.get("ollama_context_window"), 4096), 131072)),
-            })
-            prowlarr_block["ollama"] = ollama_block
-        # Auto-manage from form fields
-        prowlarr_block["auto_manage"] = {
-            "enabled": "prowlarr_auto_manage_enabled" in form,
-            "disable_threshold": _float(form.get("prowlarr_auto_manage_threshold"), 30.0),
-            "consecutive_runs": _int(form.get("prowlarr_auto_manage_runs"), 3),
-            "cooldown_hours": _int(form.get("prowlarr_auto_manage_cooldown"), 24),
-        }
-
-    # Remediation thresholds. Merged onto the existing block so
-    # severity_overrides -- which has no form field and is edited in the raw
-    # YAML view -- is not wiped every time the Rules pane is saved.
-    remediation_block = dict(existing.get("remediation", {}) or {})
-    if "remediation_min_severity" in form:
-        remediation_block.update({
-            "min_severity": form.get("remediation_min_severity", "LOW").upper(),
-            "remediate_at": form.get("remediation_remediate_at", "LOW").upper(),
-            "quarantine_timeout_minutes":
-                _int(form.get("remediation_quarantine_timeout"), 0),
-            "quarantine_timeout_action":
-                form.get("remediation_timeout_action", "release").lower(),
-            # Falls back to the STORED value, never to "automatic": a POST
-            # that omits this field must not silently promote a monitor-mode
-            # install to full automatic deletion.
-            #
-            # Note form.get(key, default) returns the default only when the
-            # key is ABSENT -- an empty posted field gives "", which would
-            # validate as "unset" and resolve to automatic. So the emptiness
-            # is tested explicitly rather than leaned on.
-            "operating_mode": (
-                (form.get("remediation_operating_mode") or "").strip().lower()
-                or remediation_block.get("operating_mode", "automatic")),
-        })
-
-    return {
-        "torrent_client": form.get("torrent_client", "qbittorrent"),
-        "remediation": remediation_block,
-        "qbittorrent": {
-            "url":      form.get("qbit_url", ""),
-            "username": form.get("qbit_username", ""),
-            "password": form.get("qbit_password", ""),
-        },
-        "transmission": {
-            "url":      form.get("transmission_url", ""),
-            "username": form.get("transmission_username", ""),
-            "password": form.get("transmission_password", ""),
-        },
-        "deluge": {
-            "url":      form.get("deluge_url", ""),
-            "password": form.get("deluge_password", ""),
-        },
-        "arrs": {
-            "sonarr": {
-                "enabled": "sonarr_enabled" in form,
-                "url":     form.get("sonarr_url", ""),
-                "api_key": form.get("sonarr_api_key", ""),
-            },
-            "radarr": {
-                "enabled": "radarr_enabled" in form,
-                "url":     form.get("radarr_url", ""),
-                "api_key": form.get("radarr_api_key", ""),
-            },
-            "lidarr": {
-                "enabled": "lidarr_enabled" in form,
-                "url":     form.get("lidarr_url", ""),
-                "api_key": form.get("lidarr_api_key", ""),
-            },
-        },
-        "rules": rules,
-        "on_arr_failure":        form.get("on_arr_failure", "delete"),
-        "poll_interval_seconds": _int(form.get("polling_interval_seconds"), 300),
-        "dry_run":               "dry_run" in form,
-        "scanning": {
-            "polling": {
-                "enabled": "polling_enabled" in form,
-                "interval_seconds": _int(form.get("polling_interval_seconds"), 300),
-            },
-            "webhooks": {
-                "enabled": "webhooks_enabled" in form,
-                "secret": form.get("webhooks_secret", ""),
-                "scan_delay_seconds": _int(form.get("webhooks_scan_delay"), 60),
-            },
-        },
-        "retry": {
-            "enabled":          "retry_enabled" in form,
-            "max_attempts":     _int(form.get("retry_max_attempts"), 10),
-            "interval_seconds": _int(form.get("retry_interval_seconds"), 600),
-        },
-        "logging": {
-            "log_file":       form.get("log_file", "./data/inspectarr.log.json"),
-            "retention_days": _int(form.get("retention_days"), 30),
-            "level":          form.get("log_level", "INFO"),
-        },
-        "state":  {"db_file": form.get("db_file", "./data/inspectarr.db")},
-        "web":    {
-            "port": _int(form.get("web_port"), 8585),
-            "scheduler_autostart": "scheduler_autostart" in form,
-            "auth": {
-                "enabled":  "auth_enabled" in form,
-                "username": form.get("auth_username", "admin"),
-                "password": _hash_if_new(form.get("auth_password", "changeme"), existing),
-            },
-        },
-        "prowlarr": prowlarr_block,
-        "notifications": {
-            "apprise": {
-                "enabled":   "apprise_enabled" in form,
-                "urls":      [u.strip() for u in form.get("apprise_urls", "").split("\n") if u.strip()],
-                "notify_on": notify_on,
-            },
-            "digest": {
-                "enabled": "digest_enabled" in form,
-                "use_ollama": "digest_use_ollama" in form,
-            },
-            "summary": {
-                "enabled": "summary_enabled" in form,
-                "schedule": form.get("summary_schedule", "daily"),
-                "use_ollama": "summary_use_ollama" in form,
-            },
-        },
-    }
 
 
 # ---------------------------------------------------------------------------
