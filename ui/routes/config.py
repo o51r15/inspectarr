@@ -7,6 +7,7 @@ from datetime import datetime
 
 from werkzeug.security import generate_password_hash
 from ui.routes._utils import safe_error
+from core import config_store
 
 # Model identity and update checking live in core/, not here -- the scorer
 # needs them too, and one implementation cannot drift from itself.
@@ -45,53 +46,22 @@ def _load_raw(config_path: str) -> dict:
 
 
 def _save_raw(config_path: str, data: dict):
+    """Write `data` into config.yaml through the comment-preserving store.
+
+    Keys in `data` are merged into the existing document; keys it does not
+    mention are left exactly as they are, comments included. Atomic write,
+    bind-mount fallback, chmod 600 and cache invalidation live in
+    core.config_store.write_text_atomic (L-17, ROADMAP item 14).
     """
-    L-17: Atomic config write — try temp-file-then-replace first (safest),
-    fall back to direct overwrite if the directory isn't writable (e.g.
-    Docker bind-mounted config.yaml where /app is read-only).
-    """
-    import tempfile
-    content = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    dir_name = os.path.dirname(os.path.abspath(config_path))
+    doc = config_store.load_document(config_path)
+    config_store.merge_into(doc.data, data)
+    config_store.save_document(config_path, doc)
 
-    # --- Attempt 1: atomic write via temp file in same dir ---
-    try:
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, config_path)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-    except PermissionError:
-        # --- Attempt 2: direct overwrite (bind-mount safe) ---
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
 
-    try:
-        os.chmod(config_path, 0o600)
-    except OSError:
-        pass  # Windows / container without chown support
-
-    # ROADMAP item 14: drop the cached parse for this file.
-    #
-    # The cache also revalidates against (mtime_ns, size, inode) on every
-    # read, so this is belt-and-braces rather than the only guard -- but an
-    # in-app save must be visible on the very next read regardless of
-    # filesystem timestamp granularity, and this makes that unconditional.
-    try:
-        from core.config import invalidate_config_cache
-        invalidate_config_cache(config_path)
-    except Exception:
-        pass  # a cache miss is harmless; failing a save over it is not
+def _file_text(config_path: str) -> str:
+    """The config as the store would write it: the user's own layout and
+    comments, for the raw YAML editor."""
+    return config_store.dump_text(config_store.load_document(config_path))
 
 
 def _get_state(cfg):
@@ -151,8 +121,7 @@ def _validation_error(data: dict) -> str | None:
 def config_view():
     config_path = current_app.config["CONFIG_PATH"]
     raw         = _load_raw(config_path)
-    raw_yaml    = yaml.dump(raw, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    return render_template("config.html", cfg=raw, raw_yaml=raw_yaml)
+    return render_template("config.html", cfg=raw, raw_yaml=_file_text(config_path))
 
 
 @config_bp.route("/config/save", methods=["POST"])
@@ -162,39 +131,38 @@ def config_save():
 
     if mode == "yaml":
         raw_yaml = request.form.get("raw_yaml", "")
+
+        def _reject(message):
+            return render_template("config.html", cfg=_load_raw(config_path),
+                                   raw_yaml=raw_yaml, error=message, edit_mode="yaml")
+
         try:
-            data = yaml.safe_load(raw_yaml)
-        except yaml.YAMLError as e:
-            raw = _load_raw(config_path)
-            return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
-                                   error=f"YAML error: {e}", edit_mode="yaml")
-        # BUG-05: yaml.safe_load("") returns None; writing None destroys the
-        # config file (yaml.dump(None) → "null\n") and bricks the app.
-        if not isinstance(data, dict):
-            raw = _load_raw(config_path)
-            return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
-                                   error="YAML must be a mapping — cannot save empty or scalar content.",
-                                   edit_mode="yaml")
+            doc = config_store.parse_text(raw_yaml)
+        except Exception as e:  # ruamel raises several YAMLError subclasses
+            return _reject(f"YAML error: {e}")
+        # BUG-05: an empty or scalar document must never replace the config.
+        # (parse_text maps an empty document to {}; a bare scalar is not a dict.)
+        if not isinstance(doc.data, dict) or not doc.data:
+            return _reject("YAML must be a mapping — cannot save empty or scalar content.")
         # IMP-4: refuse to write a config the core cannot load
-        err = _validation_error(data)
+        err = _validation_error(config_store.to_plain(doc.data))
         if err:
-            raw = _load_raw(config_path)
-            return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
-                                   error=f"Config invalid — not saved: {err}",
-                                   edit_mode="yaml")
-        _save_raw(config_path, data)
+            return _reject(f"Config invalid — not saved: {err}")
+        # The submitted text replaces the file as a whole: this editor IS
+        # the whole file, so a key the user deleted here is meant to go.
+        config_store.save_document(config_path, doc)
         return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
 
-    # Form mode — rebuild config dict from form fields
-    data = _form_to_config(request.form, _load_raw(config_path))
-    # IMP-4: refuse to write a config the core cannot load
-    err = _validation_error(data)
+    # Form mode: merge the form's values into the document, then validate
+    # the merged result -- exactly what will be written -- before saving.
+    doc = config_store.load_document(config_path)
+    config_store.merge_into(doc.data, _form_to_config(request.form, config_store.to_plain(doc.data)))
+    err = _validation_error(config_store.to_plain(doc.data))
     if err:
-        raw      = _load_raw(config_path)
-        raw_yaml = yaml.dump(raw, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        return render_template("config.html", cfg=raw, raw_yaml=raw_yaml,
+        return render_template("config.html", cfg=_load_raw(config_path),
+                               raw_yaml=_file_text(config_path),
                                error=f"Config invalid — not saved: {err}")
-    _save_raw(config_path, data)
+    config_store.save_document(config_path, doc)
     return redirect(url_for("config.config_view") + "?toast=Configuration+saved&level=success")
 
 

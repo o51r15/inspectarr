@@ -90,10 +90,36 @@ def test_yaml_mode_rejects_misspelled_mode(client, config_path):
     assert read_config(config_path)["remediation"]["operating_mode"] == "monitor"
 
 
-@pytest.mark.xfail(reason="S2: form save rebuilds the file and drops unknown keys; "
-                          "fixed in Phase 3", strict=True)
-def test_unknown_top_level_key_survives(client, config_path, base_config):
+def test_unknown_top_level_key_survives(client, config_path, base_config):    # S2
     base_config["my_note"] = "kept by hand"
     write_config(config_path, base_config)
     _save(client, _unchanged_form(client))
     assert read_config(config_path).get("my_note") == "kept by hand"
+
+
+def _with_comments(config_path, base_config):
+    """The fixture config, re-written with a header and an inline comment."""
+    text = "# my homelab notes -- please keep\n" + yaml.safe_dump(base_config, sort_keys=False)
+    lines = text.splitlines()
+    i = next(n for n, l in enumerate(lines) if l.startswith("on_arr_failure:"))
+    lines[i] += "   # think before changing"
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+def test_form_save_keeps_comments(client, config_path, base_config):
+    _with_comments(config_path, base_config)
+    _save(client, _unchanged_form(client))
+    text = open(config_path, encoding="utf-8").read()
+    assert text.startswith("# my homelab notes -- please keep\n")
+    assert "# think before changing" in text
+
+
+def test_yaml_editor_shows_and_keeps_comments(client, config_path, base_config):
+    _with_comments(config_path, base_config)
+    html = client.get("/config").get_data(as_text=True)
+    assert "# my homelab notes -- please keep" in html        # editor shows the real file
+    raw = open(config_path, encoding="utf-8").read().replace("# think before", "# THINK before")
+    resp = client.post("/config/save", data={"edit_mode": "yaml", "raw_yaml": raw})
+    assert resp.status_code == 302
+    assert "# THINK before changing" in open(config_path, encoding="utf-8").read()

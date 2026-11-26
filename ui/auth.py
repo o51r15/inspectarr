@@ -19,8 +19,6 @@ Legacy plaintext passwords are auto-migrated on first successful login.
 """
 import hmac
 import logging
-import os
-import tempfile
 from urllib.parse import urlparse
 
 import yaml
@@ -81,41 +79,19 @@ def read_auth_block(config_path: str) -> dict:
 def _migrate_password(config_path: str, plaintext: str):
     """
     H-01: Auto-migrate a plaintext password to a werkzeug hash.
-    Uses atomic write (temp → fsync → replace) to avoid corruption.
-    Best-effort — failures are logged but never block authentication.
+
+    Writes through core.config_store: only web.auth.password changes, so the
+    user's comments and every other key survive, and the write is atomic
+    (temp -> fsync -> replace, with the bind-mount fallback). Best-effort --
+    failures are logged but never block authentication.
     """
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-
-        web = raw.get("web", {})
-        auth = web.get("auth", {})
-        auth["password"] = generate_password_hash(plaintext)
-        web["auth"] = auth
-        raw["web"] = web
-
-        # Atomic write: write to temp file in same directory, fsync, then replace
-        dir_name = os.path.dirname(os.path.abspath(config_path))
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".yaml.tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                yaml.dump(raw, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, config_path)
-            try:
-                from core.config import invalidate_config_cache
-                invalidate_config_cache(config_path)
-            except Exception:
-                pass
-            log.info("Password auto-migrated to hash")
-        except Exception:
-            # Clean up temp file on failure
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
+        from core import config_store
+        doc = config_store.load_document(config_path)
+        config_store.merge_into(
+            doc.data, {"web": {"auth": {"password": generate_password_hash(plaintext)}}})
+        config_store.save_document(config_path, doc)
+        log.info("Password auto-migrated to hash")
     except Exception as exc:
         log.warning(f"Password migration failed (non-fatal): {exc}")
 
