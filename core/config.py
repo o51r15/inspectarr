@@ -143,15 +143,13 @@ class OllamaConfig:
     # The context window to budget the scoring prompt against, and the value
     # sent to Ollama as num_ctx (ROADMAP item 19).
     #
-    # 4096 by default because that is Ollama's own default for most models.
-    # Budgeting for more than Ollama actually applies is worse than useless:
-    # it silently truncates at its default and the model loses the scoring
-    # instructions, then answers with confident, invented numbers rather
-    # than an error.
-    #
-    # Raise it if the model genuinely supports more -- 8192 or 16384 are
-    # common -- and the prompt will be sent in one call instead of several.
-    context_window: int = 4096
+    # 8192 by default: 4096 proved too tight for the scoring prompt. It is
+    # sent as num_ctx on every call, so Ollama really applies it. Choosing a
+    # model resets it to 8192, or to the model's own maximum if that is
+    # smaller (core/ollama_models.py), and it is never sent above the
+    # model's maximum: past the trained length Ollama silently truncates and
+    # the model loses the scoring instructions.
+    context_window: int = 8192
 
     # Hard cap on indexers per scoring call, independent of the token budget.
     #
@@ -444,7 +442,7 @@ def _parse_ollama(o_raw: dict) -> "OllamaConfig":
         auto_update_check=bool(
             True if o_raw.get("auto_update_check") is None
             else o_raw.get("auto_update_check")),
-        context_window=_as_int(o_raw.get("context_window"), 4096),
+        context_window=_as_int(o_raw.get("context_window"), 8192),
         max_indexers_per_call=_as_int(
             o_raw.get("max_indexers_per_call"), 25),
         max_adjustment=_as_float(o_raw.get("max_adjustment"), 30.0),

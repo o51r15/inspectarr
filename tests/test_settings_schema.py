@@ -96,7 +96,7 @@ def test_bad_number_is_refused_and_nothing_written(client, config_path):
 def test_slider_values_are_clamped_not_refused():
     updates = form_to_updates(MultiDict({"ollama_max_indexers_per_call": "0",
                                          "ollama_context_window": "999999"}))
-    assert updates["prowlarr"]["ollama"] == {"max_indexers_per_call": 1, "context_window": 131072}
+    assert updates["prowlarr"]["ollama"] == {"max_indexers_per_call": 1, "context_window": 262144}
 
 
 def test_blank_operating_mode_keeps_stored_mode():
