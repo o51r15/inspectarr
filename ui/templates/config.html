@@ -791,10 +791,14 @@
             <label>Notify On</label>
             <div class="flex gap-8 flex-wrap mt-4">
               <input type="hidden" name="_rendered" value="notify_on">
+              {#- Absent or empty-null means the parser's default (action, error),
+                  exactly as core/config.py reads it; only an explicit [] means none.
+                  Showing [] here used to make the first save switch alerts off. #}
+              {% set notify_on = appr.get('notify_on') if appr.get('notify_on') is not none else ['action', 'error'] %}
               {% for evt in ['action','quarantine','error','startup','dry_run'] %}
               <label class="flex items-center gap-8 text-sm text">
                 <input type="checkbox" name="notify_on" value="{{ evt }}"
-                       {{ 'checked' if evt in appr.get('notify_on',[]) else '' }}>
+                       {{ 'checked' if evt in notify_on else '' }}>
                 {{ evt }}
               </label>
               {% endfor %}

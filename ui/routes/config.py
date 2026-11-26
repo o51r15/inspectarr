@@ -59,9 +59,18 @@ def _save_raw(config_path: str, data: dict):
 
 
 def _file_text(config_path: str) -> str:
-    """The config as the store would write it: the user's own layout and
-    comments, for the raw YAML editor."""
-    return config_store.dump_text(config_store.load_document(config_path))
+    """The config for the raw YAML editor: the user's own layout and comments,
+    with every secret replaced by the mask (3.4). Saving restores them."""
+    doc = config_store.load_document(config_path)
+    settings_schema.mask_secrets(doc.data)
+    return config_store.dump_text(doc)
+
+
+def _render_settings(config_path: str, **extra):
+    """The only way Settings is rendered, so no path can show a raw secret."""
+    extra.setdefault("raw_yaml", _file_text(config_path))
+    return render_template("config.html",
+                           cfg=settings_schema.masked_copy(_load_raw(config_path)), **extra)
 
 
 def _get_state(cfg):
@@ -119,9 +128,7 @@ def _validation_error(data: dict) -> str | None:
 
 @config_bp.route("/config", methods=["GET"])
 def config_view():
-    config_path = current_app.config["CONFIG_PATH"]
-    raw         = _load_raw(config_path)
-    return render_template("config.html", cfg=raw, raw_yaml=_file_text(config_path))
+    return _render_settings(current_app.config["CONFIG_PATH"])
 
 
 @config_bp.route("/config/save", methods=["POST"])
@@ -133,8 +140,10 @@ def config_save():
         raw_yaml = request.form.get("raw_yaml", "")
 
         def _reject(message):
-            return render_template("config.html", cfg=_load_raw(config_path),
-                                   raw_yaml=raw_yaml, error=message, edit_mode="yaml")
+            # Echo back what the user typed so nothing is lost; any stored
+            # secret in it is still only the mask.
+            return _render_settings(config_path, raw_yaml=raw_yaml, error=message,
+                                    edit_mode="yaml")
 
         try:
             doc = config_store.parse_text(raw_yaml)
@@ -144,6 +153,11 @@ def config_save():
         # (parse_text maps an empty document to {}; a bare scalar is not a dict.)
         if not isinstance(doc.data, dict) or not doc.data:
             return _reject("YAML must be a mapping — cannot save empty or scalar content.")
+        # Values still showing the mask are put back to what is stored.
+        try:
+            settings_schema.restore_secrets(doc.data, _load_raw(config_path))
+        except settings_schema.FieldError as e:
+            return _reject(f"Not saved: {e}")
         # IMP-4: refuse to write a config the core cannot load
         err = _validation_error(config_store.to_plain(doc.data))
         if err:
@@ -157,15 +171,13 @@ def config_save():
     # the store merges them in and leaves everything else as it was. The
     # merged document -- exactly what will be written -- is validated first.
     def _reject(message):
-        return render_template("config.html", cfg=_load_raw(config_path),
-                               raw_yaml=_file_text(config_path),
-                               error=f"Not saved: {message}")
+        return _render_settings(config_path, error=f"Not saved: {message}")
 
+    doc = config_store.load_document(config_path)
     try:
-        updates = settings_schema.form_to_updates(request.form)
+        updates = settings_schema.form_to_updates(request.form, config_store.to_plain(doc.data))
     except settings_schema.FieldError as e:
         return _reject(str(e))
-    doc = config_store.load_document(config_path)
     config_store.merge_into(doc.data, updates)
     err = _validation_error(config_store.to_plain(doc.data))
     if err:
@@ -180,7 +192,7 @@ def test_qbit():
     body     = request.get_json(silent=True) or {}   # SEC-5: no 415 on bad body
     url      = body.get("url", "")
     username = body.get("username", "")
-    password = body.get("password", "")
+    password = settings_schema.resolve_secret(body.get("password", ""), ('qbittorrent', 'password'), current_app.config["CONFIG_PATH"])
     try:
         client = QBittorrentClient(url, username, password)
         ok     = client.test_connection()
@@ -195,7 +207,7 @@ def test_transmission():
     body     = request.get_json(silent=True) or {}
     url      = body.get("url", "")
     username = body.get("username", "")
-    password = body.get("password", "")
+    password = settings_schema.resolve_secret(body.get("password", ""), ('transmission', 'password'), current_app.config["CONFIG_PATH"])
     try:
         client = TransmissionClient(url, username, password)
         ok     = client.test_connection()
@@ -209,7 +221,7 @@ def test_deluge():
     from core.deluge import DelugeClient
     body     = request.get_json(silent=True) or {}
     url      = body.get("url", "")
-    password = body.get("password", "")
+    password = settings_schema.resolve_secret(body.get("password", ""), ('deluge', 'password'), current_app.config["CONFIG_PATH"])
     try:
         client = DelugeClient(url, password)
         ok     = client.test_connection()
@@ -223,7 +235,7 @@ def test_lidarr():
     from core.arrs.lidarr import LidarrClient
     body    = request.get_json(silent=True) or {}   # SEC-5
     url     = body.get("url", "")
-    api_key = body.get("api_key", "")
+    api_key = settings_schema.resolve_secret(body.get("api_key", ""), ('arrs', 'lidarr', 'api_key'), current_app.config["CONFIG_PATH"])
     try:
         client = LidarrClient(url, api_key)
         ok     = client.test_connection()
@@ -237,7 +249,7 @@ def test_radarr():
     from core.arrs.radarr import RadarrClient
     body    = request.get_json(silent=True) or {}   # SEC-5
     url     = body.get("url", "")
-    api_key = body.get("api_key", "")
+    api_key = settings_schema.resolve_secret(body.get("api_key", ""), ('arrs', 'radarr', 'api_key'), current_app.config["CONFIG_PATH"])
     try:
         client = RadarrClient(url, api_key)
         ok     = client.test_connection()
@@ -251,7 +263,7 @@ def test_sonarr():
     from core.arrs.sonarr import SonarrClient
     body    = request.get_json(silent=True) or {}   # SEC-5
     url     = body.get("url", "")
-    api_key = body.get("api_key", "")
+    api_key = settings_schema.resolve_secret(body.get("api_key", ""), ('arrs', 'sonarr', 'api_key'), current_app.config["CONFIG_PATH"])
     try:
         client = SonarrClient(url, api_key)
         ok     = client.test_connection()
@@ -1150,7 +1162,8 @@ def test_prowlarr():
     from core.prowlarr import ProwlarrClient
     body    = request.get_json(silent=True) or {}   # SEC-5
     url     = body.get("url", "")
-    api_key = body.get("api_key", "")
+    api_key = settings_schema.resolve_secret(body.get("api_key", ""), ("prowlarr", "api_key"),
+                                             current_app.config["CONFIG_PATH"])
     try:
         client = ProwlarrClient(url, api_key)
         ok     = client.test_connection()
@@ -1166,7 +1179,15 @@ def test_apprise():
     body = request.get_json(silent=True) or {}   # SEC-5
     urls = body.get("urls", [])
     if isinstance(urls, str):
-        urls = [u.strip() for u in urls.split("\n") if u.strip()]
+        urls = urls.split("\n")
+    if not isinstance(urls, list):
+        urls = []
+    # Masked lines ("discord://•••••••• (saved 1)") stand for stored URLs.
+    try:
+        urls = settings_schema.resolve_urls([u for u in urls if isinstance(u, str)],
+                                            current_app.config["CONFIG_PATH"])
+    except settings_schema.FieldError as exc:
+        return jsonify({"ok": False, "message": str(exc)})
     if not urls:
         return jsonify({"ok": False, "message": "No notification URLs provided"})
     try:
