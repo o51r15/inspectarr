@@ -166,7 +166,7 @@ FIELDS: list[Field] = [
     F("ollama_max_indexers_per_call", ("prowlarr", "ollama", "max_indexers_per_call"), "int",
       lo=1, hi=100, clamp=True),
     F("ollama_context_window", ("prowlarr", "ollama", "context_window"), "int",
-      lo=512, hi=131072, clamp=True),
+      lo=512, hi=262144, clamp=True),
     # --- Interface, security, data -----------------------------------------
     F("web_port", ("web", "port"), "int", label="Web port", lo=1, hi=65535),
     F("scheduler_autostart", ("web", "scheduler_autostart"), "bool"),

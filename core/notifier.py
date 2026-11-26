@@ -35,7 +35,7 @@ class Notifier:
         self._ollama_model = _ocfg.model if _ocfg.is_active() else ""
         self._ollama_timeout = config.prowlarr.ollama.timeout
         self._ollama_context_window = getattr(
-            config.prowlarr.ollama, "context_window", 4096)
+            config.prowlarr.ollama, "context_window", 8192)
         self._buffer: list[dict] = []
         # Build the Apprise instance once
         self._apprise = apprise.Apprise()

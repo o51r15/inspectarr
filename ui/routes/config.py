@@ -453,6 +453,8 @@ def prowlarr_rescore():
 # ---------------------------------------------------------------------------
 INFLIGHT_KEY = "validation_inflight"
 
+from core.ollama_models import DEFAULT_CONTEXT
+
 _validation_lock = threading.Lock()
 _validation_state = {"running": False, "model": None, "stage": None,
                      "done": 0, "total": 3, "result": None, "error": None,
@@ -609,10 +611,10 @@ def ai_validate():
     config_path = current_app.config["CONFIG_PATH"]
     data = request.get_json(silent=True) or {}
     model = (data.get("model") or "").strip()
-    # "quick" proves the configured batch size works. "deep" searches for the
-    # largest size that works, twice, and is minutes rather than seconds --
-    # the UI says so before offering it.
-    calibration = "deep" if data.get("calibration") == "deep" else "quick"
+    # Calibrate is the only check. The old "quick" mode proved only that the
+    # configured batch size worked once, which is the claim calibration
+    # exists to replace; it is no longer offered.
+    calibration = "deep"
     if not model:
         return jsonify({"ok": False, "message": "No model specified"}), 400
 
@@ -649,6 +651,19 @@ def ai_validate():
         except Exception:
             pass
 
+        # Calibrate at the context size this model will actually run with.
+        # The saved value belongs to whichever model is in use: for that
+        # model, use it (capped at the model's limit); for any other, use
+        # what choosing it would set -- 8K, or its maximum if smaller.
+        from core.ollama_models import (context_for_model, effective_context,
+                                        model_profile)
+        configured = _int(ollama.get("context_window"), DEFAULT_CONTEXT)
+        if model == (ollama.get("model") or ""):
+            context_window = effective_context(url, model, configured)
+        else:
+            context_window = context_for_model(
+                (model_profile(url, model) or {}).get("max_context"))
+
         with _validation_lock:
             _validation_state.update(
                 running=True, model=model, stage="Starting", done=0, total=3,
@@ -665,10 +680,7 @@ def ai_validate():
             target=_validation_worker,
             args=(current_app._get_current_object(), config_path, url, model,
                   _int(ollama.get("timeout"), 300),
-                  # Validate against the window this deployment configures --
-                  # a pass at Ollama's default says nothing about a host set
-                  # to 8k, and vice versa.
-                  _int(ollama.get("context_window"), 4096),
+                  context_window,
                   indexer_count,
                   ollama.get("system_prompt") or "",
                   calibration,
@@ -677,6 +689,7 @@ def ai_validate():
         t.start()
         return jsonify({"ok": True, "message": "Validation started",
                         "indexer_count": indexer_count,
+                        "context_window": context_window,
                         "calibration": calibration})
     except Exception as exc:
         with _validation_lock:

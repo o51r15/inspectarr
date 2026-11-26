@@ -54,8 +54,8 @@
           <div id="ollama-update-info" class="hint d-none mb-8 callout">
             A newer build of this model is published. Pulling it replaces the installed
             copy (it can be several gigabytes); scoring keeps using the current build
-            until it finishes. <strong>The new build is not checked</strong>: run Quick
-            check again afterwards.
+            until it finishes. <strong>The new build is not checked</strong>: run
+            Calibrate again afterwards.
             <div class="flex gap-8 items-center mt-8">
               <button type="button" class="btn btn-sm d-none" id="ollama-pull-btn"
                       data-action="call" data-fn="pullModel">Pull the new build</button>
@@ -96,20 +96,17 @@
           </div>
 
           <div class="flex gap-8 items-center flex-wrap">
-            <button type="button" class="btn btn-ghost btn-sm" id="ollama-validate-btn"
-                    data-action="call" data-fn="validateModel" data-args='["quick"]'
-                    title="Can this model score correctly? Three tests, about 1-3 minutes.">Quick check</button>
             <button type="button" class="btn btn-ghost btn-sm" id="ollama-calibrate-btn"
                     data-action="call" data-fn="validateModel" data-args='["deep"]'
-                    title="Quick check plus the largest batch this model handles reliably on this server. 10-40 minutes.">Calibrate</button>
+                    title="Checks this model scores correctly, then finds how many indexers it handles per call on this server. Several minutes.">Calibrate</button>
             <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn"
                     data-action="call" data-fn="applyOllamaModel" disabled>Use this model</button>
             <span id="ollama-model-status" class="hint" role="status"></span>
           </div>
           <p class="hint mt-8 m-0">
-            A model has to pass <strong>Quick check</strong> on this server before it is
-            used. <strong>Calibrate</strong> also measures how many indexers it can score
-            in one request.
+            A model has to pass <strong>Calibrate</strong> on this server before it is
+            used. It checks the model scores correctly and measures how many indexers
+            it can score in one request.
           </p>
         </div>
 
@@ -182,9 +179,9 @@
             <div class="form-group">
               <label for="ollama_context_window">Context window (tokens)</label>
               <input type="number" name="ollama_context_window" id="ollama_context_window"
-                     min="512" max="131072" step="512"
-                     value="{{ ai.get('context_window',4096) }}">
-              <span class="hint">Sent to Ollama as <code>num_ctx</code>. Without it Ollama uses its own default (usually 4096) and silently cuts off anything longer. Raise it only if the model supports it.</span>
+                     min="512" max="262144" step="512"
+                     value="{{ ai.get('context_window',8192) }}">
+              <span class="hint">Sent to Ollama as <code>num_ctx</code>. Default 8K. Never sent above what the model supports: a larger value is capped at the model's own limit.</span>
             </div>
           </div>
           <div class="form-group">

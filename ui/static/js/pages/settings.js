@@ -22,7 +22,7 @@
   // unlocks it.
   const AI_FIELDS = ['ollama_timeout', 'ollama_cache_ttl_hours',
                      'ollama_update_check_hours', 'ollama-model-select',
-                     'ollama-apply-btn', 'ollama-validate-btn',
+                     'ollama-apply-btn',
                      'ollama-calibrate-btn', 'ollama_context_window',
                      'ollama_max_indexers_per_call',
                      'ollama-system-prompt'];
@@ -867,7 +867,7 @@
     const rec = _validations[model];
     if (!rec) {
       box.innerHTML = '<strong>' + escapeHtml(model) + '</strong> has not been checked on ' +
-                      'this server. Run <strong>Quick check</strong> (about 1-3 minutes).';
+                      'this server. Run <strong>Calibrate</strong>.';
       return;
     }
     let rows = (rec.tests || []).map(function (t) {
@@ -1082,7 +1082,7 @@
     const deep = (mode === 'deep');
     if (deep) {
       if (!confirm(
-          'In-depth calibration scores your indexers repeatedly at several '
+          'Calibration scores test indexers repeatedly at several '
           + 'batch sizes, and each size has to come back clean twice before '
           + 'it is accepted \u2014 one clean run is not evidence, because '
           + 'dropped indexers happen intermittently.\n\n'
@@ -1221,9 +1221,8 @@
     untested: {
       title: 'Use an unchecked model?',
       known: 'Nothing is known about this model on this server yet.',
-      advice: 'Run <strong>Quick check</strong> first (about 1-3 minutes) to '
-              + 'confirm it can score at all, or <strong>Calibrate</strong> to '
-              + 'do that and measure its batch size.',
+      advice: 'Run <strong>Calibrate</strong> first to confirm it can score '
+              + 'correctly and measure its batch size.',
     },
     failed: {
       title: 'Use a model that failed?',
@@ -1236,7 +1235,7 @@
       title: 'Use an unchecked model again?',
       known: 'This model was previously applied <strong>without passing '
              + 'validation</strong>.',
-      advice: 'Run <strong>Quick check</strong> to find out whether it '
+      advice: 'Run <strong>Calibrate</strong> to find out whether it '
               + 'actually works before relying on it.',
     },
   };

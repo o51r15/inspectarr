@@ -24,7 +24,10 @@ import time
 from .llm_client import (ollama_score_indexers,
                          DEFAULT_CONTEXT_WINDOW,
                          MAX_INDEXERS_PER_CALL,
-                         NEAR_TIMEOUT_WARN_FRACTION)
+                         NEAR_TIMEOUT_WARN_FRACTION,
+                         SYSTEM_PROMPT, _batch_size, _estimate_tokens,
+                         _key_legend)
+from .ollama_models import request_settings
 
 log = logging.getLogger("inspectarr")
 
@@ -119,7 +122,8 @@ def _synthetic_indexers(count: int) -> list[dict]:
     return out
 
 
-def _warmup(ollama_url: str, model: str) -> dict:
+def _warmup(ollama_url: str, model: str,
+            context_window: int = DEFAULT_CONTEXT_WINDOW) -> dict:
     """
     Load the model before anything is timed, and measure the host while we
     are there.
@@ -153,8 +157,13 @@ def _warmup(ollama_url: str, model: str) -> dict:
         base = ollama_url.rstrip("/")
         resp = requests.post(
             f"{base}/api/generate",
+            # Same num_ctx and thinking setting as the tests: Ollama
+            # reloads a model whose num_ctx changes, so warming up at its
+            # default would put the real load inside the first timed test,
+            # and measure GPU share at the wrong size.
             json={"model": model, "prompt": "Ready.", "stream": False,
-                  "options": {"num_predict": 24}},
+                  **request_settings(ollama_url, model, context_window,
+                                     num_predict=24)},
             timeout=300,
         )
         data = resp.json() if resp.status_code == 200 else {}
@@ -192,7 +201,8 @@ def _score_of(result: dict, indexer_id: int):
         return None
 
 
-def _test_discrimination_and_schema(url, model, timeout, prompt):
+def _test_discrimination_and_schema(url, model, timeout, prompt,
+                                    context_window=DEFAULT_CONTEXT_WINDOW):
     """
     Tests 1 and 2 share one call -- they are two questions about one response,
     and a second round trip would only add latency.
@@ -207,7 +217,8 @@ def _test_discrimination_and_schema(url, model, timeout, prompt):
     good, bad = _fixture_good(), _fixture_bad()
     t0 = time.time()
     result = ollama_score_indexers([good, bad], url, model, timeout,
-                                   custom_prompt=prompt)
+                                   custom_prompt=prompt,
+                                   context_window=context_window)
     ms = round((time.time() - t0) * 1000)
 
     disc = {"name": "Discrimination", "passed": False, "response_ms": ms,
@@ -353,6 +364,7 @@ def _probe_batch(url, model, timeout, prompt, indexer_count,
     """
     data = _synthetic_indexers(indexer_count)
     wanted = {d["indexer_id"] for d in data}
+    batch = effective_batch(data, prompt, context_window, batch)
     calls = max(1, -(-indexer_count // max(1, batch)))
 
     t0 = time.time()
@@ -387,6 +399,15 @@ def _probe_batch(url, model, timeout, prompt, indexer_count,
     return out
 
 
+def effective_batch(data, prompt, context_window, batch) -> int:
+    """The batch size ollama_score_indexers will really use for `batch`:
+    the token budget can make it smaller."""
+    system_prompt = prompt.strip() if prompt and prompt.strip() else SYSTEM_PROMPT
+    overhead = _estimate_tokens(system_prompt + _key_legend()
+                                + "\nIndexer data:\n")
+    return _batch_size(data, overhead, context_window, batch)
+
+
 def _calibrate_batch(url, model, timeout, prompt, indexer_count,
                      context_window, ceiling, progress_cb=None) -> dict:
     """
@@ -398,9 +419,14 @@ def _calibrate_batch(url, model, timeout, prompt, indexer_count,
     "we could not measure" and "this model is broken" are different answers
     and only validate_model's other tests can tell them apart.
     """
-    rungs = [b for b in BATCH_LADDER if b <= min(ceiling, indexer_count)]
-    if not rungs:
-        rungs = [max(1, min(ceiling, indexer_count))]
+    top = min(ceiling, indexer_count)
+    data = _synthetic_indexers(indexer_count)
+    rungs, seen = [], set()
+    for b in ([top] + [b for b in BATCH_LADDER if b < top]):
+        eff = effective_batch(data, prompt, context_window, b)
+        if eff not in seen:
+            seen.add(eff)
+            rungs.append(eff)
 
     out = {"name": "Batch calibration", "passed": False,
            "ladder": rungs, "attempts": [], "max_safe_batch": None,
@@ -479,20 +505,27 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
     try:
         if progress_cb:
             progress_cb("Loading model", 0, 3)
-        out.update(_warmup(ollama_url, model))
+        out.update(_warmup(ollama_url, model, context_window))
 
         if progress_cb:
             progress_cb("Discrimination + schema", 1, 3)
         disc, schema, ms1 = _test_discrimination_and_schema(
-            ollama_url, model, timeout, system_prompt)
+            ollama_url, model, timeout, system_prompt, context_window)
+        out["tests"] = [disc, schema]
+        ms2 = ms1
 
-        if progress_cb:
-            progress_cb("Context capacity", 2, 3)
-        ctx, ms2 = _test_context(ollama_url, model, timeout,
-                                 system_prompt, indexer_count,
-                                 context_window=context_window)
-
-        out["tests"] = [disc, schema, ctx]
+        # The fixed-size context test only runs in quick mode. Calibration's
+        # batch search covers the same ground properly; running both meant a
+        # model safe at 15 per call FAILED overall for dropping indexers at
+        # 25 -- the exact case the search exists to handle.
+        ctx = None
+        if calibration != "deep":
+            if progress_cb:
+                progress_cb("Context capacity", 2, 3)
+            ctx, ms2 = _test_context(ollama_url, model, timeout,
+                                     system_prompt, indexer_count,
+                                     context_window=context_window)
+            out["tests"].append(ctx)
 
         # In-depth calibration only runs once the model has shown it can
         # score at all. Searching for the best batch size of a model that
@@ -502,11 +535,11 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
         if calibration == "deep" and disc["passed"] and schema["passed"]:
             cal = _calibrate_batch(ollama_url, model, timeout, system_prompt,
                                    indexer_count, context_window,
-                                   ceiling=max_indexers_per_call,
+                                   ceiling=BATCH_LADDER[0],
                                    progress_cb=progress_cb)
             out["tests"].append(cal)
             out["max_safe_batch"] = cal.get("max_safe_batch")
-        elif ctx["passed"]:
+        elif ctx and ctx["passed"]:
             # Quick mode proved the CONFIGURED size works, which is a weaker
             # claim than "this is the largest safe size" and is recorded as
             # such. calibrated stays False so the UI can offer the real thing.

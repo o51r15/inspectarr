@@ -20,6 +20,8 @@ import time
 
 import requests
 
+from .ollama_models import effective_context, request_settings
+
 log = logging.getLogger("inspectarr")
 
 THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -171,7 +173,44 @@ NARRATION_MAX_CHARS = 900
 SALVAGE_KEYS = ("summary", "narrative", "notification", "message",
                 "digest", "overview", "text", "description")
 
-DEFAULT_CONTEXT_WINDOW = 4096
+DEFAULT_CONTEXT_WINDOW = 8192
+
+# The exact answer shape, sent as Ollama's `format`. With a schema rather than
+# plain "json", Ollama constrains generation to it: the model cannot add
+# fields, echo the input, or wrap the list in something else. The prompt still
+# describes the shape, for models and servers that ignore it.
+SCORE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "scores": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "indexer_id": {"type": "integer"},
+                    "health_score": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["indexer_id", "health_score", "reasoning"],
+            },
+        },
+    },
+    "required": ["scores"],
+}
+
+# Answer budget. One indexer's entry (id, score, one sentence) is well under
+# 100 tokens; 120 leaves room for a long sentence. The cap exists so a model
+# stuck repeating itself stops instead of running to the timeout.
+ANSWER_TOKENS_PER_INDEXER = 120
+ANSWER_TOKENS_BASE = 256
+# Models that cannot turn thinking off (gpt-oss) think inside the same budget.
+THINKING_TOKENS = 2048
+
+
+def answer_budget(indexer_count: int, thinks: bool = False) -> int:
+    """num_predict for a scoring call of this many indexers."""
+    return (ANSWER_TOKENS_BASE + ANSWER_TOKENS_PER_INDEXER * max(1, indexer_count)
+            + (THINKING_TOKENS if thinks else 0))
 
 
 def _estimate_tokens(text: str) -> int:
@@ -219,7 +258,14 @@ def _batch_size(rows: list[dict], overhead_tokens: int,
         return 0
     per = _estimate_tokens(_encode_payload(rows)) / len(rows)
     budget = context_window * PROMPT_BUDGET_FRACTION - overhead_tokens
-    by_tokens = len(rows) if (per <= 0 or budget <= 0) else int(budget / per)
+    if per <= 0:
+        by_tokens = len(rows)
+    elif budget <= 0:
+        # The instructions alone fill the budget. Sending everything at once
+        # would be the worst choice; the smallest batch is the least bad.
+        by_tokens = 1
+    else:
+        by_tokens = int(budget / per)
     return max(1, min(by_tokens, max_items or len(rows)))
 
 
@@ -314,8 +360,11 @@ def narrate(ollama_url: str, model: str, prompt: str, timeout: int,
     try:
         resp = requests.post(
             f"{ollama_url.rstrip('/')}/api/generate",
+            # Thinking off and the context capped at the model's limit, as for
+            # scoring. Temperature is left to the model: this is prose.
             json={"model": model, "prompt": prompt, "stream": False,
-                  "options": {"num_ctx": context_window}},
+                  **request_settings(ollama_url, model, context_window,
+                                     temperature=None)},
             timeout=timeout,
         )
         if resp.status_code != 200:
@@ -399,6 +448,9 @@ def ollama_score_indexers(
     system_prompt = (custom_prompt.strip()
                      if custom_prompt and custom_prompt.strip()
                      else SYSTEM_PROMPT)
+    # Never budget for more context than the model has: Ollama does not clamp
+    # num_ctx itself, and past the trained length the prompt is silently lost.
+    context_window = effective_context(ollama_url, model, context_window)
     overhead = _estimate_tokens(system_prompt + _key_legend()
                                 + "\nIndexer data:\n")
     size = _batch_size(indexer_data, overhead, context_window,
@@ -469,24 +521,31 @@ def _score_one_batch(
             "model may drop the instructions. Raise prowlarr.ollama."
             "context_window if this model supports more.", est, context_window)
 
+    settings = request_settings(ollama_url, model, context_window)
+    settings["options"]["num_predict"] = answer_budget(
+        len(indexer_data), thinks=isinstance(settings.get("think"), str))
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "format": SCORE_SCHEMA,
+        # num_ctx is always sent: without it Ollama applies its own default
+        # and silently truncates anything past it. request_settings also
+        # turns thinking off and lowers the temperature.
+        **settings,
+    }
     call_started = time.monotonic()
     try:
-        resp = requests.post(
-            f"{ollama_url.rstrip('/')}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "format": "json",
-                # Budgeting for a window Ollama is not actually using would
-                # be pointless: without num_ctx it applies its own default
-                # (4096 for most models) and silently truncates anything
-                # past it -- which is precisely the failure this item exists
-                # to remove.
-                "options": {"num_ctx": context_window},
-            },
-            timeout=timeout,
-        )
+        url = f"{ollama_url.rstrip('/')}/api/generate"
+        resp = requests.post(url, json=payload, timeout=timeout)
+        if resp.status_code == 400 and isinstance(payload["format"], dict):
+            # A server too old for schema formats. Plain JSON mode still
+            # works; the prompt describes the shape.
+            log.info("Ollama refused the answer schema (%s); using plain JSON",
+                     resp.text[:120])
+            payload["format"] = "json"
+            resp = requests.post(url, json=payload, timeout=max(
+                1, timeout - (time.monotonic() - call_started)))
         if resp.status_code != 200:
             log.warning(
                 "Ollama scoring returned HTTP %d: %s",
@@ -518,6 +577,13 @@ def _score_one_batch(
             "indexers. This is close enough to fail on a busier run -- "
             "lower prowlarr.ollama.max_indexers_per_call or raise .timeout.",
             elapsed, timeout, 100.0 * elapsed / timeout, len(indexer_data))
+
+    if data.get("done_reason") == "length":
+        # Ran out of answer budget mid-answer. The parser may still salvage
+        # the entries that finished; the rest fall back to the deterministic
+        # score. Say so, because it is a setting problem, not a model one.
+        log.warning("Scoring answer for %d indexers was cut off at %s tokens",
+                    len(indexer_data), settings["options"].get("num_predict"))
 
     raw_response = data.get("response", "")
     if not raw_response:
