@@ -7,6 +7,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added - Model Calibration and Ranking
+
+**Calibrate** now finds the best way to run each model on your Ollama
+server, and the AI tab ranks the models by how well they did there.
+
+- Calibrate grades the model on 14 test indexers whose right answers are
+  known (from the scoring prompt's points table), twice, with thinking off
+  and on (or each level, for models like gpt-oss). It then finds how many
+  of your indexers the model handles in one request, the context size it
+  needs, and a timeout. The answer is a score out of 100 and a set of
+  settings.
+- **Use this model** applies those settings: context size, indexers per
+  call, timeout and thinking. A model that was not calibrated gets an 8K
+  context (or its maximum, if smaller).
+- The AI tab lists every model on the server, best first: highest score;
+  among models within 2 points, the one that fits on the graphics card and
+  is fastest. Each shows its score, speed, where it runs, and **Results**
+  with what Calibrate tried and why it chose what it did, plus earlier runs.
+- **Calibrate all…** tests several models one after another, now or
+  overnight, with Pause and Cancel. Runs carry on after a restart. New
+  models on the server are calibrated overnight by themselves (Advanced ->
+  Testing models; on by default).
+- When a run finds a model clearly better than the one in use, a banner
+  offers it: **Review results**, **Switch to it**, **Keep current**.
+  Inspectarr never switches models by itself.
+- Inspectarr asks what graphics card the Ollama machine has, once per
+  server, to flag models that probably won't fit.
+- Quick check is gone; Calibrate is the only check. Embedding and
+  "decision" models, which can't score indexers, are listed apart.
+- A model whose scores mostly repeat Inspectarr's own score is labelled:
+  its AI score adds little.
+
+### Changed - How Inspectarr Asks the AI
+
+- **Thinking models now work.** Models that think before answering (gemma4,
+  gpt-oss, deepseek-r1 and others) were never told not to, and could think
+  until they ran out of room and return nothing: gemma4 scored 0 of 20
+  indexers that way. Thinking is now off (or at its lowest level) unless
+  Calibrate finds it scores better, and a thinking model gets the room it
+  needs.
+- Scoring uses a low temperature (0.1), so the same indexer gets the same
+  score twice, and the exact answer format is enforced by Ollama.
+- The default context size is 8K (was 4K), and Inspectarr never sends a
+  context larger than the model supports.
+- Calibration and live scoring take turns: while a model is being
+  calibrated, a scan keeps Inspectarr's own scores for that round instead
+  of competing for the AI server.
+
 ### Changed - AI Model Checks Are Kept Per Ollama Server
 
 Model check results (Quick check and Calibrate) are now stored separately
@@ -20,20 +68,21 @@ servers' results as if they applied to the one you're connected to.
 - **On upgrade:** check results that never recorded which server they came
   from are removed, because they can't be matched to any server. If the
   model you use now was only checked before servers were tracked, it shows
-  as "not checked". Scoring keeps working; run **Quick check** before
+  as "not checked". Scoring keeps working; run **Calibrate** before
   switching to a different model.
-- The AI tab is laid out top to bottom: the on/off switch, the server, the
-  model (with its result and the Quick check, Calibrate and **Use this
-  model** buttons together), then the results on this server. Typing a new
-  server address shows "Save to switch", because the list follows the saved
-  server.
+- Typing a new server address shows "Save to switch", because the list
+  follows the saved server.
 
 ### Changed - Settings Reorganised
 
-- Settings is grouped into tabs by task: Connections, Protection, Scanning,
-  Notifications, Indexers, AI, Security, and Data & backups. **Show
-  advanced** adds Server & logs and the raw config file, and shows a few
-  extra tuning sections inside the other tabs. Your choice is remembered.
+- Settings has seven tabs in plain language: Connections, Protection,
+  Scanning, Notifications, Indexer health, AI and System. Everything that
+  connects to something (download client, Sonarr/Radarr/Lidarr, Prowlarr,
+  Ollama) is under Connections. **Show advanced** adds tuning sections
+  inside the tabs and reaches the raw config file from System. Your choice
+  is remembered.
+- "Dry run" and "Watch only" are one setting, and Watch only now sends the
+  alert for what it would have done.
 - Connections shows one card per service, with a status (**Connected**,
   **Can't connect**, **Off**), its own **Test** button, and credentials
   folded away once they're saved. The download client is picked with three
