@@ -696,6 +696,12 @@
                 'removed automatically; it is held for you instead.</em>';
     }
 
+    // "Releases held for review" settings only matter when something can be
+    // held; for Watch only, or Remove automatically with nothing held, they
+    // are noise. Hidden, not removed: the fields still save as they are.
+    const heldSection = document.getElementById('held-review-section');
+    if (heldSection) heldSection.hidden = !held.length;
+
     const fmt = a => a.length ? a.join(', ') : 'nothing';
     el.innerHTML =
       '<strong>Recorded only:</strong> ' + fmt(recorded) +
