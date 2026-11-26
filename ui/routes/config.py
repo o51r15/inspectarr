@@ -1383,37 +1383,8 @@ def test_prowlarr():
         return jsonify({"ok": False, "message": safe_error(exc)})
 
 
-@config_bp.route("/config/test/apprise", methods=["POST"])
-def test_apprise():
-    """Send a test notification via Apprise to verify URLs."""
-    import apprise
-    body = request.get_json(silent=True) or {}   # SEC-5
-    urls = body.get("urls", [])
-    if isinstance(urls, str):
-        urls = urls.split("\n")
-    if not isinstance(urls, list):
-        urls = []
-    # Masked lines ("discord://•••••••• (saved 1)") stand for stored URLs.
-    try:
-        urls = settings_schema.resolve_urls([u for u in urls if isinstance(u, str)],
-                                            current_app.config["CONFIG_PATH"])
-    except settings_schema.FieldError as exc:
-        return jsonify({"ok": False, "message": str(exc)})
-    if not urls:
-        return jsonify({"ok": False, "message": "No notification URLs provided"})
-    try:
-        ap = apprise.Apprise()
-        for url in urls:
-            ap.add(url)
-        ok = ap.notify(
-            title="inspectarr",
-            body="Test notification — Apprise is configured correctly.",
-        )
-        if ok:
-            return jsonify({"ok": True, "message": "Test notification sent"})
-        return jsonify({"ok": False, "message": "Apprise failed to send — check your URLs"})
-    except Exception as exc:
-        return jsonify({"ok": False, "message": safe_error(exc)})
+# The notification test lives with the places to send to: POST /config/notify/test
+# and /config/notify/targets/<id>/test (ui/routes/notify.py).
 
 
 # ---------------------------------------------------------------------------

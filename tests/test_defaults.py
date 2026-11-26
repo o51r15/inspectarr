@@ -29,8 +29,8 @@ def test_default_matches_parser(path, expected):
 
 
 def test_get_default_returns_a_copy():
-    get_default(("notifications", "apprise", "notify_on")).append("junk")
-    assert DEFAULTS["notifications"]["apprise"]["notify_on"] == ["action", "error"]
+    get_default(("notifications", "apprise", "targets")).append("junk")
+    assert DEFAULTS["notifications"]["apprise"]["targets"] == []
 
 
 def test_unknown_path_raises():

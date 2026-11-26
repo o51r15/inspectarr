@@ -4,3 +4,4 @@ ruamel.yaml>=0.18,<0.20
 flask>=3.0.0
 waitress>=3.0.0
 apprise>=1.9.0
+segno>=1.6,<2

@@ -36,6 +36,7 @@ from ui.routes.llm_logs import llm_logs_bp
 from ui.routes.api import api_bp
 from ui.routes.quarantine import quarantine_bp
 from ui.routes.activity import activity_bp
+from ui.routes.notify import notify_bp
 
 
 # The one inline script allowed by the CSP: the theme picker in base.html's
@@ -103,6 +104,9 @@ def create_app(config_path: str) -> Flask:
     if app.config["STATE"]:
         from core.scoring_prompts import migrate_config_prompt
         migrate_config_prompt(app.config["STATE"], config_path)
+    # Old notification settings (urls + notify_on) become places to send to.
+    from core.notify_targets import migrate_config as migrate_notify_targets
+    migrate_notify_targets(config_path)
     # L-03: register explicit close so SQLite connection is cleaned up on exit
     if app.config["STATE"]:
         atexit.register(app.config["STATE"].close)
@@ -214,6 +218,7 @@ def create_app(config_path: str) -> Flask:
     app.register_blueprint(api_bp)
     app.register_blueprint(quarantine_bp)
     app.register_blueprint(activity_bp)
+    app.register_blueprint(notify_bp)
 
     return app
 
@@ -279,6 +284,25 @@ def main():
     # Calibration runs carry on after a restart, and new models are noticed.
     if app.config.get("CAL_RUNNER"):
         app.config["CAL_RUNNER"].start()
+
+    # "Stopped" / "stopped unexpectedly" messages (core/lifecycle.py). The
+    # start check sends over the network, so it runs beside startup, not in it.
+    import signal
+    import threading
+    from core import lifecycle
+    threading.Thread(target=lifecycle.on_start, args=(state, config_path),
+                     name="inspectarr-start-check", daemon=True).start()
+
+    def _stop(signum, _frame):
+        why = {getattr(signal, "SIGTERM", None): "it was asked to stop",
+               getattr(signal, "SIGINT", None): "stopped from the keyboard"}.get(signum, "")
+        print(f"Stopping ({why})…")
+        lifecycle.on_stop(state, config_path, why)
+        raise SystemExit(0)
+
+    for sig in ("SIGTERM", "SIGINT"):
+        if hasattr(signal, sig):
+            signal.signal(getattr(signal, sig), _stop)
 
     # Use waitress (production WSGI) if available, fall back to Flask dev server
     try:

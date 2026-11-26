@@ -802,6 +802,40 @@ class StateManager:
         except Exception as exc:
             log.warning(f"Failed to delete scoring prompt {prompt_id}: {exc}")
 
+    # --- notification places ---------------------------------------------------
+    def set_notify_status(self, target_id: int, ok: bool, problem: str = "") -> None:
+        """A send to one place: success stamps last_ok and clears the error;
+        a failure keeps last_ok and records why."""
+        now = _now_iso()
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "INSERT INTO notify_status (target_id, last_ok, last_error, updated_at) "
+                    "VALUES (?, ?, ?, ?) ON CONFLICT(target_id) DO UPDATE SET "
+                    "last_ok = COALESCE(excluded.last_ok, notify_status.last_ok), "
+                    "last_error = excluded.last_error, updated_at = excluded.updated_at",
+                    (int(target_id), now if ok else None, None if ok else (problem or "")[:500], now))
+                conn.commit()
+        except Exception as exc:
+            log.warning(f"Failed to save notification status: {exc}")
+
+    def get_notify_status(self) -> dict[int, dict]:
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute("SELECT * FROM notify_status").fetchall()
+            return {r["target_id"]: dict(r) for r in rows}
+        except Exception as exc:
+            log.warning(f"Failed to read notification status: {exc}")
+            return {}
+
+    def clear_notify_status(self, target_id: int) -> None:
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute("DELETE FROM notify_status WHERE target_id = ?", (int(target_id),))
+                conn.commit()
+        except Exception as exc:
+            log.warning(f"Failed to clear notification status: {exc}")
+
     def save_prompt_test(self, prompt_id: int, prompt_rev: int, model: str, ollama_url: str,
                          score: float | None, complete: bool, detail: str = "") -> None:
         try:
@@ -1296,6 +1330,16 @@ class StateManager:
                     score       REAL,
                     complete    INTEGER NOT NULL DEFAULT 0,
                     detail      TEXT
+                )
+            """)
+            # Per place to send to (notifications.apprise.targets[].id): when a
+            # message last got through and, if the last try failed, why.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notify_status (
+                    target_id   INTEGER PRIMARY KEY,
+                    last_ok     TEXT,
+                    last_error  TEXT,
+                    updated_at  TEXT NOT NULL
                 )
             """)
             conn.execute("""

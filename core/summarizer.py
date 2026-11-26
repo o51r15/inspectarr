@@ -14,7 +14,6 @@ import logging
 import re
 from datetime import datetime, timezone, timedelta
 
-import apprise
 import requests
 
 from .llm_client import narrate
@@ -36,17 +35,13 @@ class LogSummarizer:
         self._ollama_timeout = config.prowlarr.ollama.timeout
         self._ollama_context_window = getattr(
             config.prowlarr.ollama, "context_window", 8192)
-        # Build Apprise instance
-        self._apprise = apprise.Apprise()
-        for url in self.apprise_cfg.urls:
-            self._apprise.add(url)
 
     def generate_and_send(self, state) -> bool:
         """
-        Build a summary from recent data and send via Apprise.
-        Returns True if sent, False if skipped or failed.
+        Build a summary from recent data and send it to the places that asked
+        for it. Returns True if sent, False if skipped or failed.
         """
-        if not self.summary.enabled or not self.apprise_cfg.enabled:
+        if not self.summary.enabled:          # on when any place wants it
             return False
 
         window_hours = 168 if self.summary.schedule == "weekly" else 24
@@ -163,27 +158,7 @@ class LogSummarizer:
                        what="Summary narration")
 
     def _send(self, title: str, message: str):
-        if not self.apprise_cfg.enabled or not self.apprise_cfg.urls:
-            self._record(title, message, "suppressed",
-                         "notifications disabled"
-                         if not self.apprise_cfg.enabled
-                         else "no Apprise URLs configured")
-            return
-        try:
-            ok = self._apprise.notify(title=title, body=message)
-            self._record(title, message,
-                         "sent" if ok is not False else "failed",
-                         None if ok is not False else "Apprise reported no "
-                         "target accepted the message")
-        except Exception as exc:
-            log.warning("Apprise summary notification failed: %s", exc)
-            self._record(title, message, "failed", str(exc))
-
-    def _record(self, title, body, status, detail=None):
-        if not self._notice_state:
-            return
-        try:
-            self._notice_state.record_notice(
-                "push", "log_summary", title, body, status, detail)
-        except Exception as exc:
-            log.debug("Could not record notice: %s", exc)
+        """To the places that asked for the summary, through the one sender
+        every notification uses (per-place routing, status and the record)."""
+        from .notifier import Notifier
+        Notifier(self.cfg, state=self._notice_state)._send(title, message, event="summary")

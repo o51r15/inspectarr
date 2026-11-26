@@ -40,9 +40,11 @@ DEFAULTS: dict = {
         "auth": {"enabled": False, "username": "admin"},
     },
     "notifications": {
-        "apprise": {"enabled": False, "notify_on": ["action", "error"]},
+        # Places to send to (core/notify_targets.py); none until one is added.
+        # The summary is on when a place asks for it, so it has no switch here.
+        "apprise": {"targets": []},
         "digest": {"enabled": False, "use_ollama": False},
-        "summary": {"enabled": False, "schedule": "daily", "use_ollama": True},
+        "summary": {"schedule": "daily", "use_ollama": True},
     },
     "prowlarr": {
         "enabled": False,

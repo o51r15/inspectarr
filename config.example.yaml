@@ -111,22 +111,35 @@ state:
 # ---------------------------------------------------------------------------
 notifications:
   apprise:
-    enabled: false                  # Set to true and add URLs to activate
-    urls:
-      # - pover://user@token
-      # - tgram://bottoken/ChatID
-    notify_on:
-      - action                      # A torrent was deleted and blocklisted
-      - error                       # Any API failure or unhandled exception
-      - startup                     # inspectarr started successfully
-      - dry_run                     # A match was found but dry_run prevented action
+    # Places to send messages to. Easiest to set up in Settings -> Notifications,
+    # which builds these for you and can send a test. Each place has its own
+    # events:
+    #   action      a bad release was removed or blocked
+    #   quarantine  a release is waiting for your review
+    #   error       something went wrong (a service is unreachable, a removal failed)
+    #   dry_run     a release would have been removed (while watching only)
+    #   startup     Inspectarr started, stopped, or stopped unexpectedly
+    #   summary     the daily or weekly summary
+    # Services: ntfy, discord, telegram, gotify, pushover, email, apprise (any
+    # Apprise URL). An older config with `urls:` and `notify_on:` is converted
+    # to this the first time the web app starts.
+    targets: []
+      # - id: 1
+      #   service: ntfy
+      #   fields: {topic: inspectarr-make-this-hard-to-guess, server: https://ntfy.sh}
+      #   events: [action, quarantine, error, startup]
+      #   enabled: true
+      # - id: 2
+      #   service: apprise
+      #   fields: {url: "tgram://bottoken/ChatID"}
+      #   events: [summary]
+      #   enabled: true
   # Notification digest — batch notifications instead of sending individually
   digest:
     enabled: false
     use_ollama: false               # Use Ollama to generate digest summaries
-  # Periodic log summary — generates a summary of recent activity
+  # Periodic summary of recent activity, sent to the places that ticked "summary"
   summary:
-    enabled: false
     schedule: daily                 # "daily" or "weekly"
     use_ollama: true                # Use Ollama to generate natural-language summaries
 

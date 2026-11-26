@@ -1,9 +1,8 @@
 import logging
 import re
 
-import apprise
-
 from .llm_client import narrate
+from .notify_targets import describe, send_now, wants
 import requests
 
 log = logging.getLogger("inspectarr")
@@ -37,36 +36,47 @@ class Notifier:
         self._ollama_context_window = getattr(
             config.prowlarr.ollama, "context_window", 8192)
         self._buffer: list[dict] = []
-        # Build the Apprise instance once
-        self._apprise = apprise.Apprise()
-        for url in self.cfg.urls:
-            self._apprise.add(url)
+        # The places to send to; each has its own events (notify_targets).
+        self._targets = list(getattr(self.cfg, "targets", None) or [])
 
     @property
     def _digest_mode(self) -> bool:
         return self.digest_cfg.enabled and self.cfg.enabled
 
     def _should(self, event_type: str) -> bool:
-        return self.cfg.enabled and event_type in self.cfg.notify_on
+        return any(wants(t, event_type) for t in self._targets)
 
-    def _send(self, title: str, message: str, event: str = "notification"):
-        if not self.cfg.enabled or not self.cfg.urls:
+    def _send(self, title: str, message: str, event: str = "notification",
+              targets: list[dict] | None = None):
+        """Send to every place that wants `event` (or to `targets`, when the
+        caller already chose them). Never raises."""
+        chosen = targets if targets is not None else [t for t in self._targets if wants(t, event)]
+        if not chosen:
             # Suppressed, not sent. Recorded because "I never got told" and
-            # "notifications are switched off" look identical otherwise.
+            # "nobody asked for this" look identical otherwise.
             self._record(event, title, message, "suppressed",
-                         "notifications disabled" if not self.cfg.enabled
-                         else "no Apprise URLs configured")
+                         "no place to send this is switched on")
+            return
+        problems = []
+        for t in chosen:
+            ok, problem = send_now(t["url"], title, message)
+            self._target_status(t, ok, problem)
+            if not ok:
+                log.warning(f"Notification to {describe(t['service'], t['fields'])} failed: {problem}")
+                problems.append(f"{describe(t['service'], t['fields'])}: {problem}")
+        if len(problems) == len(chosen):
+            self._record(event, title, message, "failed", "; ".join(problems))
+        else:
+            self._record(event, title, message, "sent",
+                         ("some places failed: " + "; ".join(problems)) if problems else None)
+
+    def _target_status(self, target: dict, ok: bool, problem: str) -> None:
+        if not self._notice_state:
             return
         try:
-            ok = self._apprise.notify(title=title, body=message)
-            # Apprise returns False when every target rejected the message.
-            self._record(event, title, message,
-                         "sent" if ok is not False else "failed",
-                         None if ok is not False else "Apprise reported no "
-                         "target accepted the message")
+            self._notice_state.set_notify_status(target["id"], ok, problem)
         except Exception as exc:
-            log.warning("Apprise notification failed: %s", exc)
-            self._record(event, title, message, "failed", str(exc))
+            log.debug("Could not record notification status: %s", exc)
 
     def _record(self, event, title, body, status, detail=None):
         if not self._notice_state:
@@ -91,6 +101,29 @@ class Notifier:
             f"{rules_count} rule(s) loaded and active.",
             event="startup",
         )
+
+    def notify_shutdown(self, reason: str = ""):
+        """Inspectarr is stopping on purpose (docker stop, a restart). Immediate."""
+        if not self._should("shutdown"):
+            return
+        self._send("inspectarr stopped",
+                   "Inspectarr was stopped" + (f" ({reason})" if reason else "") +
+                   ". Nothing is being checked until it starts again.",
+                   event="shutdown")
+
+    def notify_unexpected_stop(self, last_seen: str | None):
+        """Sent at start when the previous run never said goodbye: a crash,
+        a power cut, or the machine killing it for memory. Nothing can send a
+        message at the moment that happens, so this is the earliest it can be
+        known."""
+        if not self._should("unexpected_stop"):
+            return
+        when = f" It was last running at {last_seen}." if last_seen else ""
+        self._send("inspectarr restarted after an unexpected stop",
+                   "Inspectarr stopped without shutting down properly (a crash, a power cut, "
+                   f"or it ran out of memory) and has now started again.{when} Releases that "
+                   "arrived while it was down are checked on this scan.",
+                   event="unexpected_stop")
 
     def notify_dry_run(self, torrent_name: str, bad_files: list[str]):
         if not self._should("dry_run"):
@@ -209,20 +242,20 @@ class Notifier:
         events = list(self._buffer)
         self._buffer.clear()
 
-        if not self.cfg.enabled:
-            return
-
-        # Try AI narration first
-        if self.digest_cfg.use_ollama and self._ollama_url and self._ollama_model:
-            narrated = self._ollama_narrate(events)
-            if narrated:
-                self._send("inspectarr: Scan Digest", narrated,
-                           event="digest")
-                return
-
-        # Fallback: plain summary
-        self._send("inspectarr: Scan Digest", self._plain_summary(events),
-                   event="digest")
+        # Each place gets only the events it asked for, so places that asked
+        # for the same events share one message (and one AI narration).
+        groups: dict[tuple, list[dict]] = {}
+        for t in self._targets:
+            mine = tuple(i for i, e in enumerate(events) if wants(t, e["type"]))
+            if mine:
+                groups.setdefault(mine, []).append(t)
+        for picked, targets in groups.items():
+            subset = [events[i] for i in picked]
+            body = None
+            if self.digest_cfg.use_ollama and self._ollama_url and self._ollama_model:
+                body = self._ollama_narrate(subset)
+            self._send("inspectarr: Scan Digest", body or self._plain_summary(subset),
+                       event="digest", targets=targets)
 
     def _plain_summary(self, events: list[dict]) -> str:
         """Build a plain-text bullet summary from buffered events."""

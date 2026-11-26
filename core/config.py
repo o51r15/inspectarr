@@ -83,6 +83,10 @@ class StateConfig:
 
 @dataclass
 class AppriseConfig:
+    # The places to send to (core/notify_targets.py): dicts with id, service,
+    # fields, events, enabled and url. The three fields below are worked out
+    # from them, for code that only needs "is anything on" or "every address".
+    targets: list[dict] = field(default_factory=list)
     enabled: bool = False
     urls: list[str] = field(default_factory=list)
     notify_on: list[str] = field(default_factory=lambda: ["action", "error"])
@@ -670,21 +674,25 @@ def _parse_config(raw: dict) -> AppConfig:
     app_raw = notif_raw.get("apprise", {})
     dig_raw = notif_raw.get("digest", {})
     sum_raw = notif_raw.get("summary", {})
-    # Normalize urls: accept string (single URL) or list
-    apprise_urls = _as_list(app_raw.get("urls"))
+    # Places to send to. An old config (urls + notify_on) is read as one
+    # place per URL; the web app rewrites the file once (notify_targets).
+    from .notify_targets import parse_targets, wants
+    targets = parse_targets(app_raw or {}, bool((sum_raw or {}).get("enabled", False)))
+    live = [t for t in targets if t["enabled"] and t["url"]]
     notif_cfg = NotificationsConfig(
         apprise=AppriseConfig(
-            enabled=app_raw.get("enabled", False),
-            urls=[u for u in apprise_urls if u and u.strip()],
-            notify_on=_as_list(app_raw.get("notify_on"),
-                               ["action", "error"]),
+            targets=targets,
+            enabled=bool(live),
+            urls=[t["url"] for t in live],
+            notify_on=sorted({e for t in live for e in t["events"]}),
         ),
         digest=DigestConfig(
             enabled=dig_raw.get("enabled", False),
             use_ollama=dig_raw.get("use_ollama", False),
         ),
         summary=SummaryConfig(
-            enabled=sum_raw.get("enabled", False),
+            # On when any place asked for the summary.
+            enabled=any(wants(t, "summary") for t in targets),
             schedule=sum_raw.get("schedule", "daily"),
             use_ollama=sum_raw.get("use_ollama", True),
         ),
