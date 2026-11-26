@@ -1,60 +1,54 @@
       <!-- PANE: Notifications -->
-      {% set appr = cfg.get('notifications', {}).get('apprise', {}) %}
       {% set dig = cfg.get('notifications', {}).get('digest', {}) %}
       {% set summ = cfg.get('notifications', {}).get('summary', {}) %}
       <div class="settings-pane" data-pane="notifications">
 
-        <div class="form-section">
-          <div class="form-section-title">Where to send alerts</div>
-          <div class="toggle-row mb-12">
-            <input type="hidden" name="_rendered" value="apprise_enabled">
-            <input type="checkbox" name="apprise_enabled" id="apprise_enabled"
-                   {{ 'checked' if appr.get('enabled') else '' }}>
-            <label for="apprise_enabled">Send me alerts</label>
-          </div>
-          <div class="form-group">
-            <label for="apprise_urls">Send them to</label>
-            <textarea class="mono text-xs" name="apprise_urls" id="apprise_urls" rows="4"
-                      placeholder="discord://webhook_id/webhook_token&#10;tgram://bot_token/chat_id">{{ appr.get('urls',[])|join('\n') }}</textarea>
-            <span class="hint">One address per line. Discord, Telegram, Pushover, email and
-              <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener">100+ more</a>
-              are supported; each service's page shows the address format.</span>
-          </div>
-          <div class="flex gap-8 items-center">
-            <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testApprise">Send a test alert</button>
-            <span id="test-apprise-result" class="hint" role="status"></span>
-          </div>
-        </div>
+        {#- Places to send to (DockLlama's design). Built by js/pages/notify.js
+            from /config/notify; each place saves through its own endpoints,
+            not this form, so nothing in this section has a name attribute. -#}
+        <div class="form-section" id="notify-section">
+          <div class="form-section-title">Where to send messages</div>
+          <p class="hint mb-12">Inspectarr tells you when it catches a bad release. Add the places it
+            should message, and choose what each one gets: removals to your phone and the summary to
+            email, say.</p>
+          <div id="notify-error" class="alert alert-error" role="alert" hidden></div>
+          <div id="notify-targets" aria-live="polite"><p class="hint">Loading…</p></div>
+          <button type="button" class="btn btn-ghost btn-sm mt-8" id="notify-add-btn"
+                  data-action="notify-add" hidden>Add another place to send messages</button>
 
-        <div class="form-section">
-          <div class="form-section-title">What to tell me about</div>
-          <input type="hidden" name="_rendered" value="notify_on">
-          {#- Absent or empty-null means the parser's default (action, error),
-              exactly as core/config.py reads it; only an explicit [] means none. -#}
-          {% set notify_on = appr.get('notify_on') if appr.get('notify_on') is not none else ['action', 'error'] %}
-          <div class="check-list">
-            {% for evt, label in [
-                 ('action', 'A bad release was removed or blocked'),
-                 ('quarantine', 'A release is waiting for my review'),
-                 ('error', 'Something went wrong (a service is unreachable, a removal failed)'),
-                 ('dry_run', 'A release would have been removed (while watching only)'),
-                 ('startup', 'Inspectarr started')] %}
-            <label class="check-item">
-              <input type="checkbox" name="notify_on" value="{{ evt }}" {{ 'checked' if evt in notify_on else '' }}>
-              {{ label }}
-            </label>
-            {% endfor %}
+          <div class="notify-card mt-12" id="notify-form" hidden>
+            <div class="form-group mw-420">
+              <label for="notify-service">Send messages with</label>
+              <select id="notify-service"></select>
+              <span class="hint" id="notify-blurb"></span>
+            </div>
+            <div id="notify-fields"></div>
+            <div class="ntfy-sub" id="notify-ntfy" hidden>
+              <img id="notify-qr" alt="QR code to subscribe" width="150" height="150">
+              <div>
+                <strong>On your phone:</strong>
+                <ol class="m-0">
+                  <li>Install the <em>ntfy</em> app (Android or iPhone).</li>
+                  <li>Scan this code, or in the app tap <em>+</em> and enter the topic above.</li>
+                  <li>Click <em>Send test</em> below. It should pop up on your phone.</li>
+                </ol>
+                <div class="hint">Or open <a id="notify-sub-link" target="_blank" rel="noopener"></a> in a browser.</div>
+              </div>
+            </div>
+            <div class="form-section-title mt-12">What to send</div>
+            <div class="event-grid" id="notify-form-events"></div>
+            <p class="hint m-0 mt-8" id="notify-test-result" role="status"></p>
+            <div class="flex gap-8 mt-8">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="notify-test-new">Send test</button>
+              <button type="button" class="btn btn-primary btn-sm" data-action="notify-save">Save</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="notify-cancel" id="notify-cancel">Cancel</button>
+            </div>
           </div>
         </div>
 
         <div class="form-section">
           <div class="form-section-title">Summaries</div>
-          <div class="toggle-row mb-12">
-            <input type="hidden" name="_rendered" value="summary_enabled">
-            <input type="checkbox" name="summary_enabled" id="summary_enabled"
-                   {{ 'checked' if summ.get('enabled') else '' }}>
-            <label for="summary_enabled">Send me a summary of what Inspectarr did</label>
-          </div>
+          <p class="hint mb-12">Sent to the places above that have <em>The daily or weekly summary</em> ticked.</p>
           <div class="form-group mw-260">
             <label for="summary_schedule">How often</label>
             <select name="summary_schedule" id="summary_schedule">

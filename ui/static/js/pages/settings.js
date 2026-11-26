@@ -517,20 +517,6 @@
     .then(d => { el.textContent = d.message; el.style.color = d.ok ? 'var(--success)' : 'var(--error)'; });
   }
 
-  function testApprise() {
-    const urlsRaw = document.querySelector('[name="apprise_urls"]').value;
-    const urls    = urlsRaw.split('\n').map(u => u.trim()).filter(Boolean);
-    const el      = document.getElementById('test-apprise-result');
-    el.textContent = 'Sending…'; el.style.color = '';
-    fetch('/config/test/apprise', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({urls}),
-    })
-    .then(r => r.json())
-    .then(d => { el.textContent = d.message; el.style.color = d.ok ? 'var(--success)' : 'var(--error)'; })
-    .catch(() => { el.textContent = 'Request failed'; el.style.color = 'var(--error)'; });
-  }
-
   // ---- Scoring weights reset ----
   // The four scoring shares must add up to 1.0; say so as they are typed.
   function sumWeights() {
