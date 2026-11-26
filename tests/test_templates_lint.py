@@ -22,7 +22,7 @@ INLINE_STYLE_BLOCK = re.compile(r"<style[\s>]")
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)(?![^>]*application/json)[^>]*>")
 
 NOT_YET_MIGRATED = {
-    "config.html", "indexers.html",
+    "config.html",
 }
 
 
