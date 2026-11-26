@@ -15,9 +15,8 @@ from core.ollama_registry import (
     local_digest as _ollama_local_digest,
     check_for_update as _ollama_check_update,
 )
-# Comparing two Ollama URLs is one rule, and the gate here and the storage
-# in StateManager must not disagree about it.
-from core.state import validation_host_state
+# Validations are stored per Ollama server (model, server); every lookup
+# here passes the server the saved config points at.
 
 log = logging.getLogger("inspectarr")
 
@@ -71,6 +70,20 @@ def _render_settings(config_path: str, **extra):
     extra.setdefault("raw_yaml", _file_text(config_path))
     return render_template("config.html",
                            cfg=settings_schema.masked_copy(_load_raw(config_path)), **extra)
+
+
+def _saved_ollama_url(config_path: str) -> str:
+    """The Ollama server the saved config points at ('' if none or unreadable).
+
+    "The server you are attached to" for every validation lookup. Typing a new
+    URL in the form does not switch servers until it is saved.
+    """
+    try:
+        raw = _load_raw(config_path)
+        return (((raw.get("prowlarr") or {}).get("ollama") or {}).get("url") or "").strip()
+    except Exception as exc:
+        log.debug(f"Could not read the Ollama URL: {exc}")
+        return ""
 
 
 def _get_state(cfg):
@@ -513,47 +526,19 @@ def ai_set_model():
         return jsonify({"ok": False, "message": "No model specified"}), 400
 
     state = current_app.config.get("STATE")
-    record = state.get_validation(model) if state else None
-
-    # A verdict is about a (host, model) pair. Before this check, moving
-    # prowlarr.ollama.url carried every stored "supported" across to hardware
-    # the model had never been measured on -- which is how a model validated
-    # on a GPU host came to be trusted on a CPU-only one.
-    #
-    # "unknown" (a record written before the column existed) still counts as
-    # validated. Anything else would invalidate an install's whole history on
-    # upgrade, and absence of evidence is not evidence of a different host.
-    current_url = ""
-    try:
-        _raw_cfg = _load_raw(config_path)
-        current_url = ((_raw_cfg.get("prowlarr") or {})
-                       .get("ollama") or {}).get("url", "") or ""
-    except Exception as exc:
-        # Unreadable config is the save path's problem, not the gate's.
-        log.debug(f"Could not read Ollama URL for the validation gate: {exc}")
-
-    host_state = validation_host_state(record, current_url)
-    validated = bool(record and record.get("status") == "supported"
-                     and host_state != "mismatch")
+    # A verdict describes a model ON A SERVER, so only this server's counts.
+    # A pass earned on other hardware says nothing about this one.
+    current_url = _saved_ollama_url(config_path)
+    record = state.get_validation(model, current_url) if (state and current_url) else None
+    validated = bool(record and record.get("status") == "supported")
 
     if not validated and not force:
-        if record and record.get("status") == "supported" \
-                and host_state == "mismatch":
-            message = (
-                f"{model} passed validation against "
-                f"{record.get('ollama_url')}, not {current_url}. "
-                f"Re-validate it on this host before using it."
-            )
-        else:
-            message = f"{model} has not passed validation."
         return jsonify({
             "ok": False,
             "needs_validation": True,
             "status": (record or {}).get("status", "untested"),
-            "host_state": host_state,
-            "validated_on": (record or {}).get("ollama_url"),
             "current_host": current_url,
-            "message": message,
+            "message": f"{model} has not passed a check on this server.",
         }), 409
 
     try:
@@ -600,17 +585,14 @@ def ai_calibration():
         return jsonify({"ok": False, "message": safe_error(exc)}), 500
 
     model = ollama.get("model") or ""
-    url = ollama.get("url") or ""
-    record = state.get_validation(model) if (state and model) else None
-    host_state = validation_host_state(record, url)
+    url = (ollama.get("url") or "").strip()
+    record = state.get_validation(model, url) if (state and model and url) else None
 
-    calibrated = bool(record and record.get("calibrated")
-                      and host_state != "mismatch")
+    calibrated = bool(record and record.get("calibrated"))
     return jsonify({
         "ok": True,
         "model": model,
         "host": url,
-        "host_state": host_state,
         "calibrated": calibrated,
         # Only meaningful when calibrated -- a quick validation records the
         # size it happened to test, which is not a measured ceiling.
@@ -618,7 +600,6 @@ def ai_calibration():
         "tok_per_s": (record or {}).get("tok_per_s"),
         "gpu_offload_pct": (record or {}).get("gpu_offload_pct"),
         "current": _int(ollama.get("max_indexers_per_call"), 25),
-        "validated_on": (record or {}).get("ollama_url"),
     })
 
 
@@ -745,28 +726,34 @@ def ai_validation_delete():
     state = current_app.config.get("STATE")
     if not state:
         return jsonify({"ok": False, "message": "State unavailable"}), 503
-    ok = state.delete_validation(model)
+    url = _saved_ollama_url(current_app.config["CONFIG_PATH"])
+    if not url:
+        return jsonify({"ok": False, "message": "No Ollama server configured"}), 400
+    ok = state.delete_validation(model, url)
     return jsonify({"ok": ok,
-                    "message": (f"Cleared validation record for {model}"
+                    "message": (f"Cleared the result for {model} on this server"
                                 if ok else "Could not clear record")})
 
 
 @config_bp.route("/config/ai/validations", methods=["GET"])
 def ai_validations():
-    """Every model validation on record, for the comparison table."""
+    """Check results for the server the saved config points at.
+
+    Results from other servers stay in the database and reappear when that
+    server is configured again; only how many there are is reported, so the
+    page can say they exist without listing them.
+    """
     state = current_app.config.get("STATE")
-    if not state:
-        return jsonify({"ok": True, "validations": []})
-    # The table has to distinguish "validated" from "validated ON THIS HOST",
-    # so the current URL is read once here rather than per row.
-    try:
-        _raw = _load_raw(current_app.config["CONFIG_PATH"])
-        current_url = ((_raw.get("prowlarr") or {}).get("ollama") or {}).get("url", "")
-    except Exception:
-        current_url = ""
+    current_url = _saved_ollama_url(current_app.config["CONFIG_PATH"])
+    if not state or not current_url:
+        return jsonify({"ok": True, "server": current_url, "validations": [],
+                        "other_servers": 0})
 
     out = []
-    for v in state.get_validations():
+    mine = state.get_validations(current_url)
+    other_servers = len({v.get("ollama_url") for v in state.get_validations()}
+                        - {v.get("ollama_url") for v in mine} - {None, ""})
+    for v in mine:
         import json as _json
         try:
             res = _json.loads(v.get("results_json") or "{}")
@@ -780,18 +767,14 @@ def ai_validations():
             "avg_response_ms": v.get("avg_response_ms"),
             "calibrated": bool(v.get("calibrated")),
             "max_safe_batch": v.get("max_safe_batch"),
-            "ollama_url": v.get("ollama_url"),
             "gpu_offload_pct": v.get("gpu_offload_pct"),
             "tok_per_s": v.get("tok_per_s"),
-            # match / unknown / mismatch. A green row for a verdict earned on
-            # another machine would be the exact lie this column exists to
-            # stop, so the front end needs this to colour honestly.
-            "host_state": validation_host_state(v, current_url),
             "tests": [{"name": t.get("name"), "passed": t.get("passed"),
                        "detail": t.get("detail", "")}
                       for t in (res.get("tests") or [])],
         })
-    return jsonify({"ok": True, "validations": out})
+    return jsonify({"ok": True, "server": current_url, "validations": out,
+                    "other_servers": other_servers})
 
 
 @config_bp.route("/config/ai/test-connection", methods=["POST"])
@@ -943,7 +926,10 @@ def ollama_update_check():
                 c = _json.loads(cached)
                 last = datetime.fromisoformat(c["checked_at"])
                 age_h = (datetime.now() - last).total_seconds() / 3600
-                if c.get("model") == model and age_h < interval:
+                # Per server too: the same model name on another server is
+                # another build, with its own update status.
+                if (c.get("model") == model and c.get("server") == url
+                        and age_h < interval):
                     c["cached"] = True
                     return jsonify(c)
         except Exception as exc:
@@ -954,7 +940,7 @@ def ollama_update_check():
         return jsonify({"ok": True, "update_available": False, "model": model,
                         "message": "Could not read model digest"})
 
-    record = state.get_validation(model) if state else None
+    record = state.get_validation(model, url) if state else None
     known = (record or {}).get("model_digest")
 
     if not known:
@@ -1014,6 +1000,7 @@ def ollama_update_check():
             import json as _json
             stamped = dict(result)
             stamped["checked_at"] = datetime.now().isoformat()
+            stamped["server"] = url
             state.set_app_state(CACHE_KEY, _json.dumps(stamped))
         except Exception as exc:
             log.debug(f"Could not stamp update check: {exc}")
