@@ -152,6 +152,26 @@ def create_app(config_path: str) -> Flask:
         except Exception:
             return "—"
 
+    @app.template_filter("duration")
+    def duration(seconds):
+        """Seconds -> '2 h 14 min' / '45 s'. Anything unusable -> '—'."""
+        try:
+            s = int(seconds)
+        except (TypeError, ValueError):
+            return "—"
+        if s <= 0:
+            return "—"
+        d, rem = divmod(s, 86400)
+        h, rem = divmod(rem, 3600)
+        m, sec = divmod(rem, 60)
+        if d:
+            return f"{d} d {h} h"
+        if h:
+            return f"{h} h {m} min"
+        if m:
+            return f"{m} min"
+        return f"{sec} s"
+
     @app.route("/logout")
     def logout():
         # A template rather than an inline <style> string, so the CSP's

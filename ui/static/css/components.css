@@ -249,6 +249,9 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 textarea { font-family: var(--font-mono); font-size: var(--fs-xs); resize: vertical; }
+select.select-sm { width: auto; min-height: 30px; padding: 3px 8px; font-size: var(--fs-xs); }
+a.link-plain { color: var(--text); }
+a.link-plain:hover { color: var(--accent); }
 input[type=checkbox], input[type=radio] { width: 16px; height: 16px; accent-color: var(--accent); }
 
 .form-section { margin-bottom: var(--space-8); }
@@ -380,6 +383,44 @@ tr.detail-row:hover { background: transparent; }
 .reason-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
 .reason-list li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .reason-file { display: block; width: 100%; color: var(--text-dim); word-break: break-all; }
+
+/* Key / value list (System > Status, detail panels) */
+.kv { display: grid; grid-template-columns: minmax(110px, 40%) 1fr; }
+.kv > dt, .kv > dd { padding: 9px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.kv > dt { color: var(--text-muted); font-size: var(--fs-sm); }
+.kv > dd { overflow-wrap: anywhere; }
+.kv > dt:last-of-type, .kv > dd:last-of-type { border-bottom: none; }
+
+/* Plain prose block with a readable measure */
+.prose { color: var(--text-muted); font-size: var(--fs-sm); max-width: 75ch; }
+.prose strong { color: var(--text); }
+
+pre.code-block {
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+  white-space: pre-wrap; max-height: 320px; overflow-y: auto;
+  padding: var(--space-3); border-radius: var(--radius);
+  background: var(--inset); border: 1px solid var(--border);
+}
+
+code.chip-code {
+  display: inline-block; margin: 0 4px 4px 0; padding: 1px 6px;
+  border-radius: var(--radius-sm); background: var(--inset); border: 1px solid var(--border);
+  font-size: 11px; word-break: break-all;
+}
+tr.row-new { background: var(--accent-soft); transition: background 1.5s var(--ease); }
+
+.progress-row { display: flex; align-items: center; gap: var(--space-2); min-width: 110px; }
+.progress-row .progress-track { flex: 1; }
+
+/* Property grid (torrent detail) */
+.props { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-4) var(--space-6); }
+.props dt { font-size: var(--fs-xs); color: var(--text-muted); }
+.props dd { overflow-wrap: anywhere; }
+
+/* Status inline (dot + word) */
+.state { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.status-dot.dim { opacity: .55; }
+.progress-track.is-danger .progress-bar { background: var(--danger-fg); }
 
 /* ======================================================================
    Empty state

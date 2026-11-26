@@ -1,187 +1,74 @@
 {% extends "base.html" %}
+{% from "_macros.html" import icon, time, empty %}
 {% block title %}Events — inspectarr{% endblock %}
-{% block page_title %}Events{% endblock %}
+{% block page_title %}System{% endblock %}
 
 {% block topbar_actions %}
-  <button class="btn btn-ghost btn-sm" id="stream-btn" onclick="toggleLiveStream(this)">
-    Live: Off
+  <button type="button" class="btn btn-secondary btn-sm" id="stream-btn" data-action="toggle-live" aria-pressed="false">
+    <span class="status-dot stopped" id="live-dot"></span><span id="live-label">Live off</span>
   </button>
-  <a href="/logs/download" class="btn btn-ghost btn-sm">⬇ Export</a>
-  <form method="post" action="/logs/clear"
-        onsubmit="return confirm('Clear the entire log file? This cannot be undone.')">
-    <button class="btn btn-danger btn-sm">Clear Log</button>
+  <a href="/logs/download" class="btn btn-secondary btn-sm">{{ icon('download') }} <span class="btn-label-sm-hide">Export</span></a>
+  <form method="post" action="/logs/clear" id="clear-log-form">
+    <button type="button" class="btn btn-ghost btn-sm" data-action="clear-log">{{ icon('trash') }} <span class="btn-label-sm-hide">Clear</span></button>
   </form>
 {% endblock %}
 
 {% block content %}
+{% set tones = {'ACTION': 'ok', 'ERROR': 'danger', 'WARNING': 'warn', 'DRY_RUN': 'violet', 'DEBUG': 'neutral'} %}
+<section class="card card-flush">
+  <div class="card-head flex-wrap">
+    <div>
+      <h2 class="card-title">Events</h2>
+      <p class="card-sub">{{ total }} {{ 'entry' if total == 1 else 'entries' }}{% if level_filter and level_filter != 'ALL' %} at level {{ level_filter }}{% endif %}. Hover the table to pause live updates while you read.</p>
+    </div>
+    <div class="flex flex-wrap gap-4" role="group" aria-label="Filter by level">
+      {% for lvl in levels %}
+      <a href="/system/events?level={{ lvl }}&page=1" class="btn btn-sm {{ 'btn-primary' if level_filter == lvl else 'btn-ghost' }}"{% if level_filter == lvl %} aria-current="true"{% endif %}>{{ lvl|replace('_', ' ')|title }}</a>
+      {% endfor %}
+    </div>
+  </div>
+  <input type="hidden" id="level-filter" value="{{ level_filter }}">
 
-<!-- Level filter -->
-<div class="flex gap-8 items-center mb-16">
-  <span class="text-muted" style="font-size:12px">Filter:</span>
-  {% for lvl in levels %}
-  <a href="/logs?level={{ lvl }}&page=1"
-     class="btn btn-sm {{ 'btn-primary' if level_filter == lvl else 'btn-ghost' }}">
-    {{ lvl }}
-  </a>
-  {% endfor %}
-  <span class="text-muted" style="font-size:12px;margin-left:8px">{{ total }} entries</span>
-</div>
-
-<input type="hidden" id="level-filter" value="{{ level_filter }}">
-
-<!-- Log table -->
-<div class="card" style="padding:0;overflow:hidden">
   <div class="table-wrap">
-    <table>
+    <table class="table-fluid">
       <caption class="sr-only">Event log entries</caption>
-      <thead><tr>
-        <th style="width:160px">Timestamp</th>
-        <th style="width:90px">Level</th>
-        <th style="width:160px">Event</th>
-        <th>Torrent / Detail</th>
-        <th>Bad Files</th>
-      </tr></thead>
+      <thead><tr><th>When</th><th>Level</th><th class="hide-sm">Event</th><th>Release or detail</th><th class="hide-sm">Bad files</th></tr></thead>
       <tbody id="log-tbody">
-        {% for e in entries %}
+      {% for e in entries %}
+        {% set level = e.get('level', 'INFO') %}
         <tr>
-          <td class="mono text-muted">{{ e.timestamp[:19].replace('T',' ') if e.timestamp else '—' }}</td>
-          <td>
-            {% set level = e.get('level','INFO') %}
-            {% if level == 'ACTION' %}
-              <span class="badge badge-action">ACTION</span>
-            {% elif level == 'ERROR' %}
-              <span class="badge badge-error">ERROR</span>
-            {% elif level == 'DRY_RUN' %}
-              <span class="badge badge-dry-run">DRY RUN</span>
-            {% elif level == 'DEBUG' %}
-              <span class="badge badge-debug">DEBUG</span>
-            {% else %}
-              <span class="badge badge-info">{{ level }}</span>
-            {% endif %}
+          <td class="text-sm nowrap">{{ time(e.timestamp) }}</td>
+          <td><span class="badge badge-{{ tones.get(level, 'info') }}">{{ level|replace('_', ' ') }}</span></td>
+          <td class="hide-sm mono text-xs">{{ e.get('event', '') }}</td>
+          <td class="cell-truncate">
+            {% if e.get('torrent_name') %}<span title="{{ e.torrent_name }}">{{ e.torrent_name }}</span>
+            {% elif e.get('reason') %}<span class="text-danger">{{ e.reason }}</span>
+            {% elif e.get('category') %}<span class="text-muted">category: {{ e.category }}</span>{% endif %}
           </td>
-          <td class="mono" style="font-size:12px">{{ e.get('event','') }}</td>
-          <td>
-            {% if e.get('torrent_name') %}
-              <span>{{ e.torrent_name }}</span>
-            {% elif e.get('reason') %}
-              <span class="text-error">{{ e.reason }}</span>
-            {% elif e.get('category') %}
-              <span class="text-muted">category: {{ e.category }}</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if e.get('bad_files') %}
-              {% for f in e.bad_files %}
-                <code style="font-size:11px;background:var(--surface);padding:1px 5px;border-radius:3px;margin-right:4px">{{ f }}</code>
-              {% endfor %}
-            {% endif %}
-          </td>
+          <td class="hide-sm">{% for f in e.get('bad_files') or [] %}<code class="chip-code">{{ f }}</code>{% endfor %}</td>
         </tr>
-        {% else %}
-        <tr><td colspan="5" class="text-muted" style="text-align:center;padding:32px">No log entries found.</td></tr>
-        {% endfor %}
+      {% endfor %}
       </tbody>
     </table>
   </div>
-</div>
-
-<!-- Pagination -->
-{% if total_pages > 1 %}
-<div class="pagination">
-  {% if page > 1 %}
-    <a href="/logs?level={{ level_filter }}&page={{ page - 1 }}">← Prev</a>
+  {% if not entries %}
+    {{ empty("No events yet", "Scans, removals, holds and errors are logged here as they happen.", icon_name="list") }}
   {% endif %}
-  {% for p in range(1, total_pages + 1) %}
-    {% if p == page %}
-      <span class="current">{{ p }}</span>
-    {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
-      <a href="/logs?level={{ level_filter }}&page={{ p }}">{{ p }}</a>
-    {% elif p == page - 3 or p == page + 3 %}
-      <span>…</span>
-    {% endif %}
-  {% endfor %}
-  {% if page < total_pages %}
-    <a href="/logs?level={{ level_filter }}&page={{ page + 1 }}">Next →</a>
-  {% endif %}
-</div>
-{% endif %}
 
+  {% if total_pages > 1 %}
+  <nav class="pagination" aria-label="Pages">
+    {% if page > 1 %}<a href="/system/events?level={{ level_filter }}&page={{ page - 1 }}" aria-label="Previous page">‹</a>{% endif %}
+    {% for p in range(1, total_pages + 1) %}
+      {% if p == page %}<span class="current">{{ p }}</span>
+      {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}<a href="/system/events?level={{ level_filter }}&page={{ p }}">{{ p }}</a>
+      {% elif p == page - 3 or p == page + 3 %}<span>…</span>{% endif %}
+    {% endfor %}
+    {% if page < total_pages %}<a href="/system/events?level={{ level_filter }}&page={{ page + 1 }}" aria-label="Next page">›</a>{% endif %}
+  </nav>
+  {% endif %}
+</section>
 {% endblock %}
 
 {% block scripts %}
-<script>
-  let evtSource = null;
-  let paused = false;
-
-  function toggleLiveStream(btn) {
-    if (evtSource) {
-      evtSource.close();
-      evtSource = null;
-      btn.textContent = 'Live: Off';
-      btn.classList.remove('btn-success');
-      btn.classList.add('btn-ghost');
-      return;
-    }
-    const level = document.getElementById('level-filter').value;
-    evtSource = new EventSource('/logs/stream?level=' + encodeURIComponent(level));
-    btn.textContent = 'Live: On';
-    btn.classList.remove('btn-ghost');
-    btn.classList.add('btn-success');
-
-    evtSource.onmessage = function(e) {
-      // Reset button text after successful reconnect
-      if (btn.textContent !== 'Live: On') {
-        btn.textContent = 'Live: On';
-        btn.classList.remove('btn-ghost');
-        btn.classList.add('btn-success');
-      }
-      if (paused) return;
-      try {
-        const entry = JSON.parse(e.data);
-        const tbody = document.getElementById('log-tbody');
-        const tr = document.createElement('tr');
-        tr.style.background = 'rgba(168,85,247,0.04)';
-        setTimeout(() => { tr.style.background = ''; }, 2000);
-
-        const ts = (entry.timestamp || '').substring(0, 19).replace('T', ' ') || '—';
-        const level = entry.level || 'INFO';
-        const badgeClass = level === 'ACTION' ? 'badge-action' :
-                           level === 'ERROR' ? 'badge-error' :
-                           level === 'DRY_RUN' ? 'badge-dry-run' :
-                           level === 'DEBUG' ? 'badge-debug' : 'badge-info';
-        const badgeText = level === 'DRY_RUN' ? 'DRY RUN' : level;
-
-        let detail = '';
-        if (entry.torrent_name) detail = esc(entry.torrent_name);
-        else if (entry.reason) detail = '<span class="text-error">' + esc(entry.reason) + '</span>';
-        else if (entry.category) detail = '<span class="text-muted">category: ' + esc(entry.category) + '</span>';
-
-        let badFiles = '';
-        if (entry.bad_files) {
-          badFiles = entry.bad_files.map(f =>
-            '<code style="font-size:11px;background:var(--surface);padding:1px 5px;border-radius:3px;margin-right:4px">' + esc(f) + '</code>'
-          ).join('');
-        }
-
-        tr.innerHTML = '<td class="mono text-muted">' + esc(ts) + '</td>' +
-          '<td><span class="badge ' + badgeClass + '">' + badgeText + '</span></td>' +
-          '<td class="mono" style="font-size:12px">' + esc(entry.event || '') + '</td>' +
-          '<td>' + detail + '</td>' +
-          '<td>' + badFiles + '</td>';
-
-        tbody.insertBefore(tr, tbody.firstChild);
-        // Keep table from growing unbounded
-        while (tbody.children.length > 200) tbody.removeChild(tbody.lastChild);
-      } catch (err) {}
-    };
-
-    evtSource.onerror = function() {
-      btn.textContent = 'Live: Reconnecting…';
-    };
-  }
-
-  // Pause on hover to allow reading
-  document.getElementById('log-tbody').addEventListener('mouseenter', () => { paused = true; });
-  document.getElementById('log-tbody').addEventListener('mouseleave', () => { paused = false; });
-</script>
+<script src="{{ url_for('static', filename='js/pages/logs.js') }}?v={{ app_version }}"></script>
 {% endblock %}

@@ -1,336 +1,99 @@
 {% extends "base.html" %}
+{% from "_macros.html" import icon, empty, torrent_state, progress %}
 {% block title %}Torrents — inspectarr{% endblock %}
-{% block page_title %}Torrents{% endblock %}
+{% block page_title %}Activity{% endblock %}
 
 {% block topbar_actions %}
-<button class="btn btn-sm" onclick="refreshTorrents()">↻ Refresh</button>
+  <a class="btn btn-secondary btn-sm" href="/torrents{% if page > 1 %}?page={{ page }}{% endif %}">{{ icon('refresh') }} <span class="btn-label-sm-hide">Refresh</span></a>
 {% endblock %}
 
 {% block content %}
-
 {% if error %}
-<div class="alert alert-error">
-  <strong>qBittorrent unreachable:</strong> {{ error }}
-</div>
+  <div class="alert alert-danger">{{ icon('plug') }} <span><strong>Can't reach the torrent client.</strong> {{ error }}</span></div>
 {% else %}
-
-<!-- Filters -->
-<div class="card" style="margin-bottom:1rem;padding:0.75rem 1rem;">
-  <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
+<section class="card card-flush">
+  <div class="card-head flex-wrap">
     <div>
-      <label class="form-label" style="margin-bottom:0;margin-right:0.5rem;">Status</label>
-      <select id="filter-status" class="form-select" style="width:auto;" onchange="applyFilters()">
-        <option value="">All</option>
+      <h2 class="card-title">Torrents</h2>
+      <p class="card-sub">Everything in your torrent client{% if total_pages > 1 %}, page {{ page }} of {{ total_pages }}{% endif %}. Filters apply to this page.</p>
+    </div>
+    <div class="flex flex-wrap gap-8 items-center">
+      <label class="sr-only" for="filter-status">Status</label>
+      <select id="filter-status" class="select-sm" data-filter>
+        <option value="">All statuses</option>
         <option value="downloading">Downloading</option>
         <option value="seeding">Seeding</option>
-        <option value="paused">Paused</option>
+        <option value="paused">Stopped</option>
         <option value="stalled">Stalled</option>
         <option value="error">Error</option>
       </select>
-    </div>
-    <div>
-      <label class="form-label" style="margin-bottom:0;margin-right:0.5rem;">Category</label>
-      <select id="filter-category" class="form-select" style="width:auto;" onchange="applyFilters()">
-        <option value="">All</option>
-        <option value="__none__">(none)</option>
-        {% for cat in categories %}
-        <option value="{{ cat }}">{{ cat }}</option>
-        {% endfor %}
+      <label class="sr-only" for="filter-category">Category</label>
+      <select id="filter-category" class="select-sm" data-filter>
+        <option value="">All categories</option>
+        <option value="__none__">(no category)</option>
+        {% for cat in categories %}<option value="{{ cat }}">{{ cat }}</option>{% endfor %}
       </select>
-    </div>
-    <div style="margin-left:auto;color:var(--text-muted);font-size:0.85rem;">
-      <span id="visible-count">{{ torrents|length }}</span> of {{ total }} torrents
+      <span class="text-sm text-muted"><span id="visible-count">{{ torrents|length }}</span> shown · {{ total }} total</span>
     </div>
   </div>
-</div>
 
-{% if torrents %}
-<div class="card" style="padding:0;overflow:hidden;">
-  <div style="overflow-x:auto;">
-  <table class="table" id="torrent-table">
-    <caption class="sr-only">Monitored torrents</caption>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Size</th>
-        <th>Progress</th>
-        <th>Status</th>
-        <th style="min-width:120px;">↓ Speed</th>
-        <th style="min-width:160px;">Category</th>
-        <th style="min-width:140px;">Actions</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for t in torrents %}
-    <tr data-hash="{{ t.hash }}"
-        data-state="{{ t.state }}"
-        data-category="{{ t.category }}">
-      <td style="max-width:280px;">
-        <a href="/torrents/{{ t.hash }}"
-           style="color:var(--text-primary);text-decoration:none;font-weight:500;"
-           title="{{ t.name }}">
-          {{ t.name | truncate(60) }}
-        </a>
-      </td>
-      <td style="white-space:nowrap;color:var(--text-muted);">{{ t.size | filesizeformat }}</td>
-      <td style="min-width:100px;">
-        <div style="display:flex;align-items:center;gap:0.5rem;">
-          <div style="flex:1;background:var(--border);border-radius:4px;height:6px;overflow:hidden;">
-            <div style="width:{{ (t.progress * 100)|int }}%;background:var(--accent);height:100%;border-radius:4px;"></div>
-          </div>
-          <span style="font-size:0.8rem;color:var(--text-muted);white-space:nowrap;">{{ (t.progress * 100)|int }}%</span>
-        </div>
-      </td>
-      <td>
-        {% set s = t.state %}
-        {% if s in ['downloading', 'metaDL', 'allocating', 'forcedDL'] %}
-          <span class="badge badge-blue">Downloading</span>
-        {% elif s in ['uploading', 'forcedUP'] %}
-          <span class="badge badge-green">Seeding</span>
-        {% elif s in ['pausedDL', 'pausedUP', 'stoppedDL', 'stoppedUP'] %}
-          <span class="badge badge-gray">Stopped</span>
-        {% elif s in ['stalledDL'] %}
-          <span class="badge badge-yellow">Stalled ↓</span>
-        {% elif s in ['stalledUP'] %}
-          <span class="badge badge-yellow">Stalled ↑</span>
-        {% elif s in ['checkingDL', 'checkingUP', 'checkingResumeData', 'moving'] %}
-          <span class="badge badge-yellow">Checking</span>
-        {% elif s in ['queuedDL', 'queuedUP'] %}
-          <span class="badge badge-gray">Queued</span>
-        {% elif s in ['error', 'missingFiles', 'unknown'] %}
-          <span class="badge badge-red">Error</span>
-        {% else %}
-          <span class="badge badge-gray">{{ s }}</span>
-        {% endif %}
-      </td>
-      <td style="white-space:nowrap;color:var(--text-muted);font-size:0.85rem;">
-        {% if t.dlspeed > 0 %}↓ {{ t.dlspeed | filesizeformat }}/s{% endif %}
-        {% if t.upspeed > 0 %}<br>↑ {{ t.upspeed | filesizeformat }}/s{% endif %}
-      </td>
-      <td>
-        <div style="display:flex;gap:0.4rem;align-items:center;">
-          <select class="form-select cat-select" style="font-size:0.8rem;padding:0.2rem 0.4rem;"
-                  data-original="{{ t.category }}"
-                  onchange="onCatChange(this)">
-            <option value=""{% if not t.category %} selected{% endif %}>(none)</option>
-            {% for cat in categories %}
-            <option value="{{ cat }}"{% if t.category == cat %} selected{% endif %}>{{ cat }}</option>
-            {% endfor %}
-          </select>
-          <button class="btn btn-sm apply-btn" disabled
-                  onclick="applyCategory(this)"
-                  title="Apply category change to qBittorrent"
-                  style="opacity:0.4;">Apply</button>
-        </div>
-      </td>
-      <td>
-        <div style="display:flex;gap:0.4rem;">
-          {% if t.state in ['pausedDL', 'pausedUP', 'stoppedDL', 'stoppedUP'] %}
-          <button class="btn btn-sm btn-success" title="Resume this torrent in qBittorrent" onclick="torrentAction('resume', '{{ t.hash }}', this)">▶ Resume</button>
-          {% else %}
-          <button class="btn btn-sm" title="Stop this torrent in qBittorrent" onclick="torrentAction('pause', '{{ t.hash }}', this)">⏸ Pause</button>
-          {% endif %}
-          <button class="btn btn-sm btn-danger"
-                  title="Delete torrent and all files from qBittorrent (does not blocklist in Sonarr/Radarr/Lidarr)"
-                  onclick="deleteTorrent('{{ t.hash }}', {{ t.name | tojson }}, this)">✕</button>
-        </div>
-      </td>
-    </tr>
+  {% if torrents %}
+  <div class="table-wrap">
+    <table id="torrent-table">
+      <caption class="sr-only">Torrents in the client</caption>
+      <thead><tr><th>Name</th><th class="hide-sm">Size</th><th>Progress</th><th>Status</th><th class="hide-sm">Speed</th><th>Category</th><th class="text-right">Actions</th></tr></thead>
+      <tbody>
+      {% for t in torrents %}
+        <tr data-hash="{{ t.hash }}" data-state="{{ t.state }}" data-category="{{ t.category }}">
+          <td class="cell-truncate"><a class="font-medium link-plain" href="/torrents/{{ t.hash }}" title="{{ t.name }}">{{ t.name }}</a></td>
+          <td class="hide-sm nowrap text-muted">{{ t.size|filesizeformat }}</td>
+          <td>{{ progress(t.progress) }}</td>
+          <td class="state-cell">{{ torrent_state(t.state) }}</td>
+          <td class="hide-sm nowrap text-sm text-muted">
+            {% if t.dlspeed > 0 %}↓ {{ t.dlspeed|filesizeformat }}/s{% endif %}
+            {% if t.upspeed > 0 %}<div>↑ {{ t.upspeed|filesizeformat }}/s</div>{% endif %}
+          </td>
+          <td>
+            <div class="flex gap-4 items-center">
+              <select class="select-sm cat-select" data-original="{{ t.category }}" aria-label="Category for {{ t.name }}">
+                <option value=""{% if not t.category %} selected{% endif %}>(none)</option>
+                {% for cat in categories %}<option value="{{ cat }}"{% if t.category == cat %} selected{% endif %}>{{ cat }}</option>{% endfor %}
+              </select>
+              <button type="button" class="btn btn-secondary btn-sm apply-btn" data-action="apply-category" disabled title="Save this category in the torrent client">Save</button>
+            </div>
+          </td>
+          <td class="nowrap text-right">
+            {% if t.state in ['pausedDL', 'pausedUP', 'stoppedDL', 'stoppedUP'] %}
+              <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="torrent-resume" title="Resume" aria-label="Resume {{ t.name }}">{{ icon('play') }}</button>
+            {% else %}
+              <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="torrent-pause" title="Pause" aria-label="Pause {{ t.name }}">{{ icon('pause') }}</button>
+            {% endif %}
+            <button type="button" class="btn btn-ghost btn-sm btn-icon text-danger" data-action="torrent-delete" data-name="{{ t.name }}"
+                    title="Delete with files (does not blocklist in Sonarr/Radarr)" aria-label="Delete {{ t.name }}">{{ icon('trash') }}</button>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if total_pages > 1 %}
+  <nav class="pagination" aria-label="Pages">
+    {% if page > 1 %}<a href="/torrents?page={{ page - 1 }}" aria-label="Previous page">‹</a>{% endif %}
+    {% for p in range(1, total_pages + 1) %}
+      {% if p == page %}<span class="current">{{ p }}</span>
+      {% elif p <= 2 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}<a href="/torrents?page={{ p }}">{{ p }}</a>
+      {% elif p == 3 or p == total_pages - 2 %}<span>…</span>{% endif %}
     {% endfor %}
-    </tbody>
-  </table>
-  </div>
-</div>
-
-{% if total_pages > 1 %}
-<div class="pagination">
-  {% if page > 1 %}
-  <a href="/torrents?page={{ page - 1 }}">&laquo; Prev</a>
+    {% if page < total_pages %}<a href="/torrents?page={{ page + 1 }}" aria-label="Next page">›</a>{% endif %}
+  </nav>
   {% endif %}
-  {% for p in range(1, total_pages + 1) %}
-    {% if p == page %}
-    <span class="current">{{ p }}</span>
-    {% elif p <= 3 or p > total_pages - 2 or (p >= page - 1 and p <= page + 1) %}
-    <a href="/torrents?page={{ p }}">{{ p }}</a>
-    {% elif p == 4 or p == total_pages - 2 %}
-    <span class="text-muted">…</span>
-    {% endif %}
-  {% endfor %}
-  {% if page < total_pages %}
-  <a href="/torrents?page={{ page + 1 }}">Next &raquo;</a>
+  {% else %}
+    {{ empty("No torrents", "Your torrent client is empty right now.", icon_name="download") }}
   {% endif %}
-</div>
+</section>
 {% endif %}
-
-{% else %}
-<div class="card" style="text-align:center;padding:3rem;color:var(--text-muted);">
-  No torrents found in qBittorrent.
-</div>
-{% endif %}
-
-{% endif %}
-
 {% endblock %}
 
 {% block scripts %}
-<script>
-// ---- Category change ----
-function onCatChange(select) {
-  const btn = select.parentElement.querySelector('.apply-btn');
-  const changed = select.value !== select.dataset.original;
-  btn.disabled = !changed;
-  btn.style.opacity = changed ? '1' : '0.4';
-}
-
-function applyCategory(btn) {
-  const row   = btn.closest('tr');
-  const hash  = row.dataset.hash;
-  const select = btn.parentElement.querySelector('.cat-select');
-  const category = select.value;
-  btn.disabled = true;
-  btn.textContent = '…';
-
-  fetch('/torrents/set-category', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({hash, category}),
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.ok) {
-      select.dataset.original = category;
-      row.dataset.category = category;
-      btn.textContent = 'Apply';
-      btn.style.opacity = '0.4';
-      showToast('Category updated', 'success');
-    } else {
-      btn.disabled = false;
-      btn.textContent = 'Apply';
-      showToast('Failed: ' + data.msg, 'error');
-    }
-  })
-  .catch(() => {
-    btn.disabled = false;
-    btn.textContent = 'Apply';
-    showToast('Request failed', 'error');
-  });
-}
-
-// ---- Pause / Resume ----
-function torrentAction(action, hash, btn) {
-  const row = btn.closest('tr');
-  btn.disabled = true;
-
-  fetch('/torrents/' + action, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({hash}),
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.ok) {
-      // Swap the button in-place
-      const actionsCell = btn.parentElement;
-      if (action === 'pause') {
-        btn.className = 'btn btn-sm btn-success';
-        btn.textContent = '▶ Resume';
-        btn.setAttribute('onclick', `torrentAction('resume', '${hash}', this)`);
-        row.dataset.state = 'stoppedDL';
-        // Update status badge
-        row.querySelector('td:nth-child(4) span').className = 'badge badge-gray';
-        row.querySelector('td:nth-child(4) span').textContent = 'Stopped';
-      } else {
-        btn.className = 'btn btn-sm';
-        btn.textContent = '⏸ Pause';
-        btn.setAttribute('onclick', `torrentAction('pause', '${hash}', this)`);
-        row.dataset.state = 'downloading';
-        row.querySelector('td:nth-child(4) span').className = 'badge badge-blue';
-        row.querySelector('td:nth-child(4) span').textContent = 'Downloading';
-      }
-      btn.disabled = false;
-    } else {
-      btn.disabled = false;
-      showToast('Failed: ' + data.msg, 'error');
-    }
-  })
-  .catch(() => {
-    btn.disabled = false;
-    showToast('Request failed', 'error');
-  });
-}
-
-// ---- Delete ----
-function deleteTorrent(hash, name, btn) {
-  if (!confirm(`Delete "${name}" and all its files?\n\nThis cannot be undone.`)) return;
-  btn.disabled = true;
-
-  fetch('/torrents/delete', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({hash}),
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.ok) {
-      const row = btn.closest('tr');
-      row.style.transition = 'opacity 0.3s';
-      row.style.opacity = '0';
-      setTimeout(() => {
-        row.remove();
-        updateVisibleCount();
-      }, 300);
-      showToast('Torrent deleted', 'info');
-    } else {
-      btn.disabled = false;
-      showToast('Failed: ' + data.msg, 'error');
-    }
-  })
-  .catch(() => {
-    btn.disabled = false;
-    showToast('Request failed', 'error');
-  });
-}
-
-// ---- Filters ----
-function applyFilters() {
-  const statusFilter   = document.getElementById('filter-status').value;
-  const categoryFilter = document.getElementById('filter-category').value;
-  const rows = document.querySelectorAll('#torrent-table tbody tr');
-  let visible = 0;
-
-  const statusGroups = {
-    downloading: ['downloading', 'metaDL', 'allocating', 'forcedDL'],
-    seeding:     ['uploading', 'forcedUP'],
-    paused:      ['pausedDL', 'pausedUP', 'stoppedDL', 'stoppedUP'],
-    stalled:     ['stalledDL', 'stalledUP'],
-    error:       ['error', 'missingFiles', 'unknown'],
-  };
-
-  rows.forEach(row => {
-    const state    = row.dataset.state;
-    const category = row.dataset.category;
-
-    const statusOk = !statusFilter ||
-      (statusGroups[statusFilter] && statusGroups[statusFilter].includes(state));
-
-    const categoryOk = !categoryFilter ||
-      (categoryFilter === '__none__' ? !category : category === categoryFilter);
-
-    const show = statusOk && categoryOk;
-    row.style.display = show ? '' : 'none';
-    if (show) visible++;
-  });
-
-  document.getElementById('visible-count').textContent = visible;
-}
-
-function updateVisibleCount() {
-  const visible = document.querySelectorAll('#torrent-table tbody tr:not([style*="display: none"])').length;
-  document.getElementById('visible-count').textContent = visible;
-}
-
-function refreshTorrents() {
-  window.location.reload();
-}
-</script>
+<script src="{{ url_for('static', filename='js/pages/torrents.js') }}?v={{ app_version }}"></script>
 {% endblock %}

@@ -33,6 +33,28 @@
 </div>
 {%- endmacro %}
 
+{#- qBittorrent state -> plain label and tone. One definition, used by the
+    Torrents list and the torrent detail page (it used to be copied in both). -#}
+{% macro torrent_state(s) -%}
+{%- if s in ['downloading', 'metaDL', 'allocating', 'forcedDL'] -%}{{ badge('Downloading', 'info') }}
+{%- elif s in ['uploading', 'forcedUP'] -%}{{ badge('Seeding', 'ok') }}
+{%- elif s in ['pausedDL', 'pausedUP', 'stoppedDL', 'stoppedUP'] -%}{{ badge('Stopped', 'neutral') }}
+{%- elif s == 'stalledDL' -%}{{ badge('Stalled', 'warn', title='No peers sending data') }}
+{%- elif s == 'stalledUP' -%}{{ badge('Seeding (idle)', 'neutral', title='Complete; no one is downloading from you') }}
+{%- elif s in ['checkingDL', 'checkingUP', 'checkingResumeData', 'moving'] -%}{{ badge('Checking', 'warn') }}
+{%- elif s in ['queuedDL', 'queuedUP'] -%}{{ badge('Queued', 'neutral') }}
+{%- elif s in ['error', 'missingFiles', 'unknown'] -%}{{ badge('Error', 'danger') }}
+{%- else -%}{{ badge(s, 'neutral') }}{%- endif -%}
+{%- endmacro %}
+
+{% macro progress(fraction, label=True) -%}
+{%- set pct = ((fraction or 0) * 100)|int -%}
+<div class="progress-row">
+  <div class="progress-track"><div class="progress-bar" data-pct="{{ pct }}"></div></div>
+  {% if label %}<span class="text-xs text-muted nowrap">{{ pct }}%</span>{% endif %}
+</div>
+{%- endmacro %}
+
 {% macro subnav(items, active, counts={}) -%}
 <nav class="subnav" aria-label="Section">
   {% for it in items %}

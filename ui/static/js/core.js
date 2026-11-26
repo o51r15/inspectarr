@@ -192,7 +192,19 @@ Actions["toggle-scheduler"] = async (el) => {
   }
 };
 
+/* Widths that used to be inline width styles: markup carries
+   data-pct="NN" and this sets the --pct custom property through CSSOM,
+   which a Content-Security-Policy permits (style attributes it does not). */
+function applyPercents(root = document) {
+  root.querySelectorAll("[data-pct]").forEach((el) => {
+    const n = Math.max(0, Math.min(100, parseFloat(el.dataset.pct) || 0));
+    el.style.setProperty("--pct", n + "%");
+  });
+}
+window.applyPercents = applyPercents;
+
 document.addEventListener("DOMContentLoaded", () => {
+  applyPercents();
   syncThemeButton();
   upgradeTimes();
   consumeToastParam();
