@@ -21,9 +21,7 @@ INLINE_HANDLER = re.compile(r'\son[a-z]+="')
 INLINE_STYLE_BLOCK = re.compile(r"<style[\s>]")
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)(?![^>]*application/json)[^>]*>")
 
-NOT_YET_MIGRATED = {
-    "config.html",
-}
+NOT_YET_MIGRATED: set[str] = set()     # Phase 1 gate: empty
 
 
 def _templates():

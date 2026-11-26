@@ -60,6 +60,20 @@
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 .pre-wrap { white-space: pre-wrap; }
+.block { display: block; }
+.d-none { display: none; }
+.pointer { cursor: pointer; }
+.flex-row { flex-direction: row; }
+.items-end { align-items: flex-end; }
+.gap-24 { gap: var(--space-6); }
+.m-0 { margin: 0; }
+.border-0 { border: 0 !important; }
+.mw-160 { max-width: 160px; }
+.mw-200 { max-width: 200px; }
+.mw-220 { max-width: 220px; }
+.w-140 { width: 140px; }
+.minh-500 { min-height: 500px; }
+.overflow-x-auto { overflow-x: auto; }
 .align-top, .align-top > td { vertical-align: top; }
 .px-card { padding-left: var(--space-5); padding-right: var(--space-5); }
 .scroll-y-160 { max-height: 160px; overflow-y: auto; }

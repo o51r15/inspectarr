@@ -33,6 +33,10 @@ nothing is hidden in a collapsing menu any more.
   a layout that works on a phone. The theme follows your system setting
   until you pick one.
 - `/quarantine` now redirects to **Activity → Needs review**.
+- Every page, including Settings, Indexers, Torrents and System, now uses
+  the new design. The Scheduler page's content (scan schedule, retry queue,
+  recent scans) moved to **System → Tasks**, and `/scheduler` redirects there.
+- Indexer charts follow the light and dark theme.
 
 ### Changed - No More Third-Party Requests
 
@@ -42,9 +46,18 @@ internet access and your browser no longer contacts those services.
 
 ### Added - Content-Security-Policy
 
-Every page now sends a Content-Security-Policy, in report-only mode for now.
-It will be switched to enforcing once the remaining older pages are moved
-onto the new design system.
+Every page now sends an enforced Content-Security-Policy: the browser runs
+only Inspectarr's own scripts and styles, so injected HTML cannot execute.
+If something on your setup stops working because of it, set the environment
+variable `INSPECTARR_CSP=report-only` on the container to fall back to
+reporting only, and please open an issue.
+
+### Fixed - Interface Details
+
+- Indexers' AI "change" column showed +0.0 when the rules score was exactly 0.
+- Pinning an indexer that failed to save left the checkbox showing the wrong state.
+- Torrent and log names from the client are always inserted as text, never as HTML.
+- The System → Tasks page showed "—" for the last Prowlarr reorder after every restart.
 
 ### Changed - Newer Base Image, and Images for ARM
 

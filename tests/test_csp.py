@@ -43,6 +43,19 @@ def test_csp_header_present(client):
     assert "unsafe-inline" not in header
 
 
+def test_csp_is_enforced_by_default(client):
+    r = client.get("/")
+    assert "Content-Security-Policy" in r.headers
+    assert "Content-Security-Policy-Report-Only" not in r.headers
+
+
+def test_csp_escape_hatch(monkeypatch, client):
+    monkeypatch.setattr(web, "CSP_ENFORCE", False)
+    r = client.get("/")
+    assert "Content-Security-Policy-Report-Only" in r.headers
+    assert "Content-Security-Policy" not in r.headers
+
+
 def test_no_third_party_assets_in_templates():
     """Fonts and Chart.js are vendored; nothing may load from a CDN again."""
     tdir = BASE.parent
