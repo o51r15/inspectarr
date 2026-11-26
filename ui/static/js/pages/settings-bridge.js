@@ -17,7 +17,7 @@
     "addExt", "removeExt", "addPattern", "removePattern", "describeBands",
     "testProwlarr", "resetScoringDefaults", "syncAiEnabled", "testOllama", "pullModel",
     "loadOllamaModels", "onBatchInput",
-    "onBatchCommit", "testApprise", "createBackup", "deleteBackup",
+    "onBatchCommit", "createBackup", "deleteBackup",
   ]);
 
   function call(name, args) {

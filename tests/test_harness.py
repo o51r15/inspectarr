@@ -28,7 +28,7 @@ def test_settings_form_is_fully_parsed(client):
     # A spread from every pane: connections, rules, remediation, prowlarr,
     # notifications, general, advanced.
     for expected in ("qbit_url", "sonarr_api_key", "rule_name_0", "rule_extensions_0",
-                     "remediation_operating_mode", "prowlarr_url", "notify_on",
+                     "remediation_operating_mode", "prowlarr_url", "summary_schedule",
                      "polling_interval_seconds", "auth_username", "log_level"):
         assert expected in names, f"{expected} missing from parsed form"
     assert len(names) >= 50, f"only {len(names)} distinct fields parsed"
