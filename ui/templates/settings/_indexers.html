@@ -1,0 +1,163 @@
+      <!-- PANE: Indexers (Prowlarr) -->
+      <div class="settings-pane" data-pane="indexers">
+        <div class="form-section">
+          <div class="form-section-title flex items-center justify-between">
+            <span>Prowlarr Connection &amp; Scoring</span>
+            <div class="flex gap-8 items-center">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testProwlarr">Test Connection</button>
+              <span id="prowlarr-status" class="hint"></span>
+            </div>
+          </div>
+          <p class="hint mb-12">
+            View scores and reorder indexers on the <a href="/indexers">Indexers</a> page.
+          </p>
+          <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="prowlarr_enabled">
+            <input type="checkbox" name="prowlarr_enabled" id="prowlarr_enabled"
+                   {{ 'checked' if cfg.get('prowlarr',{}).get('enabled') else '' }}>
+            <label for="prowlarr_enabled">Enable Prowlarr indexer health scoring</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>URL</label>
+              <input type="text" name="prowlarr_url" id="prowlarr_url"
+                     value="{{ cfg.get('prowlarr',{}).get('url','') }}"
+                     placeholder="http://192.168.1.x:9696/prowlarr">
+            </div>
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" name="prowlarr_api_key" id="prowlarr_api_key"
+                     value="{{ cfg.get('prowlarr',{}).get('api_key','') }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Base priority</label>
+              <input type="number" name="prowlarr_base_priority" id="prowlarr_base_priority" min="1" max="50"
+                     value="{{ cfg.get('prowlarr',{}).get('base_priority', 10) }}">
+              <span class="hint">Best-scoring torrent indexer gets this priority; others count up. Keep above your NZB indexers' priority numbers.</span>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>History window (days)</label>
+              <input type="number" name="prowlarr_history_window" id="prowlarr_history_window" min="1"
+                     value="{{ cfg.get('prowlarr',{}).get('history_window_days', 90) }}">
+            </div>
+            <div class="form-group">
+              <label>Min records before scoring</label>
+              <input type="number" name="prowlarr_min_grabs" id="prowlarr_min_grabs" min="1"
+                     value="{{ cfg.get('prowlarr',{}).get('min_grabs_before_scoring', 10) }}">
+              <span class="hint">Indexers with fewer history records show N/A for health score</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title flex items-center justify-between">
+            <span>Scoring Weights &amp; Multipliers</span>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="resetScoringDefaults"
+                    title="Reset all weights and multipliers to defaults">Reset to Defaults</button>
+          </div>
+          <p class="hint mb-12">
+            The four scoring weights must sum to 1.0. Failure multipliers control how heavily each failure type counts.
+          </p>
+          {% set sc = cfg.get('prowlarr',{}).get('scoring',{}) %}
+          <div class="form-row form-row-4 mb-12">
+            <div class="form-group">
+              <label>Response Time</label>
+              <input type="number" name="scoring_response_time_weight" step="0.05" min="0" max="1"
+                     value="{{ sc.get('response_time_weight', 0.25) }}" data-default="0.25">
+            </div>
+            <div class="form-group">
+              <label>Failure Rate</label>
+              <input type="number" name="scoring_failure_rate_weight" step="0.05" min="0" max="1"
+                     value="{{ sc.get('failure_rate_weight', 0.30) }}" data-default="0.30">
+            </div>
+            <div class="form-group">
+              <label>Malicious</label>
+              <input type="number" name="scoring_malicious_weight" step="0.05" min="0" max="1"
+                     value="{{ sc.get('malicious_weight', 0.20) }}" data-default="0.20">
+            </div>
+            <div class="form-group">
+              <label>Grab Success</label>
+              <input type="number" name="scoring_grab_success_weight" step="0.05" min="0" max="1"
+                     value="{{ sc.get('grab_success_weight', 0.25) }}" data-default="0.25">
+            </div>
+          </div>
+          <div class="form-row form-row-4 mb-12">
+            <div class="form-group">
+              <label>Auth Failure ×</label>
+              <input type="number" name="scoring_auth_failure_mult" step="0.5" min="0"
+                     value="{{ sc.get('auth_failure_mult', 3.0) }}" data-default="3.0">
+            </div>
+            <div class="form-group">
+              <label>Grab Failure ×</label>
+              <input type="number" name="scoring_grab_failure_mult" step="0.5" min="0"
+                     value="{{ sc.get('grab_failure_mult', 2.0) }}" data-default="2.0">
+            </div>
+            <div class="form-group">
+              <label>Query Failure ×</label>
+              <input type="number" name="scoring_query_failure_mult" step="0.5" min="0"
+                     value="{{ sc.get('query_failure_mult', 1.0) }}" data-default="1.0">
+            </div>
+            <div class="form-group">
+              <label>RSS Failure ×</label>
+              <input type="number" name="scoring_rss_failure_mult" step="0.5" min="0"
+                     value="{{ sc.get('rss_failure_mult', 0.5) }}" data-default="0.5">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Backoff Penalty</label>
+              <input type="number" name="scoring_backoff_penalty" step="5" min="0"
+                     value="{{ sc.get('backoff_penalty', 20) }}" data-default="20">
+              <div class="hint">Points deducted if indexer is in Prowlarr backoff</div>
+            </div>
+            <div class="form-group">
+              <label>Malicious Penalty (per hit)</label>
+              <input type="number" name="scoring_malicious_penalty_per_hit" step="5" min="0"
+                     value="{{ sc.get('malicious_penalty_per_hit', 10) }}" data-default="10">
+              <div class="hint">Points deducted per confirmed malicious torrent</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Auto-Manage Indexers</div>
+          <p class="hint mb-12">
+            Automatically disable indexers that consistently score below a health threshold,
+            and re-enable them after a cooldown period. You can always manually override from the
+            <a href="/indexers">Indexers</a> page.
+          </p>
+          <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="prowlarr_auto_manage_enabled">
+            <input type="checkbox" name="prowlarr_auto_manage_enabled" id="prowlarr_auto_manage_enabled"
+                   {{ 'checked' if cfg.get('prowlarr',{}).get('auto_manage',{}).get('enabled') else '' }}>
+            <label for="prowlarr_auto_manage_enabled">Enable automatic disable/re-enable</label>
+          </div>
+          <div class="form-row form-row-3">
+            <div class="form-group">
+              <label>Disable threshold</label>
+              <input type="number" name="prowlarr_auto_manage_threshold"
+                     value="{{ cfg.get('prowlarr',{}).get('auto_manage',{}).get('disable_threshold', 30) }}"
+                     min="0" max="100" step="5">
+              <div class="hint">Score below this triggers disable</div>
+            </div>
+            <div class="form-group">
+              <label>Consecutive runs</label>
+              <input type="number" name="prowlarr_auto_manage_runs"
+                     value="{{ cfg.get('prowlarr',{}).get('auto_manage',{}).get('consecutive_runs', 3) }}"
+                     min="1" max="20">
+              <div class="hint">How many scoring runs below threshold before disabling</div>
+            </div>
+            <div class="form-group">
+              <label>Cooldown (hours)</label>
+              <input type="number" name="prowlarr_auto_manage_cooldown"
+                     value="{{ cfg.get('prowlarr',{}).get('auto_manage',{}).get('cooldown_hours', 24) }}"
+                     min="1" max="720">
+              <div class="hint">Wait this long before auto-re-enabling</div>
+            </div>
+          </div>
+        </div>
+      </div>

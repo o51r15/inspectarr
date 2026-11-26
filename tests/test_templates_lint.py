@@ -25,10 +25,10 @@ NOT_YET_MIGRATED: set[str] = set()     # Phase 1 gate: empty
 
 
 def _templates():
-    return sorted(TEMPLATES.glob("*.html"))
+    return sorted(TEMPLATES.rglob("*.html"))     # includes the settings/ panes
 
 
-@pytest.mark.parametrize("f", _templates(), ids=lambda p: p.name)
+@pytest.mark.parametrize("f", _templates(), ids=lambda p: p.relative_to(TEMPLATES).as_posix())
 def test_no_inline_style_script_or_handlers(f):
     if f.name in NOT_YET_MIGRATED:
         pytest.skip("not yet migrated")

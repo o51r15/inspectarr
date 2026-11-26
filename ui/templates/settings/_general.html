@@ -1,0 +1,138 @@
+      <!-- PANE: General -->
+      <div class="settings-pane" data-pane="general">
+        <div class="form-section">
+          <div class="form-section-title">Behavior</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>On Arr Failure</label>
+              <select name="on_arr_failure">
+                <option value="delete" {{ 'selected' if cfg.get('on_arr_failure','delete') == 'delete' else '' }}>Delete from qBit anyway</option>
+                <option value="abort"  {{ 'selected' if cfg.get('on_arr_failure') == 'abort' else '' }}>Abort — skip deletion</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="dry_run">
+            <input type="checkbox" name="dry_run" id="dry_run"
+                   {{ 'checked' if cfg.get('dry_run') else '' }}>
+            <label for="dry_run">Dry Run — flag matches but take no action</label>
+          </div>
+          <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="scheduler_autostart">
+            <input type="checkbox" name="scheduler_autostart" id="scheduler_autostart"
+                   {{ 'checked' if cfg.get('web',{}).get('scheduler_autostart') else '' }}>
+            <label for="scheduler_autostart">Auto-start scheduler on launch</label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Scan Triggers</div>
+          <p class="hint mb-12">
+            Configure how inspectarr detects new torrents. Polling and webhooks can be used independently or together.
+          </p>
+
+          <div class="grid grid-2 gap-24">
+            <div class="panel">
+              <div class="font-semibold mb-8">Polling</div>
+              <div class="toggle-row mb-12">
+                <input type="hidden" name="_rendered" value="polling_enabled">
+                <input type="checkbox" name="polling_enabled" id="polling_enabled"
+                       {{ 'checked' if cfg.get('scanning',{}).get('polling',{}).get('enabled', True) else '' }}>
+                <label for="polling_enabled">Enabled</label>
+              </div>
+              <div class="form-group">
+                <label>Interval (seconds)</label>
+                <input type="number" name="polling_interval_seconds"
+                       value="{{ cfg.get('scanning',{}).get('polling',{}).get('interval_seconds', cfg.get('poll_interval_seconds', 300)) }}"
+                       min="60">
+                <div class="hint">How often to poll qBittorrent for new torrents</div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="font-semibold mb-8">Event-Driven (Webhooks)</div>
+              <div class="toggle-row mb-12">
+                <input type="hidden" name="_rendered" value="webhooks_enabled">
+                <input type="checkbox" name="webhooks_enabled" id="webhooks_enabled"
+                       {{ 'checked' if cfg.get('scanning',{}).get('webhooks',{}).get('enabled') else '' }}>
+                <label for="webhooks_enabled">Enabled</label>
+              </div>
+              <div class="form-group">
+                <label>Scan Delay (seconds)</label>
+                <input type="number" name="webhooks_scan_delay"
+                       value="{{ cfg.get('scanning',{}).get('webhooks',{}).get('scan_delay_seconds', 60) }}"
+                       min="5" max="600">
+                <div class="hint">Wait for torrent to connect to swarm before scanning</div>
+              </div>
+              <div class="form-group">
+                <label>Shared Secret</label>
+                <input type="text" name="webhooks_secret" autocomplete="off"
+                       value="{{ cfg.get('scanning',{}).get('webhooks',{}).get('secret', '') }}"
+                       placeholder="Optional — leave blank for no auth">
+                <div class="hint">Set in *arr webhook headers as X-Webhook-Secret</div>
+              </div>
+              <div class="hint mt-8">
+                Webhook URLs:<br>
+                <code class="text-xs">POST /webhook/sonarr</code> &nbsp;
+                <code class="text-xs">POST /webhook/radarr</code> &nbsp;
+                <code class="text-xs">POST /webhook/lidarr</code>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Retry</div>
+          <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="retry_enabled">
+            <input type="checkbox" name="retry_enabled" id="retry_enabled"
+                   {{ 'checked' if cfg.get('retry',{}).get('enabled', True) else '' }}>
+            <label for="retry_enabled">Enabled</label>
+          </div>
+          <div class="form-row form-row-3">
+            <div class="form-group">
+              <label>Max Attempts</label>
+              <input type="number" name="retry_max_attempts" value="{{ cfg.get('retry',{}).get('max_attempts', 10) }}" min="1">
+            </div>
+            <div class="form-group">
+              <label>Interval (seconds)</label>
+              <input type="number" name="retry_interval_seconds" value="{{ cfg.get('retry',{}).get('interval_seconds', 600) }}" min="60">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Indexer Scoring Schedule</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Reorder interval (hours)</label>
+              <input type="number" name="prowlarr_reorder_interval" id="prowlarr_reorder_interval" min="1"
+                     value="{{ cfg.get('prowlarr',{}).get('reorder_interval_hours', 24) }}">
+              <span class="hint">How often to automatically rescore and reorder Prowlarr indexers</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Web UI Authentication</div>
+          <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="auth_enabled">
+            <input type="checkbox" name="auth_enabled" id="auth_enabled"
+                   {{ 'checked' if cfg.get('web',{}).get('auth',{}).get('enabled') else '' }}>
+            <label for="auth_enabled">Require login to access the web UI</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Username</label>
+              <input type="text" name="auth_username" autocomplete="off"
+                     value="{{ cfg.get('web',{}).get('auth',{}).get('username','admin') }}">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" name="auth_password" autocomplete="new-password"
+                     value="{{ cfg.get('web',{}).get('auth',{}).get('password','') }}">
+            </div>
+          </div>
+          <div class="hint">Changes take effect immediately — no restart required.</div>
+        </div>
+      </div>

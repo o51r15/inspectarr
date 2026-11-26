@@ -1,0 +1,34 @@
+      <!-- PANE: Advanced -->
+      <div class="settings-pane" data-pane="advanced">
+        <div class="form-section">
+          <div class="form-section-title">Advanced</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Log File Path</label>
+              <input type="text" name="log_file" value="{{ cfg.get('logging',{}).get('log_file','./data/inspectarr.log.json') }}">
+            </div>
+            <div class="form-group">
+              <label>DB File Path</label>
+              <input type="text" name="db_file" value="{{ cfg.get('state',{}).get('db_file','./data/inspectarr.db') }}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Retention (days)</label>
+              <input type="number" name="retention_days" value="{{ cfg.get('logging',{}).get('retention_days',30) }}" min="1">
+            </div>
+            <div class="form-group">
+              <label>Log Level</label>
+              <select name="log_level">
+                <option {{ 'selected' if cfg.get('logging',{}).get('level','INFO') == 'INFO' else '' }}>INFO</option>
+                <option {{ 'selected' if cfg.get('logging',{}).get('level') == 'DEBUG' else '' }}>DEBUG</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group mw-200">
+            <label>Web UI Port</label>
+            <input type="number" name="web_port" value="{{ cfg.get('web',{}).get('port', 8585) }}" min="1024" max="65535">
+            <div class="hint">Requires restart to take effect</div>
+          </div>
+        </div>
+      </div>
