@@ -976,38 +976,130 @@ def ollama_set_model():
         return jsonify({"ok": False, "message": safe_error(exc)})
 
 
-@config_bp.route("/config/ollama/system-prompt", methods=["GET"])
-def ollama_get_system_prompt():
-    """Return the current (or default) Ollama system prompt."""
-    from core.llm_client import SYSTEM_PROMPT
-    config_path = current_app.config["CONFIG_PATH"]
-    raw = _load_raw(config_path)
-    custom = raw.get("prowlarr", {}).get("ollama", {}).get("system_prompt", "")
+# ---------------------------------------------------------------------------
+# Scoring instructions (core/scoring_prompts.py): the locked Default, people's
+# own prompts, which one scores, and testing a prompt.
+# ---------------------------------------------------------------------------
+def _prompt_view(row: dict, active_id: int) -> dict:
+    from core.scoring_prompts import label
+    return {"id": row["id"], "number": row["number"], "name": row.get("name") or "",
+            "label": label(row), "text": row["text"], "revision": row["revision"],
+            "updated_at": row["updated_at"], "in_use": row["id"] == active_id}
+
+
+@config_bp.route("/config/ai/prompts", methods=["GET", "POST"])
+def ai_prompts():
+    """GET: the Default (read-only), the answer format, every prompt, which
+    is in use. POST {text?, name?}: New prompt, a copy of the Default's
+    instructions unless text is given."""
+    from core import scoring_prompts as sp
+    state = current_app.config.get("STATE")
+    if not state:
+        return jsonify({"ok": False, "message": "No database"}), 503
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        try:
+            text = sp.clean_text(data.get("text") or sp.DEFAULT_INSTRUCTIONS)
+        except sp.PromptError as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+        pid = state.create_scoring_prompt(text, data.get("name") or "")
+        if not pid:
+            return jsonify({"ok": False, "message": "Could not save the prompt"}), 500
+        return jsonify({"ok": True, "id": pid})
+    active = sp.active(state)
+    active_id = active["id"] if active else 0
     return jsonify({
         "ok": True,
-        "prompt": custom if custom else SYSTEM_PROMPT,
-        "is_default": not bool(custom),
-        "default_prompt": SYSTEM_PROMPT,
+        "default_instructions": sp.DEFAULT_INSTRUCTIONS,
+        "answer_format": sp.ANSWER_FORMAT,
+        "active_id": active_id,
+        "active_label": sp.label(active),
+        "prompts": [_prompt_view(r, active_id) for r in state.list_scoring_prompts()],
+        "limits": {"min": sp.MIN_CHARS, "max": sp.MAX_CHARS},
     })
 
 
-@config_bp.route("/config/ollama/system-prompt", methods=["POST"])
-def ollama_set_system_prompt():
-    """Save or reset the Ollama system prompt."""
-    config_path = current_app.config["CONFIG_PATH"]
+@config_bp.route("/config/ai/prompts/<int:prompt_id>", methods=["POST"])
+def ai_prompt_update(prompt_id):
+    """Save a prompt's instructions and name."""
+    from core import scoring_prompts as sp
+    state = current_app.config.get("STATE")
     data = request.get_json(silent=True) or {}
-    prompt = data.get("prompt", "").strip()
+    if not state or not state.get_scoring_prompt(prompt_id):
+        return jsonify({"ok": False, "message": "That prompt doesn't exist any more."}), 404
     try:
-        raw = _load_raw(config_path)
-        prowlarr = raw.setdefault("prowlarr", {})
-        ollama = prowlarr.setdefault("ollama", {})
-        # Empty string = reset to default (built-in prompt used at runtime)
-        ollama["system_prompt"] = prompt
-        _save_raw(config_path, raw)
-        msg = "System prompt reset to default" if not prompt else "System prompt saved"
-        return jsonify({"ok": True, "message": msg})
-    except Exception as exc:
-        return jsonify({"ok": False, "message": safe_error(exc)})
+        text = sp.clean_text(data.get("text") or "")
+    except sp.PromptError as exc:
+        return jsonify({"ok": False, "message": str(exc)}), 400
+    state.update_scoring_prompt(prompt_id, text, data.get("name") or "")
+    return jsonify({"ok": True})
+
+
+@config_bp.route("/config/ai/prompts/<int:prompt_id>/delete", methods=["POST"])
+def ai_prompt_delete(prompt_id):
+    """Delete a prompt; if it was in use, the Default is used again."""
+    from core import scoring_prompts as sp
+    state = current_app.config.get("STATE")
+    if state:
+        sp.delete(state, prompt_id)
+    return jsonify({"ok": True})
+
+
+@config_bp.route("/config/ai/prompts/use", methods=["POST"])
+def ai_prompt_use():
+    """Use this prompt for scoring ({id}; 0 = the Default)."""
+    from core import scoring_prompts as sp
+    state = current_app.config.get("STATE")
+    data = request.get_json(silent=True) or {}
+    try:
+        sp.use(state, int(data.get("id") or 0))
+    except (sp.PromptError, TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "message": str(exc) or "Bad prompt id"}), 400
+    return jsonify({"ok": True, "active_label": sp.label(sp.active(state))})
+
+
+@config_bp.route("/config/ai/prompts/<int:prompt_id>/test", methods=["POST"])
+def ai_prompt_test(prompt_id):
+    """Test this prompt on the chosen models: a run of kind "prompt"."""
+    state = current_app.config.get("STATE")
+    data = request.get_json(silent=True) or {}
+    models = [m for m in (data.get("models") or []) if isinstance(m, str) and m.strip()]
+    if not models:
+        return jsonify({"ok": False, "message": "Tick at least one model"}), 400
+    if not state or not state.get_scoring_prompt(prompt_id):
+        return jsonify({"ok": False, "message": "That prompt doesn't exist any more."}), 404
+    url, _ollama, err = _ai_server_or_error()
+    if err:
+        return err
+    run_id = state.create_calibration_run(url, models, kind="prompt", prompt_id=prompt_id)
+    runner = _runner()
+    if runner:
+        runner.wake()
+    return jsonify({"ok": True, "run_id": run_id})
+
+
+@config_bp.route("/config/ai/prompts/<int:prompt_id>/tests", methods=["GET"])
+def ai_prompt_tests(prompt_id):
+    """This prompt's test results on the connected server, next to each
+    model's Default score; marked outdated after the prompt was edited."""
+    state = current_app.config.get("STATE")
+    row = state.get_scoring_prompt(prompt_id) if state else None
+    if not row:
+        return jsonify({"ok": False, "message": "That prompt doesn't exist any more."}), 404
+    url = _saved_ollama_url(current_app.config["CONFIG_PATH"])
+    defaults = {}
+    for v in state.get_validations(url):
+        try:
+            defaults[v["model"]] = (json.loads(v.get("results_json") or "{}") or {}).get("quality_score")
+        except (TypeError, ValueError):
+            pass
+    tests = []
+    for t in state.get_prompt_tests(prompt_id, url):
+        tests.append({"model": t["model"], "score": t["score"], "complete": bool(t["complete"]),
+                      "detail": t["detail"], "run_at": t["run_at"],
+                      "outdated": t["prompt_rev"] != row["revision"],
+                      "default_score": defaults.get(t["model"])})
+    return jsonify({"ok": True, "tests": tests})
 
 
 @config_bp.route("/config/ollama/update-check", methods=["GET"])

@@ -297,7 +297,7 @@ def grade(result: dict) -> dict:
 
 
 def run_quality_test(url: str, model: str, timeout: int, context_window: int,
-                     think=None, stats: list | None = None) -> dict:
+                     think=None, stats: list | None = None, prompt: str | None = None) -> dict:
     """Score the test indexers in one call and grade the answer. Never raises.
 
     One call, all fourteen: quality is measured separately from batch size
@@ -307,7 +307,7 @@ def run_quality_test(url: str, model: str, timeout: int, context_window: int,
     t0 = time.time()
     try:
         result = ollama_score_indexers(rows, url, model, timeout,
-                                       custom_prompt=SYSTEM_PROMPT,
+                                       custom_prompt=prompt or SYSTEM_PROMPT,
                                        context_window=context_window,
                                        max_indexers_per_call=len(rows),
                                        think=think, stats=stats)
@@ -322,8 +322,11 @@ def run_quality_test(url: str, model: str, timeout: int, context_window: int,
     if not result:
         out["detail"] = "The model returned nothing that could be read."
     elif not out["complete"]:
-        out["detail"] = (f"{out['score']:.0f}/100, but {out['missing']} indexer(s) missing"
-                         + (f" and {out['invented']} invented" if out["invented"] else "")
+        left_out = [c["case"] for c in out["cases"] if c["got"] is None]
+        out["left_out"] = left_out
+        out["detail"] = (f"{out['score']:.0f}/100, but it left out {len(left_out)} indexer(s)"
+                         + (f" ({'; '.join(left_out[:3])})" if left_out else "")
+                         + (f" and invented {out['invented']}" if out["invented"] else "")
                          + " -- not safe to use.")
     else:
         worst = [c for c in out["cases"] if c["points"] == 0][:3]

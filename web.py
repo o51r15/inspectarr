@@ -98,6 +98,11 @@ def create_app(config_path: str) -> Flask:
     from core.calibration_runs import CalibrationRunner
     app.config["CAL_RUNNER"] = (CalibrationRunner(app.config["STATE"], config_path)
                                 if app.config["STATE"] else None)
+    # The old single prowlarr.ollama.system_prompt setting becomes a stored
+    # prompt (or nothing, if it was the Default) and leaves config.yaml.
+    if app.config["STATE"]:
+        from core.scoring_prompts import migrate_config_prompt
+        migrate_config_prompt(app.config["STATE"], config_path)
     # L-03: register explicit close so SQLite connection is cleaned up on exit
     if app.config["STATE"]:
         atexit.register(app.config["STATE"].close)

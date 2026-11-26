@@ -201,6 +201,8 @@ class CalibrationRunner:
         return False
 
     def _run(self, run: dict) -> None:
+        if run.get("kind") == "prompt":
+            return self._run_prompt_test(run)
         from .ai_turn import ai_turn
         from .calibration import calibrate
         from .ollama_models import unload
@@ -253,6 +255,58 @@ class CalibrationRunner:
                 self.state.set_calibration_run(run_id, "paused", note="Paused")
             else:
                 self.state.set_calibration_run(run_id, "cancelled", note="Cancelled")
+        finally:
+            self.progress = {}
+
+    # --- testing a scoring prompt ----------------------------------------------------
+    def _run_prompt_test(self, run: dict) -> None:
+        """Grade a custom prompt on each chosen model: the quality test, once,
+        with the model's calibrated thinking and context if it has them.
+        Results go to prompt_tests only -- never to the model ranking."""
+        from .ai_turn import ai_turn
+        from .calibration import context_for_thinking
+        from .model_quality import run_quality_test
+        from .ollama_models import model_profile, recommended_think, unload
+        from .scoring_prompts import build
+        run_id, url = run["id"], run["ollama_url"]
+        prompt = self.state.get_scoring_prompt(run.get("prompt_id") or 0)
+        if not prompt:
+            self.state.set_calibration_run(run_id, "cancelled", note="The prompt was deleted")
+            return
+        system = build(prompt["text"])
+        self.state.set_calibration_run(run_id, "running", note="")
+        total = len(run["items"])
+        try:
+            for item in [i for i in run["items"] if i["status"] == "queued"]:
+                self._check(run_id)
+                model = item["model"]
+                self.state.set_calibration_item(run_id, item["position"], "running")
+                rec = self.state.get_validation(model, url) or {}
+                try:
+                    settings = (json.loads(rec.get("results_json") or "{}") or {}).get("settings") or {}
+                except (TypeError, ValueError):
+                    settings = {}
+                think = settings.get("think", recommended_think(model_profile(url, model)))
+                ctx = settings.get("context_window") or context_for_thinking(
+                    think, (model_profile(url, model) or {}).get("max_context"))
+                self.progress = {"run_id": run_id, "model": model, "stage": "Testing the prompt",
+                                 "done": 0, "total": 1, "position": item["position"] + 1, "of": total}
+                with ai_turn("prompt test", model, wait=None):
+                    self._check(run_id)
+                    r = run_quality_test(url, model, 900, ctx, think=think, prompt=system)
+                    if model != self._ollama().get("model"):
+                        unload(url, model)
+                self.state.save_prompt_test(prompt["id"], prompt["revision"], model, url,
+                                            r.get("score"), r.get("complete", False), r.get("detail", ""))
+                self.state.set_calibration_item(run_id, item["position"],
+                                                "done" if r.get("complete") else "failed",
+                                                score=r.get("score"))
+            self.state.set_calibration_run(run_id, "done", note="Finished")
+        except Interrupted as why:
+            with self._lock:
+                self._request.pop(run_id, None)
+            self.state.set_calibration_run(run_id, "paused" if str(why) == "pause" else "cancelled",
+                                           note="Paused" if str(why) == "pause" else "Cancelled")
         finally:
             self.progress = {}
 

@@ -180,6 +180,7 @@ class Calibration:
             "spread": round(max(scores) - min(scores), 1) if scores else 0.0,
             "sec_per_indexer": round(sum(r["sec_per_indexer"] for r in runs) / len(runs), 2) if runs else None,
             "follows_reference": any(r.get("follows_reference") for r in runs),
+            "left_out": sorted({c for r in runs for c in (r.get("left_out") or [])}),
             "detail": runs[-1].get("detail", "") if runs else "",
             "stats": stats,
         }
@@ -361,8 +362,10 @@ def calibrate(url: str, model: str, indexer_count: int = 20, progress=None) -> d
         chosen = cal.choose_thinking(tried)
 
         if chosen is None:
+            left_out = sorted({c for t in tried for c in (t.get("left_out") or [])})
             why = ("ran out of room before finishing its answer" if any(t["cut_off"] for t in tried)
-                   else "left indexers out of its answer")
+                   else "left indexers out of its answer"
+                   + (f" (always: {'; '.join(left_out[:3])})" if left_out else ""))
             q = {"name": "Quality", "passed": False,
                  "detail": f"No setting scored every indexer: the model {why}."}
             out["tests"].append(q)

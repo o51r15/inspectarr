@@ -16,7 +16,7 @@
     "openConfigFile", "sumWeights", "toggleTorrentPanes", "testConnection", "addRule", "removeRule",
     "addExt", "removeExt", "addPattern", "removePattern", "describeBands",
     "testProwlarr", "resetScoringDefaults", "syncAiEnabled", "testOllama", "pullModel",
-    "loadOllamaModels", "resetSystemPrompt", "saveSystemPrompt", "onBatchInput",
+    "loadOllamaModels", "onBatchInput",
     "onBatchCommit", "testApprise", "createBackup", "deleteBackup",
   ]);
 

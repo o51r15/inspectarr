@@ -496,13 +496,18 @@ class IndexerScorer:
         # not gain this protection for that run. Failing the scan over an
         # advisory lookup would be the worse trade.
         model_digest = ollama_local_digest(ocfg.url, ocfg.model)
+        # The prompt in use (Settings -> AI -> Scoring instructions): the
+        # Default, or a person's own instructions followed by the locked
+        # answer format. Part of the cache key, so changing it rescores.
+        from .scoring_prompts import active_system
+        prompt_label, system_prompt = active_system(self.state)
         content_hash = hashlib.sha256(
             json.dumps(
                 {
                     "payload":       payload,
                     "model":         ocfg.model,
                     "model_digest":  model_digest,
-                    "system_prompt": ocfg.system_prompt,
+                    "system_prompt": system_prompt,
                 },
                 sort_keys=True,
             ).encode()
@@ -521,7 +526,7 @@ class IndexerScorer:
                 )
             ai_results_raw = ollama_score_indexers(
                 payload, ocfg.url, ocfg.model, ocfg.timeout,
-                custom_prompt=ocfg.system_prompt,
+                custom_prompt=system_prompt,
                 context_window=getattr(ocfg, "context_window", 8192),
                 max_indexers_per_call=getattr(
                     ocfg, "max_indexers_per_call", 25),
