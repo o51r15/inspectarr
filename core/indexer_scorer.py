@@ -525,6 +525,7 @@ class IndexerScorer:
                 context_window=getattr(ocfg, "context_window", 8192),
                 max_indexers_per_call=getattr(
                     ocfg, "max_indexers_per_call", 25),
+                think=getattr(ocfg, "think", None),
             )
             if not ai_results_raw:
                 log.info("AI scoring unavailable — using deterministic scores")

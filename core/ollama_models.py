@@ -145,14 +145,24 @@ def recommended_think(profile: dict | None):
     return None
 
 
+def valid_think(value) -> bool:
+    """Is this a think value a user (or calibration) may store?"""
+    return value is None or isinstance(value, bool) or value in ("low", "medium", "high")
+
+
 def request_settings(url: str, model: str, context_window: int,
                      temperature: float | None = SCORING_TEMPERATURE,
-                     num_predict: int | None = None) -> dict:
+                     num_predict: int | None = None,
+                     think=None) -> dict:
     """The fields to merge into an /api/generate payload for this model.
 
     One place for it, so the scorer, the narrator and calibration send the
     same thing -- a test is only meaningful if it runs the way production
     does. Returns {"options": {...}} plus "think" when the model thinks.
+
+    think=None uses the recommended value. Anything else is a choice made by
+    calibration or the user (gpt-oss at "medium", say) and is sent as given,
+    except to a model that does not think at all, which gets nothing.
     """
     profile = model_profile(url, model)
     limit = (profile or {}).get("max_context")
@@ -166,7 +176,10 @@ def request_settings(url: str, model: str, context_window: int,
     if num_predict:
         options["num_predict"] = num_predict
     out = {"options": options}
-    think = recommended_think(profile)
+    if think is None or not valid_think(think):
+        think = recommended_think(profile)
+    elif (profile or {}).get("thinking", "none") == "none" and profile:
+        think = None
     if think is not None:
         out["think"] = think        # top level, never inside options
     return out
