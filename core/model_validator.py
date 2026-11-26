@@ -28,6 +28,7 @@ from .llm_client import (ollama_score_indexers,
                          SYSTEM_PROMPT, _batch_size, _estimate_tokens,
                          _key_legend)
 from .ollama_models import request_settings
+from .model_quality import run_quality_test
 
 log = logging.getLogger("inspectarr")
 
@@ -507,12 +508,25 @@ def validate_model(ollama_url: str, model: str, timeout: int = 300,
             progress_cb("Loading model", 0, 3)
         out.update(_warmup(ollama_url, model, context_window))
 
-        if progress_cb:
+        if progress_cb and calibration != "deep":
             progress_cb("Discrimination + schema", 1, 3)
-        disc, schema, ms1 = _test_discrimination_and_schema(
-            ollama_url, model, timeout, system_prompt, context_window)
-        out["tests"] = [disc, schema]
-        ms2 = ms1
+        if calibration == "deep":
+            # The graded quality test replaces the two-indexer check: it asks
+            # the same questions (good above bad, well-formed answers) and
+            # thirteen more, and its grade is what the ranking uses.
+            if progress_cb:
+                progress_cb("Quality test", 1, 3)
+            quality = run_quality_test(ollama_url, model, timeout, context_window)
+            out["tests"] = [quality]
+            out["quality_score"] = quality["score"]
+            out["sec_per_indexer"] = quality["sec_per_indexer"]
+            disc = schema = quality           # the gate below reads .passed
+            ms1 = ms2 = round(quality["elapsed_s"] * 1000)
+        else:
+            disc, schema, ms1 = _test_discrimination_and_schema(
+                ollama_url, model, timeout, system_prompt, context_window)
+            out["tests"] = [disc, schema]
+            ms2 = ms1
 
         # The fixed-size context test only runs in quick mode. Calibration's
         # batch search covers the same ground properly; running both meant a

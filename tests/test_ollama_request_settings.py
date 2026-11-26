@@ -210,9 +210,9 @@ def test_calibration_skips_the_fixed_25_per_call_test(ollama, monkeypatch):
     monkeypatch.setattr(model_validator, "_calibrate_batch",
                         lambda *a, **k: {"name": "Batch calibration", "passed": True,
                                          "max_safe_batch": 10})
-    monkeypatch.setattr(model_validator, "_test_discrimination_and_schema",
-                        lambda *a, **k: ({"name": "D", "passed": True},
-                                         {"name": "S", "passed": True}, 100))
+    monkeypatch.setattr(model_validator, "run_quality_test",
+                        lambda *a, **k: {"name": "Quality", "passed": True, "score": 90.0,
+                                         "sec_per_indexer": 0.5, "elapsed_s": 7.0})
     out = model_validator.validate_model(URL, "gemma4:latest", indexer_count=37,
                                          calibration="deep")
     names = [t["name"] for t in out["tests"]]
