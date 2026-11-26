@@ -3,15 +3,18 @@
  * Function names are unchanged on purpose (Phase 1); markup calls them
  * through data-action="call" via the whitelist in settings-bridge.js.
  * Phase 3 reshapes this file by pane. */
-  // ---- Edit mode (form vs raw yaml) ----
+  // ---- Edit mode ----
+  // The raw YAML editor is now the "Config file" pane with its own form, so
+  // there is no mode to switch. Kept (and whitelisted) so an old link or
+  // bookmark that calls it still lands somewhere sensible.
   function setEditMode(mode) {
-    document.getElementById('edit_mode').value = mode;
-    document.getElementById('form-view').style.display = (mode === 'form') ? 'block' : 'none';
-    document.getElementById('yaml-view').style.display = (mode === 'yaml') ? 'block' : 'none';
-    document.getElementById('mode-form-btn').classList.toggle('active', mode === 'form');
-    document.getElementById('mode-yaml-btn').classList.toggle('active', mode === 'yaml');
+    showPane(mode === 'yaml' ? 'file' : 'connections');
   }
-  setEditMode('form');
+
+  function discardFileEdits() {
+    window.removeEventListener('beforeunload', beforeUnloadHandler);
+    window.location.reload();
+  }
 
   // The AI master switch. Everything on this pane, plus the Ollama-backed
   // notification options, is meaningless without it -- disable rather than
@@ -110,30 +113,82 @@
     });
   }
 
-  // ---- Pane switching — driven by the sidebar Settings group + URL hash ----
+  // ---- Pane switching — tab bar + URL hash ----
   const paneNames = {
-    connections: 'Connections', rules: 'Rules', indexers: 'Indexers',
-    notifications: 'Notifications', ai: 'AI', general: 'General', advanced: 'Advanced',
-    backups: 'Backups',
+    connections: 'Connections', protection: 'Protection', scanning: 'Scanning',
+    notifications: 'Notifications', security: 'Security', data: 'Data & backups',
+    indexers: 'Indexers', ai: 'AI', server: 'Server & logs', file: 'Config file',
+  };
+  // Names from before Phase 3, so bookmarks and old links keep working.
+  const paneAliases = {
+    rules: 'protection', general: 'scanning', advanced: 'server', backups: 'data', yaml: 'file',
   };
 
+  function resolvePane(pane) {
+    pane = paneAliases[pane] || pane;
+    return paneNames[pane] ? pane : 'connections';
+  }
+
+  // ---- Basic / Advanced ----
+  const ADVANCED_KEY = 'inspectarr.settings.advanced';
+  const settingsRoot = document.getElementById('settings-root');
+
+  function advancedShown() {
+    return settingsRoot.classList.contains('show-advanced');
+  }
+
+  function setAdvanced(on, remember) {
+    settingsRoot.classList.toggle('show-advanced', on);
+    const btn = document.getElementById('advanced-toggle');
+    if (btn) {
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.textContent = on ? 'Hide advanced' : 'Show advanced';
+    }
+    if (remember) {
+      // Storage can be unavailable (private mode, blocked); the toggle still works.
+      try { localStorage.setItem(ADVANCED_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function toggleAdvanced() {
+    const on = !advancedShown();
+    setAdvanced(on, true);
+    // Hiding advanced while looking at an advanced pane: go somewhere visible.
+    const active = document.querySelector('.settings-pane.active');
+    if (!on && active && active.dataset.level === 'advanced') {
+      history.replaceState(null, '', '/config#connections');
+      showPane('connections');
+    }
+  }
+
+  (function restoreAdvanced() {
+    let on = false;
+    try { on = localStorage.getItem(ADVANCED_KEY) === '1'; } catch (e) { /* ignore */ }
+    setAdvanced(on, false);
+  })();
+
   function showPane(pane) {
-    if (!paneNames[pane]) pane = 'connections';
+    pane = resolvePane(pane);
+    const target = document.querySelector('.settings-pane[data-pane="' + pane + '"]');
+    // A link straight to an advanced pane shows it rather than a blank page.
+    if (target && target.dataset.level === 'advanced' && !advancedShown()) setAdvanced(true, false);
     document.querySelectorAll('.settings-pane').forEach(p =>
       p.classList.toggle('active', p.dataset.pane === pane));
     document.getElementById('active-pane-name').textContent = paneNames[pane];
-    // Reflect the active sub-item in the sidebar Settings group
     document.querySelectorAll('#settings-group .nav-group-items a').forEach(a =>
       a.classList.toggle('active', a.dataset.pane === pane));
-    // Ensure form mode is visible if a YAML view was open
-    if (document.getElementById('edit_mode').value !== 'form') setEditMode('form');
+    // The Config file pane has its own Save button; the form's bar would mislead.
+    document.getElementById('savebar').classList.toggle('d-none', pane === 'file');
+    return pane;
   }
 
-  // Initial pane from the URL hash (e.g. /config#rules), default connections
-  // NOTE: deferred hooks (loadBackups, loadOllamaModels) are added later in the
-  // script via the showPane wrapper. Store initial pane and re-fire after wrapper.
-  var _initialPane = (window.location.hash || '').replace('#', '') || 'connections';
-  showPane(_initialPane);
+  // Initial pane: a server-side YAML error re-opens the Config file pane;
+  // otherwise the URL hash (e.g. /config#protection), default Connections.
+  // Deferred hooks (loadBackups, loadOllamaModels) are re-fired for it at the
+  // end of this file, once the showPane wrapper below exists.
+  const _settingsData = JSON.parse(document.getElementById('settings-data').textContent || '{}');
+  var _initialPane = showPane(_settingsData.initial_pane
+                              || (window.location.hash || '').replace('#', '') || 'connections');
 
   syncAiEnabled();
   resumeValidationIfRunning();
@@ -149,7 +204,7 @@
     a.addEventListener('click', (e) => {
       // Already on /config — intercept and switch pane in place
       e.preventDefault();
-      const pane = a.dataset.pane;
+      const pane = resolvePane(a.dataset.pane);
       history.replaceState(null, '', '/config#' + pane);
       showPane(pane);
     });
@@ -169,8 +224,11 @@
   document.getElementById('config-form').addEventListener('input', markDirty);
   document.getElementById('config-form').addEventListener('change', markDirty);
   // Clear dirty flag on submit so the warning doesn't fire during navigation
-  document.getElementById('config-form').addEventListener('submit', () => {
-    window.removeEventListener('beforeunload', beforeUnloadHandler);
+  ['config-form', 'file-form'].forEach(id => {
+    const f = document.getElementById(id);
+    if (f) f.addEventListener('submit', () => {
+      window.removeEventListener('beforeunload', beforeUnloadHandler);
+    });
   });
   function beforeUnloadHandler(e) {
     if (savebar.classList.contains('dirty')) { e.preventDefault(); e.returnValue = ''; }
@@ -549,7 +607,7 @@
   const origShowPane = showPane;
   showPane = function(pane) {
     origShowPane(pane);
-    if (pane === 'backups') loadBackups();
+    if (resolvePane(pane) === 'data') loadBackups();
     if (pane === 'ai') {
       loadOllamaModels(); loadSystemPrompt(); loadBatchCalibration();
     }
@@ -1275,7 +1333,7 @@
   }
 
   // Re-fire deferred hooks for the initial pane (wrapper + functions defined above)
-  if (_initialPane === 'backups') loadBackups();
+  if (_initialPane === 'data') loadBackups();
   if (_initialPane === 'ai') {
     loadOllamaModels(); loadSystemPrompt(); loadBatchCalibration();
   }

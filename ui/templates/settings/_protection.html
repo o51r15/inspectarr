@@ -1,5 +1,24 @@
-      <!-- PANE: Rules -->
-      <div class="settings-pane" data-pane="rules">
+      <!-- PANE: Protection -->
+      <div class="settings-pane" data-pane="protection">
+        <div class="form-section">
+          <div class="form-section-title">When something is caught</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>On Arr Failure</label>
+              <select name="on_arr_failure">
+                <option value="delete" {{ 'selected' if cfg.get('on_arr_failure','delete') == 'delete' else '' }}>Delete from qBit anyway</option>
+                <option value="abort"  {{ 'selected' if cfg.get('on_arr_failure') == 'abort' else '' }}>Abort — skip deletion</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="dry_run">
+            <input type="checkbox" name="dry_run" id="dry_run"
+                   {{ 'checked' if cfg.get('dry_run') else '' }}>
+            <label for="dry_run">Dry Run — flag matches but take no action</label>
+          </div>
+        </div>
+
         <div class="conn-banner" id="qbit-conn-banner">
           <span class="status-dot stopped" id="qbit-conn-dot"></span>
           <span class="conn-text" id="qbit-conn-text">Checking qBittorrent connection…</span>

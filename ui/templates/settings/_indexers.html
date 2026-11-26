@@ -1,5 +1,5 @@
       <!-- PANE: Indexers (Prowlarr) -->
-      <div class="settings-pane" data-pane="indexers">
+      <div class="settings-pane" data-pane="indexers" data-level="advanced">
         <div class="form-section">
           <div class="form-section-title flex items-center justify-between">
             <span>Prowlarr Connection &amp; Scoring</span>
@@ -157,6 +157,18 @@
                      value="{{ cfg.get('prowlarr',{}).get('auto_manage',{}).get('cooldown_hours', 24) }}"
                      min="1" max="720">
               <div class="hint">Wait this long before auto-re-enabling</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Indexer Scoring Schedule</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Reorder interval (hours)</label>
+              <input type="number" name="prowlarr_reorder_interval" id="prowlarr_reorder_interval" min="1"
+                     value="{{ cfg.get('prowlarr',{}).get('reorder_interval_hours', 24) }}">
+              <span class="hint">How often to automatically rescore and reorder Prowlarr indexers</span>
             </div>
           </div>
         </div>

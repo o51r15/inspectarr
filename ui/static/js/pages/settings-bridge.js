@@ -12,7 +12,7 @@
 
 (function () {
   const CALLABLE = new Set([
-    "setEditMode", "toggleTorrentPanes", "testConnection", "addRule", "removeRule",
+    "setEditMode", "toggleAdvanced", "discardFileEdits", "toggleTorrentPanes", "testConnection", "addRule", "removeRule",
     "addExt", "removeExt", "addPattern", "removePattern", "describeBands",
     "testProwlarr", "resetScoringDefaults", "syncAiEnabled", "testOllama", "pullModel",
     "renderValidationDetail", "paintSelectedModel", "loadOllamaModels", "validateModel",
