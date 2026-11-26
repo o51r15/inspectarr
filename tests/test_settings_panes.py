@@ -8,8 +8,8 @@ from collections import Counter
 from tests.formparse import form_fields
 from ui.settings_schema import FIELDS, RENDERED
 
-BASIC = ["connections", "protection", "scanning", "notifications", "security", "data"]
-ADVANCED = ["indexers", "ai", "server", "file"]
+BASIC = ["connections", "protection", "scanning", "notifications", "ai", "security", "data"]
+ADVANCED = ["indexers", "server", "file"]
 
 
 def _html(client):
