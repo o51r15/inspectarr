@@ -562,3 +562,42 @@ dialog.dialog::backdrop { background: rgba(0, 0, 0, .55); }
   background: var(--surface-alt);
   border-color: var(--border);
 }
+
+/* ---- Settings: connection cards (Phase 3.6) ----------------------------- */
+.conn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+.conn-card { display: flex; flex-direction: column; gap: 12px; }
+.conn-card .form-group { margin-bottom: 0; }
+.conn-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.conn-card-title { font-weight: 600; font-size: 1rem; color: var(--text); }
+.conn-card-title .hint { font-weight: 400; margin-left: 6px; }
+.conn-status { white-space: nowrap; }
+.conn-creds { border: 1px solid var(--border); border-radius: var(--radius-sm, 6px); }
+.conn-creds > summary {
+  cursor: pointer; padding: 8px 12px; font-size: .875rem; color: var(--text-muted);
+  list-style-position: inside;
+}
+.conn-creds[open] > summary { border-bottom: 1px solid var(--border); }
+.conn-creds-body { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.conn-test { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.torrent-pane { display: flex; flex-direction: column; gap: 12px; }
+
+/* Radio "cards" for choosing one of a few options. The real radio stays in
+   the DOM (keyboard, screen readers, form submission); the label is styled. */
+.choice-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice-card {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 8px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm, 6px);
+  background: var(--surface); color: var(--text-muted); font-size: .875rem;
+}
+.choice-card:hover { color: var(--text); }
+.choice-card:has(input:checked) {
+  border-color: var(--accent); color: var(--text); background: var(--surface-alt);
+}
+.choice-card:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choice-card input { accent-color: var(--accent); margin: 0; }

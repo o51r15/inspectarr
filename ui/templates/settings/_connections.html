@@ -1,156 +1,140 @@
       <!-- PANE: Connections -->
       <div class="settings-pane active" data-pane="connections">
-        <div class="form-section">
-          <div class="form-section-title">Torrent Client</div>
-          <div class="form-row">
+        {#- One card per service (3.6). The status pill shows whether the SAVED
+            settings connect, checked once when the page opens; Test tries what
+            is typed in the card right now. Credentials sit in a collapsible
+            area that starts open when nothing is stored yet, so first-time
+            setup shows every field and a configured install stays tidy.
+            Field names and test-result ids are unchanged: saving and the Test
+            buttons work exactly as before. -#}
+        {% macro status_pill(service) -%}
+          <span class="badge badge-neutral conn-status" data-status-for="{{ service }}"
+                title="Whether the saved settings connect, checked when this page opened. Use Test to try what you have typed.">Checking…</span>
+        {%- endmacro %}
+        {% macro creds(label, stored) -%}
+          <details class="conn-creds"{% if not stored %} open{% endif %}>
+            <summary>{{ label }}{% if stored %} <span class="hint">· saved</span>{% endif %}</summary>
+            <div class="conn-creds-body">{{ caller() }}</div>
+          </details>
+        {%- endmacro %}
+        {% macro test_row(which) -%}
+          <div class="conn-test">
+            <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testConnection"
+                    data-args='{{ [which]|tojson }}'>Test</button>
+            <span id="test-{{ which }}-result" class="hint" role="status"></span>
+          </div>
+        {%- endmacro %}
+
+        <p class="hint mb-16">
+          Inspectarr needs your download client, and at least one of Sonarr, Radarr or Lidarr
+          so it can block a bad release and ask for another.
+        </p>
+
+        {# ---------------- Download client ---------------- #}
+        {% set client = cfg.get('torrent_client', 'qbittorrent') %}
+        <div class="card conn-card mb-16">
+          <div class="conn-card-head">
+            <div class="conn-card-title">Download client</div>
+            {{ status_pill("Torrent Client") }}
+          </div>
+
+          <div class="choice-cards" role="radiogroup" aria-label="Download client">
+            {% for value, label in [('qbittorrent', 'qBittorrent'), ('transmission', 'Transmission'), ('deluge', 'Deluge')] %}
+            <label class="choice-card">
+              <input type="radio" name="torrent_client" value="{{ value }}" id="torrent_client_{{ value }}"
+                     data-on-change="toggleTorrentPanes" {{ 'checked' if client == value else '' }}>
+              <span>{{ label }}</span>
+            </label>
+            {% endfor %}
+          </div>
+
+          {% set qb = cfg.get('qbittorrent', {}) %}
+          <div class="torrent-pane" id="pane-qbittorrent">
             <div class="form-group">
-              <label>Active Client</label>
-              <select name="torrent_client" id="torrent_client" data-on-change="toggleTorrentPanes">
-                <option value="qbittorrent" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'qbittorrent' else '' }}>qBittorrent</option>
-                <option value="transmission" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'transmission' else '' }}>Transmission</option>
-                <option value="deluge" {{ 'selected' if cfg.get('torrent_client','qbittorrent') == 'deluge' else '' }}>Deluge</option>
-              </select>
+              <label for="qbit_url">qBittorrent URL</label>
+              <input type="text" name="qbit_url" id="qbit_url" value="{{ qb.get('url','') }}" placeholder="http://192.168.1.100:8080">
             </div>
+            {% call creds("Username and password", qb.get('password')) %}
+            <div class="form-row">
+              <div class="form-group">
+                <label for="qbit_username">Username</label>
+                <input type="text" name="qbit_username" id="qbit_username" value="{{ qb.get('username','') }}" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="qbit_password">Password</label>
+                <input type="password" name="qbit_password" id="qbit_password" value="{{ qb.get('password','') }}" autocomplete="new-password">
+              </div>
+            </div>
+            {% endcall %}
+            {{ test_row("qbit") }}
+          </div>
+
+          {% set tr = cfg.get('transmission', {}) %}
+          <div class="torrent-pane" id="pane-transmission">
+            <div class="form-group">
+              <label for="transmission_url">Transmission URL</label>
+              <input type="text" name="transmission_url" id="transmission_url" value="{{ tr.get('url','') }}" placeholder="http://192.168.1.100:9091">
+            </div>
+            {% call creds("Username and password", tr.get('password')) %}
+            <div class="form-row">
+              <div class="form-group">
+                <label for="transmission_username">Username</label>
+                <input type="text" name="transmission_username" id="transmission_username" value="{{ tr.get('username','') }}" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="transmission_password">Password</label>
+                <input type="password" name="transmission_password" id="transmission_password" value="{{ tr.get('password','') }}" autocomplete="new-password">
+              </div>
+            </div>
+            {% endcall %}
+            {{ test_row("transmission") }}
+          </div>
+
+          {% set dl = cfg.get('deluge', {}) %}
+          <div class="torrent-pane" id="pane-deluge">
+            <div class="form-group">
+              <label for="deluge_url">Deluge URL</label>
+              <input type="text" name="deluge_url" id="deluge_url" value="{{ dl.get('url','') }}" placeholder="http://192.168.1.100:8112">
+            </div>
+            {% call creds("Password", dl.get('password')) %}
+            <div class="form-group">
+              <label for="deluge_password">Password</label>
+              <input type="password" name="deluge_password" id="deluge_password" value="{{ dl.get('password','') }}" autocomplete="new-password">
+            </div>
+            {% endcall %}
+            {{ test_row("deluge") }}
           </div>
         </div>
 
-        <div class="form-section torrent-pane" id="pane-qbittorrent">
-          <div class="form-section-title">qBittorrent</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>URL</label>
-              <input type="text" name="qbit_url" value="{{ cfg.get('qbittorrent',{}).get('url','') }}" placeholder="http://192.168.1.100:8080">
+        {# ---------------- Sonarr / Radarr / Lidarr ---------------- #}
+        <div class="conn-grid">
+        {% for app, title, what, port in [('sonarr', 'Sonarr', 'TV shows', 8989), ('radarr', 'Radarr', 'Movies', 7878), ('lidarr', 'Lidarr', 'Music', 8686)] %}
+          {% set a = cfg.get('arrs', {}).get(app, {}) %}
+          <div class="card conn-card">
+            <div class="conn-card-head">
+              <div class="conn-card-title">{{ title }} <span class="hint">{{ what }}</span></div>
+              {{ status_pill(title) }}
+            </div>
+            <div class="toggle-row">
+              <input type="hidden" name="_rendered" value="{{ app }}_enabled">
+              <input type="checkbox" name="{{ app }}_enabled" id="{{ app }}_enabled"
+                     {{ 'checked' if a.get('enabled') else '' }}>
+              <label for="{{ app }}_enabled">Use {{ title }}</label>
             </div>
             <div class="form-group">
-              <label>Username</label>
-              <input type="text" name="qbit_username" value="{{ cfg.get('qbittorrent',{}).get('username','') }}">
+              <label for="{{ app }}_url">URL</label>
+              <input type="text" name="{{ app }}_url" id="{{ app }}_url" value="{{ a.get('url','') }}"
+                     placeholder="http://192.168.1.100:{{ port }}">
             </div>
-          </div>
-          <div class="form-row">
+            {% call creds("API key", a.get('api_key')) %}
             <div class="form-group">
-              <label>Password</label>
-              <input type="password" name="qbit_password" value="{{ cfg.get('qbittorrent',{}).get('password','') }}">
+              <label for="{{ app }}_api_key">API key</label>
+              <input type="password" name="{{ app }}_api_key" id="{{ app }}_api_key" value="{{ a.get('api_key','') }}" autocomplete="off">
+              <div class="hint">In {{ title }}: Settings → General → Security → API Key.</div>
             </div>
-            <div class="form-group justify-end flex-row items-end gap-8">
-              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testConnection" data-args='["qbit"]'>Test Connection</button>
-              <span id="test-qbit-result" class="hint"></span>
-            </div>
+            {% endcall %}
+            {{ test_row(app) }}
           </div>
-        </div>
-
-        <div class="form-section torrent-pane" id="pane-transmission">
-          <div class="form-section-title">Transmission</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>URL</label>
-              <input type="text" name="transmission_url" value="{{ cfg.get('transmission',{}).get('url','') }}" placeholder="http://192.168.1.100:9091">
-            </div>
-            <div class="form-group">
-              <label>Username</label>
-              <input type="text" name="transmission_username" value="{{ cfg.get('transmission',{}).get('username','') }}">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Password</label>
-              <input type="password" name="transmission_password" value="{{ cfg.get('transmission',{}).get('password','') }}">
-            </div>
-            <div class="form-group justify-end flex-row items-end gap-8">
-              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testConnection" data-args='["transmission"]'>Test Connection</button>
-              <span id="test-transmission-result" class="hint"></span>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-section torrent-pane" id="pane-deluge">
-          <div class="form-section-title">Deluge</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>URL</label>
-              <input type="text" name="deluge_url" value="{{ cfg.get('deluge',{}).get('url','') }}" placeholder="http://192.168.1.100:8112">
-            </div>
-            <div class="form-group">
-              <label>Password</label>
-              <input type="password" name="deluge_password" value="{{ cfg.get('deluge',{}).get('password','') }}">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group justify-end flex-row items-end gap-8">
-              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testConnection" data-args='["deluge"]'>Test Connection</button>
-              <span id="test-deluge-result" class="hint"></span>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="form-section-title">Sonarr</div>
-          <div class="toggle-row">
-            <input type="hidden" name="_rendered" value="sonarr_enabled">
-            <input type="checkbox" name="sonarr_enabled" id="sonarr_enabled"
-                   {{ 'checked' if cfg.get('arrs',{}).get('sonarr',{}).get('enabled') else '' }}>
-            <label for="sonarr_enabled">Enabled</label>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>URL</label>
-              <input type="text" name="sonarr_url" value="{{ cfg.get('arrs',{}).get('sonarr',{}).get('url','') }}" placeholder="http://192.168.1.100:8989/sonarr">
-            </div>
-            <div class="form-group">
-              <label>API Key</label>
-              <input type="password" name="sonarr_api_key" value="{{ cfg.get('arrs',{}).get('sonarr',{}).get('api_key','') }}">
-            </div>
-          </div>
-          <div class="flex gap-8 items-center">
-            <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testConnection" data-args='["sonarr"]'>Test Connection</button>
-            <span id="test-sonarr-result" class="hint"></span>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="form-section-title">Radarr</div>
-          <div class="toggle-row">
-            <input type="hidden" name="_rendered" value="radarr_enabled">
-            <input type="checkbox" name="radarr_enabled" id="radarr_enabled"
-                   {{ 'checked' if cfg.get('arrs',{}).get('radarr',{}).get('enabled') else '' }}>
-            <label for="radarr_enabled">Enabled</label>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>URL</label>
-              <input type="text" name="radarr_url" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('url','') }}" placeholder="http://192.168.1.100:7878/radarr">
-            </div>
-            <div class="form-group">
-              <label>API Key</label>
-              <input type="password" name="radarr_api_key" value="{{ cfg.get('arrs',{}).get('radarr',{}).get('api_key','') }}">
-            </div>
-          </div>
-          <div class="flex gap-8 items-center">
-            <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testConnection" data-args='["radarr"]'>Test Connection</button>
-            <span id="test-radarr-result" class="hint"></span>
-          </div>
-        </div>
-
-        <div class="form-section">
-          <div class="form-section-title">Lidarr</div>
-          <div class="toggle-row">
-            <input type="hidden" name="_rendered" value="lidarr_enabled">
-            <input type="checkbox" name="lidarr_enabled" id="lidarr_enabled"
-                   {{ 'checked' if cfg.get('arrs',{}).get('lidarr',{}).get('enabled') else '' }}>
-            <label for="lidarr_enabled">Enabled</label>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>URL</label>
-              <input type="text" name="lidarr_url" value="{{ cfg.get('arrs',{}).get('lidarr',{}).get('url','') }}" placeholder="http://192.168.1.100:8686/lidarr">
-            </div>
-            <div class="form-group">
-              <label>API Key</label>
-              <input type="password" name="lidarr_api_key" value="{{ cfg.get('arrs',{}).get('lidarr',{}).get('api_key','') }}">
-            </div>
-          </div>
-          <div class="flex gap-8 items-center">
-            <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testConnection" data-args='["lidarr"]'>Test Connection</button>
-            <span id="test-lidarr-result" class="hint"></span>
-          </div>
+        {% endfor %}
         </div>
       </div>
