@@ -1,70 +1,67 @@
       <!-- PANE: AI -->
+      {% set ai = cfg.get('prowlarr', {}).get('ollama', {}) %}
       <div class="settings-pane" data-pane="ai">
 
+        {#- 1. The switch. Element ids below are the ones settings.js uses. -#}
         <div class="form-section">
-          <div class="form-section-title">AI Features</div>
+          <div class="form-section-title">AI</div>
           <div class="toggle-row mb-8">
             <input type="hidden" name="_rendered" value="ollama_enabled">
             <input type="checkbox" name="ollama_enabled" id="ollama_enabled"
                    data-on-change="syncAiEnabled"
-                   {{ 'checked' if cfg.get('prowlarr',{}).get('ollama',{}).get('enabled', (cfg.get('prowlarr',{}).get('ollama',{}).get('url') or '') != '') else '' }}>
-            <label for="ollama_enabled">Enable AI features</label>
+                   {{ 'checked' if ai.get('enabled', (ai.get('url') or '') != '') else '' }}>
+            <label for="ollama_enabled">Use a local AI model (Ollama) for indexer scoring and summaries</label>
           </div>
-          <p class="hint m-0">
-            AI is entirely optional and off by default. Inspectarr scores
-            indexers with a deterministic weighted formula on its own; Ollama
-            only adds an advisory overlay on top, plus narrated notification
-            digests and summaries.
-          </p>
-          <p class="hint m-0 mt-8">
-            While this is off, none of the settings below are used, no Ollama
-            request is ever made, and AI scoring is unavailable on the
-            Indexers page. Detection, severity grading, quarantine and
-            remediation never use AI and are unaffected either way.
-          </p>
+          <details class="hint">
+            <summary>What does AI do?</summary>
+            <p class="m-0 mt-8">
+              Optional, and off by default. Inspectarr scores indexers with its own
+              weighted formula; an Ollama model only adds an advisory opinion on top,
+              plus written notification digests and summaries.
+            </p>
+            <p class="m-0 mt-8">
+              While this is off, nothing below is used and no Ollama request is made.
+              Detection, severity, quarantine and removal never use AI.
+            </p>
+          </details>
         </div>
 
+        {#- 2. The server. Everything under it is about the SAVED server. -#}
         <div class="form-section">
-          <div class="form-section-title">Ollama Connection</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Ollama URL</label>
-              <input type="text" name="ollama_url" id="ollama_url"
+          <div class="form-section-title">Ollama server</div>
+          <div class="form-group">
+            <label for="ollama_url">Server URL</label>
+            <div class="flex gap-8 items-center">
+              <input type="text" name="ollama_url" id="ollama_url" class="flex-1"
+                     data-saved-url="{{ ai.get('url','') }}"
                      placeholder="http://192.168.1.125:11434"
-                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('url','') }}">
-              <span class="hint">Base URL of your Ollama server. Blank disables all AI features.</span>
+                     value="{{ ai.get('url','') }}">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testOllama">Test</button>
             </div>
-            <div class="form-group">
-              <label>Timeout (seconds)</label>
-              <input type="number" name="ollama_timeout" id="ollama_timeout" min="10" max="1800"
-                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('timeout',120) }}">
-              <span class="hint">Hard cutoff per scoring run. Allow extra on the first run after a model swap — the model has to load.</span>
-            </div>
+            <span id="ollama-test-status" class="hint" role="status"></span>
           </div>
-          <div class="form-row">
-            <div class="form-group flex-row items-center gap-8">
-              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testOllama">Test Connection</button>
-              <span id="ollama-test-status" class="hint"></span>
-            </div>
+          <div id="ollama-url-unsaved" class="callout d-none mb-8" role="status">
+            You changed the server. <strong>Save</strong> to switch to it. Until then, the
+            models and results below are still for the saved server.
           </div>
+          <p class="hint m-0" id="ollama-server-note">
+            Models and check results below are for this server.
+          </p>
         </div>
 
-
+        {#- 3. The model: pick, see its result right here, act. -#}
         <div class="form-section">
           <div class="form-section-title flex items-center gap-8">
-            AI Model (Ollama)
+            Model
             <span id="ollama-update-badge" class="badge badge-warning d-none pointer"
                   data-action="show-ollama-update"
-                  title="A newer version of this model is available">Update available</span>
+                  title="A newer build of this model is published">Update available</span>
           </div>
           <div id="ollama-update-info" class="hint d-none mb-8 callout">
-            ⬆ A newer build of this model is published upstream. Pulling it replaces
-            the installed copy — it can be several gigabytes, and scoring keeps using
-            the current build until it finishes.
-            <br>
-            <strong>The new build is not validated.</strong> A different build of the
-            same name can score differently, so re-run validation afterwards before
-            relying on it.
+            A newer build of this model is published. Pulling it replaces the installed
+            copy (it can be several gigabytes); scoring keeps using the current build
+            until it finishes. <strong>The new build is not checked</strong>: run Quick
+            check again afterwards.
             <div class="flex gap-8 items-center mt-8">
               <button type="button" class="btn btn-sm d-none" id="ollama-pull-btn"
                       data-action="call" data-fn="pullModel">Pull the new build</button>
@@ -76,62 +73,24 @@
               <span class="hint block mt-4" id="pull-status"></span>
             </div>
           </div>
-          <p class="hint mb-12">
-            Select which Ollama model to use for AI-powered indexer scoring and analysis.
-            Requires a valid Ollama URL configured above.
-          </p>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Model</label>
-              <div class="flex gap-8 items-center">
-                <select id="ollama-model-select" class="model-opt flex-1" data-on-change="renderValidationDetail paintSelectedModel" disabled>
-                  <option value="">Loading…</option>
-                </select>
-                <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="loadOllamaModels" title="Refresh model list">↻</button>
-              </div>
-            </div>
-            <div class="form-group justify-end flex-row items-end gap-8">
-              <button type="button" class="btn btn-ghost btn-sm" id="ollama-validate-btn" data-action="call" data-fn="validateModel" data-args='["quick"]' title="Can this model score correctly? Runs three tests, about 1-3 minutes. Does not measure the batch size.">Quick Check</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="ollama-calibrate-btn" data-action="call" data-fn="validateModel" data-args='["deep"]' title="Everything Quick Check does, plus measures the largest batch size this model handles reliably on this host. 10-40 minutes.">Calibrate</button>
-              <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn" data-action="call" data-fn="applyOllamaModel" disabled>Apply</button>
-              <span id="ollama-model-status" class="hint"></span>
-            </div>
-          </div>
-        </div>
 
-        <div class="form-section" data-level="advanced">
-          <div class="form-section-title flex items-center justify-between">
-            <span>AI Scoring Prompt</span>
-            <div class="flex gap-8 items-center">
-              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="resetSystemPrompt"
-                      title="Reset to the built-in default prompt">Reset to Default</button>
-              <button type="button" class="btn btn-primary btn-sm" data-action="call" data-fn="saveSystemPrompt">Save Prompt</button>
-              <span id="system-prompt-status" class="hint"></span>
-            </div>
-          </div>
-          <p class="hint mb-12">
-            The system prompt sent to Ollama when scoring indexers. Edit to customize scoring behavior.
-            Leave empty or click "Reset to Default" to use the built-in prompt.
-          </p>
           <div class="form-group">
-            <textarea class="mono text-xs pre-wrap" id="ollama-system-prompt" rows="12"
-                     
-                      placeholder="Loading…"></textarea>
+            <label for="ollama-model-select">Models on this server</label>
+            <div class="flex gap-8 items-center">
+              <select id="ollama-model-select" class="model-opt flex-1"
+                      data-on-change="renderValidationDetail paintSelectedModel" disabled>
+                <option value="">Loading…</option>
+              </select>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="call"
+                      data-fn="loadOllamaModels" title="Reload the list from the server">↻</button>
+            </div>
+            <span class="hint" id="ollama-in-use">
+              {%- if ai.get('model') %}In use: <code>{{ ai.get('model') }}</code>{% else %}No model in use yet.{% endif -%}
+            </span>
           </div>
-        </div>
 
-        <div class="form-section">
-          <div class="form-section-title">Model Validation</div>
-          <p class="hint mb-12">
-            Validation runs three scoring tests against a model: can it tell a
-            good indexer from a bad one, does it return the expected shape, and
-            can it handle a prompt covering every one of your indexers. A model
-            must pass before it can be applied.
-          </p>
-
-          <div id="validation-detail" class="hint panel-sm mb-12"
-              >
-            Select a model to see its validation status.
+          <div id="validation-detail" class="panel-sm mb-12" role="status">
+            Pick a model to see whether it has been checked on this server.
           </div>
 
           <div class="d-none mb-12" id="validation-progress">
@@ -139,21 +98,42 @@
               <span class="spinner" aria-hidden="true"></span>
               <span id="validation-stage">Starting…</span>
             </div>
-            <p class="hint mt-4">
-              This takes a few minutes. You can leave this page — the run
-              continues in the background.
-            </p>
+            <p class="hint mt-4">This runs in the background; you can leave the page.</p>
           </div>
 
+          <div class="flex gap-8 items-center flex-wrap">
+            <button type="button" class="btn btn-ghost btn-sm" id="ollama-validate-btn"
+                    data-action="call" data-fn="validateModel" data-args='["quick"]'
+                    title="Can this model score correctly? Three tests, about 1-3 minutes.">Quick check</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="ollama-calibrate-btn"
+                    data-action="call" data-fn="validateModel" data-args='["deep"]'
+                    title="Quick check plus the largest batch this model handles reliably on this server. 10-40 minutes.">Calibrate</button>
+            <button type="button" class="btn btn-primary btn-sm" id="ollama-apply-btn"
+                    data-action="call" data-fn="applyOllamaModel" disabled>Use this model</button>
+            <span id="ollama-model-status" class="hint" role="status"></span>
+          </div>
+          <p class="hint mt-8 m-0">
+            A model has to pass <strong>Quick check</strong> on this server before it is
+            used. <strong>Calibrate</strong> also measures how many indexers it can score
+            in one request.
+          </p>
+        </div>
+
+        {#- 4. Results for this server only (others are kept, not shown). -#}
+        <div class="form-section">
+          <div class="form-section-title">Results on this server</div>
+          <p class="hint mb-12" id="validation-empty">No model has been checked on this server yet.</p>
           <div class="overflow-x-auto">
             <table class="data-table d-none" id="validation-table">
-              <caption class="sr-only">Validated models and their test results</caption>
+              <caption class="sr-only">Check results for models on this Ollama server</caption>
               <thead>
                 <tr>
-                  <th>Model</th><th>Status</th><th>Discrimination</th>
-                  <th>Schema</th><th>Context</th><th>Calibrated</th>
-                  <th>Host</th><th>Avg response</th>
-                  <th>Validated</th><th><span class="sr-only">Actions</span></th>
+                  <th>Model</th><th>Result</th>
+                  <th title="Can it tell a good indexer from a bad one?">Ranks correctly</th>
+                  <th title="Does it answer in the expected format?">Format</th>
+                  <th title="Can it handle a prompt with all of your indexers?">Full list</th>
+                  <th title="Largest batch that scored cleanly twice">Batch</th>
+                  <th>Avg reply</th><th>Checked</th><th><span class="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody id="validation-tbody"></tbody>
@@ -161,44 +141,72 @@
           </div>
         </div>
 
+        {#- 5-6. Tuning, for people who need it. -#}
         <div class="form-section" data-level="advanced">
-          <div class="form-section-title">Scoring Behaviour</div>
+          <div class="form-section-title flex items-center justify-between">
+            <span>Scoring prompt</span>
+            <div class="flex gap-8 items-center">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="resetSystemPrompt"
+                      title="Go back to the built-in prompt">Reset to default</button>
+              <button type="button" class="btn btn-primary btn-sm" data-action="call" data-fn="saveSystemPrompt">Save prompt</button>
+              <span id="system-prompt-status" class="hint"></span>
+            </div>
+          </div>
+          <p class="hint mb-12">
+            The instructions sent to the model when it scores indexers. Leave empty, or reset,
+            to use the built-in prompt.
+          </p>
+          <div class="form-group">
+            <textarea class="mono text-xs pre-wrap" id="ollama-system-prompt" rows="12"
+                      aria-label="Scoring prompt" placeholder="Loading…"></textarea>
+          </div>
+        </div>
+
+        <div class="form-section" data-level="advanced">
+          <div class="form-section-title">Scoring behaviour</div>
           <div class="form-row">
             <div class="form-group">
-              <label>Cache TTL (hours)</label>
-              <input type="number" name="ollama_cache_ttl_hours" id="ollama_cache_ttl_hours" min="0" max="720"
-                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('cache_ttl_hours',24) }}">
-              <span class="hint">How long an AI result is reused for identical input. The cache key includes the model and system prompt, so changing either always rescores.</span>
+              <label for="ollama_timeout">Timeout (seconds)</label>
+              <input type="number" name="ollama_timeout" id="ollama_timeout" min="10" max="1800"
+                     value="{{ ai.get('timeout',120) }}">
+              <span class="hint">Cut-off for one scoring run. Allow extra right after switching models: the model has to load first.</span>
             </div>
             <div class="form-group">
-              <label>Model update check (hours)</label>
-              <input type="number" name="ollama_update_check_hours" id="ollama_update_check_hours" min="0" max="720"
-                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('update_check_hours',24) }}">
-              <span class="hint">How often to check whether your model has a newer version published. 0 disables the check.</span>
+              <label for="ollama_cache_ttl_hours">Reuse results for (hours)</label>
+              <input type="number" name="ollama_cache_ttl_hours" id="ollama_cache_ttl_hours" min="0" max="720"
+                     value="{{ ai.get('cache_ttl_hours',24) }}">
+              <span class="hint">An answer is reused for identical input. Changing the model or prompt always rescores.</span>
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
+              <label for="ollama_update_check_hours">Check for model updates every (hours)</label>
+              <input type="number" name="ollama_update_check_hours" id="ollama_update_check_hours" min="0" max="720"
+                     value="{{ ai.get('update_check_hours',24) }}">
+              <span class="hint">0 turns the check off.</span>
+            </div>
+            <div class="form-group">
               <label for="ollama_context_window">Context window (tokens)</label>
               <input type="number" name="ollama_context_window" id="ollama_context_window"
                      min="512" max="131072" step="512"
-                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('context_window',4096) }}">
-              <span class="hint">Sent to Ollama as <code>num_ctx</code>. Without it Ollama applies its own default (usually 4096) and silently truncates anything past it. Set it higher only if the model genuinely supports it.</span>
+                     value="{{ ai.get('context_window',4096) }}">
+              <span class="hint">Sent to Ollama as <code>num_ctx</code>. Without it Ollama uses its own default (usually 4096) and silently cuts off anything longer. Raise it only if the model supports it.</span>
             </div>
-            <div class="form-group">
-              <label for="ollama_max_indexers_per_call">
-                Indexers per scoring call
-                <output id="batch-value" for="ollama_max_indexers_per_call">25</output>
-              </label>
-              <input type="range" name="ollama_max_indexers_per_call"
-                     id="ollama_max_indexers_per_call" min="1" max="50" step="1"
-                     value="{{ cfg.get('prowlarr',{}).get('ollama',{}).get('max_indexers_per_call',25) }}"
-                     data-on-input="onBatchInput" data-on-change="onBatchCommit">
-              <span class="hint" id="batch-hint">
-                How many indexers go in one request. Fewer per call is slower overall but far more reliable: a model that loses track of a long list drops indexers silently, and the scores it does not return quietly fall back to the deterministic ones.
-              </span>
-              <span class="hint" id="batch-calibration">Checking calibration…</span>
-            </div>
+          </div>
+          <div class="form-group">
+            <label for="ollama_max_indexers_per_call">
+              Indexers per scoring call
+              <output id="batch-value" for="ollama_max_indexers_per_call">25</output>
+            </label>
+            <input type="range" name="ollama_max_indexers_per_call"
+                   id="ollama_max_indexers_per_call" min="1" max="50" step="1"
+                   value="{{ ai.get('max_indexers_per_call',25) }}"
+                   data-on-input="onBatchInput" data-on-change="onBatchCommit">
+            <span class="hint" id="batch-hint">
+              Fewer per call is slower but far more reliable: a model that loses track of a long
+              list drops indexers silently, and those fall back to the formula's score.
+            </span>
+            <span class="hint" id="batch-calibration">Checking calibration…</span>
           </div>
         </div>
       </div>
