@@ -7,6 +7,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed - Settings Keeps What You Wrote
+
+Saving Settings now changes only the settings you changed. Everything else
+in `config.yaml` is left exactly as it was.
+
+- **Your comments, key order and layout survive a save.** Previously every
+  save rewrote the whole file and threw away comments. Saving with nothing
+  changed now leaves the file byte-for-byte identical.
+- **Keys Settings does not know about are kept.** Before, a save silently
+  dropped anything without a form field.
+- **Settings you never set stay unset.** Saving no longer fills a trimmed
+  `config.yaml` with every default.
+- **The raw YAML editor shows your real file**, comments included, and
+  keeps them when you save from it.
+- A number that isn't a number (for example `3o0` for an interval) is now
+  refused with a message. Before, it was quietly replaced with a default.
+- Leaving the web password blank keeps the current password. Before, it
+  set an empty one.
+- The first save after upgrading may tidy a few spellings without changing
+  their meaning, for example `yes` becomes `true` and `~` becomes `null`.
+
+### Security - Secrets Stay on the Server
+
+Settings no longer sends any stored password, API key, webhook secret or
+web-password hash to your browser, and no longer shows the tokens inside
+notification URLs. Each one is shown as `••••••••`, and notification URLs
+read like `discord://•••••••• (saved 1)`. Leave a masked field alone to
+keep it, clear it to remove it, or type a new value to replace it. The
+**Test** buttons and the raw YAML editor work the same way.
+
+### Fixed
+
+- If you had never changed **Notify On**, Settings showed every box
+  unticked, even though alerts were being sent for actions and errors, so
+  the first save switched those alerts off. The boxes now show what is
+  actually in effect.
+
 ### Changed - A Simpler, Calmer Interface
 
 The sidebar is down to five places: **Overview**, **Activity**, **Indexers**,
