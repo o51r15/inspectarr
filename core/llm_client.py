@@ -20,6 +20,7 @@ import time
 
 import requests
 
+from .ai_turn import ai_turn, busy_with
 from .ollama_models import effective_context, request_settings
 
 log = logging.getLogger("inspectarr")
@@ -206,6 +207,16 @@ ANSWER_TOKENS_BASE = 256
 # Models that cannot turn thinking off (gpt-oss) think inside the same budget.
 THINKING_TOKENS = 2048
 
+# How long live scoring waits for the AI before falling back for this round.
+# Long enough for a notification to finish; far shorter than a calibration.
+SCORING_WAIT_S = 30
+NARRATION_WAIT_S = 5
+
+
+def _busy_message() -> str:
+    b = busy_with()
+    return f" (busy with {b['kind']} of {b['label']})" if b and b.get("label") else ""
+
 
 def answer_budget(indexer_count: int, thinks: bool = False) -> int:
     """num_predict for a scoring call of this many indexers."""
@@ -357,6 +368,14 @@ def narrate(ollama_url: str, model: str, prompt: str, timeout: int,
     """
     if not ollama_url or not model or not prompt:
         return None
+    with ai_turn("narration", what, wait=NARRATION_WAIT_S) as got:
+        if not got:
+            log.info("%s: AI is busy%s; sending without narration", what, _busy_message())
+            return None
+        return _narrate(ollama_url, model, prompt, timeout, context_window, what)
+
+
+def _narrate(ollama_url, model, prompt, timeout, context_window, what):
     try:
         resp = requests.post(
             f"{ollama_url.rstrip('/')}/api/generate",
@@ -425,6 +444,9 @@ def ollama_score_indexers(
     custom_prompt: str = "",
     context_window: int = DEFAULT_CONTEXT_WINDOW,
     max_indexers_per_call: int = MAX_INDEXERS_PER_CALL,
+    think=None,
+    stats: list | None = None,
+    wait: float | None = SCORING_WAIT_S,
 ) -> dict[int, dict]:
     """
     Score every indexer, splitting into several calls if they will not fit.
@@ -444,7 +466,18 @@ def ollama_score_indexers(
     """
     if not ollama_url or not model or not indexer_data:
         return {}
+    with ai_turn("scoring", model, wait=wait) as got:
+        if not got:
+            log.warning("AI is busy%s; this round keeps Inspectarr's own scores",
+                        _busy_message())
+            return {}
+        return _score_all(indexer_data, ollama_url, model, timeout, custom_prompt,
+                          context_window, max_indexers_per_call, think, stats)
 
+
+def _score_all(indexer_data, ollama_url, model, timeout, custom_prompt,
+               context_window, max_indexers_per_call, think, stats):
+    """ollama_score_indexers, once this thread has the AI."""
     system_prompt = (custom_prompt.strip()
                      if custom_prompt and custom_prompt.strip()
                      else SYSTEM_PROMPT)
@@ -458,7 +491,7 @@ def ollama_score_indexers(
 
     if size >= len(indexer_data):
         return _score_one_batch(indexer_data, ollama_url, model, timeout,
-                                system_prompt, context_window)
+                                system_prompt, context_window, think, stats)
 
     batches = [indexer_data[i:i + size]
                for i in range(0, len(indexer_data), size)]
@@ -471,7 +504,7 @@ def ollama_score_indexers(
     failed = 0
     for n, batch in enumerate(batches, 1):
         part = _score_one_batch(batch, ollama_url, model, timeout,
-                                system_prompt, context_window)
+                                system_prompt, context_window, think, stats)
         if not part:
             failed += 1
             log.warning("Batch %d/%d returned nothing", n, len(batches))
@@ -494,8 +527,15 @@ def _score_one_batch(
     timeout: int,
     system_prompt: str,
     context_window: int,
+    think=None,
+    stats: list | None = None,
 ) -> dict[int, dict]:
-    """One Ollama call. Same contract as the public function."""
+    """One Ollama call. Same contract as the public function.
+
+    stats, when given, gets one entry per call with what Ollama measured:
+    tokens read and written, seconds, and why it stopped. Calibration sizes
+    batches from these instead of estimating.
+    """
     prompt = (
         system_prompt
         + "\n" + _key_legend()
@@ -521,9 +561,11 @@ def _score_one_batch(
             "model may drop the instructions. Raise prowlarr.ollama."
             "context_window if this model supports more.", est, context_window)
 
-    settings = request_settings(ollama_url, model, context_window)
+    settings = request_settings(ollama_url, model, context_window, think=think)
     settings["options"]["num_predict"] = answer_budget(
-        len(indexer_data), thinks=isinstance(settings.get("think"), str))
+        # Any thinking at all shares the answer budget: a level ("low") or
+        # plain True (gemma4 with thinking on).
+        len(indexer_data), thinks=settings.get("think") not in (None, False))
     payload = {
         "model": model,
         "prompt": prompt,
@@ -570,6 +612,15 @@ def _score_one_batch(
         return {}
 
     elapsed = time.monotonic() - call_started
+    if stats is not None:
+        stats.append({
+            "n": len(indexer_data),
+            "prompt_tokens": data.get("prompt_eval_count"),
+            "answer_tokens": data.get("eval_count"),
+            "seconds": round(elapsed, 2),
+            "done_reason": data.get("done_reason"),
+            "num_ctx": settings["options"]["num_ctx"],
+        })
     if timeout and elapsed > timeout * NEAR_TIMEOUT_WARN_FRACTION:
         # This call succeeded. It is the next one that will not.
         log.warning(
