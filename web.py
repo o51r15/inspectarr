@@ -43,7 +43,11 @@ from ui.routes.activity import activity_bp
 # this hash from base.html, so editing that script without updating the hash
 # fails the build instead of silently breaking theming.
 THEME_SCRIPT_HASH = "sha256-PPoTuvlWA0XNVpQ6rJx1Ht/QDS3rc3k6k+EMCxYxZtY="
-CSP_ENFORCE = False
+# Enforced since every template passed tests/test_templates_lint.py and an
+# enforced sweep of every page logged zero violations. Escape hatch if a
+# path was missed: set INSPECTARR_CSP=report-only on the container and the
+# policy only reports (browser console) instead of blocking.
+CSP_ENFORCE = os.environ.get("INSPECTARR_CSP", "enforce").strip().lower() != "report-only"
 CSP = ("default-src 'self'; "
        f"script-src 'self' '{THEME_SCRIPT_HASH}'; "
        "style-src 'self'; img-src 'self' data:; font-src 'self'; "

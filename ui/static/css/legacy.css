@@ -58,3 +58,20 @@ option.model-opt { background: var(--card); }
 .ext-tag button { background: none; border: none; color: var(--accent); font-size: 14px; line-height: 1; padding: 0; }
 
 .theme-toggle { display: none; }
+
+/* Settings panels and the "apply model anyway" dialog (were inline styles) */
+.panel { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
+.panel-sm { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2) 10px; }
+.callout { padding: var(--space-2); background: var(--inset); border-radius: var(--radius-sm); }
+.reason-ul { margin: 6px 0 0 18px; }
+.update-dot-inline { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--warn-fg); margin-left: 6px; }
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center; padding: var(--space-4);
+  background: rgba(0, 0, 0, .55);
+}
+.modal-panel {
+  max-width: 460px; padding: var(--space-5);
+  background: var(--card); border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
