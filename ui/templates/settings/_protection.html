@@ -141,7 +141,11 @@
         </div>
 
         {# ---- 3. Holding for review ------------------------------------------- #}
-        <div class="form-section">
+        {#- Shown only when something can be held (settings.js describeBands):
+            always in Hold for my review; in Remove automatically only when the
+            Advanced strictness settings send milder catches to review. Hidden,
+            not removed, so its values still save unchanged. -#}
+        <div class="form-section" id="held-review-section">
           <div class="form-section-title">Releases held for review</div>
           <p class="hint mb-12">Held releases wait on the <a href="/activity/review">Activity</a> page until you decide.</p>
           <div class="form-row">
