@@ -109,6 +109,24 @@
           </details>
         </div>
 
+        {#- C-5: how far the AI may move Inspectarr's own score. -#}
+        <div class="form-section" data-level="advanced">
+          <div class="form-section-title">How much the AI can change a score</div>
+          <div class="form-group">
+            <label for="ollama_max_adjustment">The AI may move an indexer's score by up to</label>
+            {%- set ma = (ai.get('max_adjustment', 30) or 30)|round|int %}
+            <select name="ollama_max_adjustment" id="ollama_max_adjustment" class="mw-260">
+              {%- for v in ([10, 15, 20, 30] + ([ma] if ma not in [10, 15, 20, 30] else []))|sort %}
+              <option value="{{ v }}" {{ 'selected' if v == ma else '' }}>{{ v }} points either way{{ ' (default)' if v == 30 else '' }}</option>
+              {%- endfor %}
+            </select>
+            <span class="hint">Inspectarr scores each indexer from its own rules first; the AI can only
+              adjust that. A smaller limit keeps the AI closer to the rules. The AI never switches an
+              indexer off on its own: that needs Inspectarr's own score to be low too. The Indexers page
+              shows what the AI changed and why.</span>
+          </div>
+        </div>
+
         {#- Testing models: overnight runs and new models. -#}
         <div class="form-section" data-level="advanced">
           <div class="form-section-title">Testing models</div>

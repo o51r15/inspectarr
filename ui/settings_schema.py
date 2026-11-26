@@ -185,6 +185,9 @@ FIELDS: list[Field] = [
       label="Overnight hour", lo=0, hi=23, clamp=True),
     F("ollama_context_window", ("prowlarr", "ollama", "context_window"), "int",
       lo=512, hi=262144, clamp=True),
+    # C-5: never 0 from the form -- 0 would switch the limit off entirely.
+    F("ollama_max_adjustment", ("prowlarr", "ollama", "max_adjustment"), "int",
+      lo=1, hi=100, clamp=True),
     # --- Interface, security, data -----------------------------------------
     F("web_port", ("web", "port"), "int", label="Web port", lo=1, hi=65535),
     F("scheduler_autostart", ("web", "scheduler_autostart"), "bool"),

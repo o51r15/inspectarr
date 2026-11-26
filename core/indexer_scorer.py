@@ -98,7 +98,7 @@ log = logging.getLogger("inspectarr")
 # Score calculation (pure function — easy to unit-test)
 # -------------------------------------------------------------------------
 
-def compute_health_score(
+def health_parts(
     avg_response_ms: float,
     weighted_failure_rate: float,  # 0.0 – 1.0 (weighted across failure types)
     malicious_rate: float,         # malicious_hits / total_grabs (0.0 – 1.0)
@@ -106,7 +106,14 @@ def compute_health_score(
     in_backoff: bool,
     cfg: ProwlarrConfig,
     trend: float | None = None,
-) -> float:
+) -> dict:
+    """The health score's named parts, for people as much as for the maths.
+
+    Four parts out of 100 -- speed, searches, downloads, safety -- each with
+    the share of the score it carries, then two adjustments: Prowlarr pausing
+    the indexer, and the recent trend. compute_health_score() adds them up;
+    the Indexers page shows them, so a score can be read rather than trusted.
+    """
     s = cfg.scoring
     # Logarithmic response time curve — gentle on fast, harsh on slow
     if avg_response_ms <= 0:
@@ -119,17 +126,43 @@ def compute_health_score(
     m_score = max(0.0, 100.0 - malicious_rate * 100.0 * s.malicious_penalty_per_hit)
     # Grab success as distinct sub-score
     gr_score = grab_success_rate * 100.0
-    raw = (
-        rt_score * s.response_time_weight
-        + fr_score * s.failure_rate_weight
-        + m_score  * s.malicious_weight
-        + gr_score * s.grab_success_weight
-    )
-    if in_backoff:
-        raw -= s.backoff_penalty
-    if trend is not None:
-        raw += trend
+    return {
+        "speed":       {"score": rt_score, "weight": s.response_time_weight},
+        "searches":    {"score": fr_score, "weight": s.failure_rate_weight},
+        "downloads":   {"score": gr_score, "weight": s.grab_success_weight},
+        "safety":      {"score": m_score,  "weight": s.malicious_weight},
+        "paused":      -s.backoff_penalty if in_backoff else 0.0,
+        "trend":       trend or 0.0,
+    }
+
+
+def compute_health_score(
+    avg_response_ms: float,
+    weighted_failure_rate: float,
+    malicious_rate: float,
+    grab_success_rate: float,
+    in_backoff: bool,
+    cfg: ProwlarrConfig,
+    trend: float | None = None,
+) -> float:
+    p = health_parts(avg_response_ms, weighted_failure_rate, malicious_rate,
+                     grab_success_rate, in_backoff, cfg, trend)
+    raw = sum(p[k]["score"] * p[k]["weight"] for k in ("speed", "searches", "safety", "downloads"))
+    raw += p["paused"] + p["trend"]
     return round(max(0.0, min(100.0, raw)), 1)
+
+
+def parts_for_display(parts: dict) -> dict:
+    """Rounded, for the page: whole points, and each part's share of the four
+    weights as a percentage (shares, so they read as adding up to 100 even if
+    the configured weights don't sum to exactly 1.0)."""
+    keys = ("speed", "searches", "downloads", "safety")
+    total = sum(parts[k]["weight"] for k in keys) or 1.0
+    out = {k: {"score": round(parts[k]["score"]), "weight_pct": round(parts[k]["weight"] / total * 100)}
+           for k in keys}
+    out["paused"] = round(parts["paused"], 1)
+    out["trend"] = round(parts["trend"], 1)
+    return out
 
 
 # -------------------------------------------------------------------------
@@ -338,7 +371,21 @@ class IndexerScorer:
             iid = s["id"]
             ams = self.state.get_auto_manage_state(iid)
 
-            if s["health_score"] < am.disable_threshold:
+            # C-5: the AI advises, it does not disable on its own. Measured on
+            # the live box, every model scored below Inspectarr's rules on
+            # average (gemma4 by 12.5 points), so an AI score alone would push
+            # borderline indexers under the line. Disabling needs the rules'
+            # own score below it too; ordering still uses the AI's score.
+            rule = s.get("rule_score")
+            ai_only_low = (s.get("ai_scored") and rule is not None
+                           and s["health_score"] < am.disable_threshold <= rule)
+            if ai_only_low:
+                log.info(
+                    f"Indexer '{s['name']}': the AI scored it {s['health_score']}, below "
+                    f"{am.disable_threshold}, but Inspectarr's own score is {rule}; "
+                    f"not counted toward disabling it")
+
+            if s["health_score"] < am.disable_threshold and not ai_only_low:
                 if ams.get("disabled_by_auto"):
                     # Already off by our own hand. Counting further low runs
                     # measures nothing -- it cannot be disabled twice, and the
@@ -589,6 +636,8 @@ class IndexerScorer:
                 s["health_score"] = value
                 s["ai_scored"]    = True
                 s["ai_reasoning"] = ai.get("reasoning", "")
+                if value != raw:               # the limit cut it short: say by how much
+                    s["ai_wanted"] = raw
 
         if clamped:
             # Worth a line each: a clamp means the model wanted to move an
@@ -677,6 +726,9 @@ class IndexerScorer:
             )
             if has_enough else None
         )
+        parts = (parts_for_display(health_parts(
+            avg_ms, weighted_failure_rate, malicious_rate, grab_success_rate,
+            in_backoff, self.cfg, trend)) if has_enough else None)
 
         return {
             "id":              iid,
@@ -689,6 +741,11 @@ class IndexerScorer:
             "malicious_hits":  malicious_hits,
             "malicious_rate":  round(malicious_rate * 100, 1),
             "health_score":    health,
+            # Inspectarr's own score from its rules, before any AI change;
+            # health_score becomes the AI's when it scores, and the page shows
+            # the difference so an AI change is never hidden.
+            "rule_score":      health,
+            "parts":           parts,
             "trend":           trend,
             "in_backoff":      in_backoff,
             "ignored":         bool(db_stats.get("ignored", False)),

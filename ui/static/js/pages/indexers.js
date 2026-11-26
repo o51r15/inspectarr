@@ -45,6 +45,55 @@
     return el("span", "font-semibold text-" + tone, v.toFixed(1) + "%");
   }
 
+  /* What the health score is made of, in plain words (C-3), and what the AI
+     changed (C-5). Shown under the row when its score is clicked. */
+  const PARTS = [
+    ["speed", "Speed", "how fast it answers searches"],
+    ["searches", "Searches", "searches that work"],
+    ["downloads", "Downloads", "downloads that work"],
+    ["safety", "Safety", "no bad releases caught from it"],
+  ];
+  const signed = (n) => (n > 0 ? "+" : n < 0 ? "−" : "") + Math.abs(Math.round(n * 10) / 10);
+  const open = new Set();                       // indexer ids whose breakdown is showing
+
+  function breakdown(idx) {
+    const box = el("div", "score-breakdown");
+    const p = idx.parts;
+    if (!p) {
+      box.append(el("p", "m-0 text-muted",
+        "Not scored yet: Inspectarr waits until an indexer has handled enough searches to judge it fairly."));
+      return box;
+    }
+    const grid = el("div", "score-parts");
+    PARTS.forEach(([key, name, what]) => {
+      const part = p[key];
+      const cell = el("div", "score-part");
+      const bar = el("div", "score-bar");
+      const fill = el("span", "score-bar-fill tone-" + (part.score >= 80 ? "ok" : part.score >= 50 ? "warn" : "danger"));
+      fill.style.width = Math.max(0, Math.min(100, part.score)) + "%";
+      bar.append(fill);
+      cell.append(el("div", "score-part-head"), bar, el("div", "hint", what + " · counts for " + part.weight_pct + "%"));
+      cell.firstChild.append(el("strong", null, name), el("span", "font-semibold", part.score + "/100"));
+      grid.append(cell);
+    });
+    box.append(grid);
+
+    const notes = el("ul", "score-notes");
+    if (p.paused) notes.append(el("li", null, "Prowlarr has paused it after failures: " + signed(p.paused) + " points"));
+    if (p.trend) notes.append(el("li", null, (p.trend > 0 ? "Getting better lately: " : "Getting worse lately: ") + signed(p.trend) + " points"));
+    if (idx.ai_scored && idx.rule_score != null && idx.health_score != null) {
+      const diff = idx.health_score - idx.rule_score;
+      const li = el("li", null, Math.abs(diff) < 0.05
+        ? "The AI agreed with Inspectarr's own score (" + idx.rule_score + ")."
+        : "The AI changed it by " + signed(diff) + " points (Inspectarr's own score: " + idx.rule_score + ").");
+      if (idx.ai_wanted != null) li.append(" It wanted " + idx.ai_wanted + "; the limit in Settings → AI held it back.");
+      if (idx.ai_reasoning) li.append(el("div", "hint", "AI: " + idx.ai_reasoning));
+      notes.append(li);
+    }
+    if (notes.childElementCount) box.append(notes);
+    return box;
+  }
+
   function renderTable(indexers) {
     const tbody = $("indexer-tbody");
     tbody.replaceChildren();
@@ -68,7 +117,25 @@
       const tdSucc = el("td", "num hide-sm text-muted", idx.total_records > 0 ? idx.success_rate + "%" : "—");
       const tdBad = el("td", "num");
       tdBad.append(idx.malicious_hits > 0 ? el("span", "text-danger font-semibold", String(idx.malicious_hits)) : el("span", "text-dim", "0"));
-      const tdScore = el("td", "num"); tdScore.append(scoreCell(idx.health_score));
+      const tdScore = el("td", "num");
+      const why = el("button", "btn-link score-toggle");
+      why.type = "button";
+      why.title = "What this score is made of";
+      why.setAttribute("aria-expanded", open.has(idx.id) ? "true" : "false");
+      why.append(scoreCell(idx.health_score));
+      if (idx.ai_scored) why.append(el("span", "badge badge-neutral ml-4", "AI"));
+      tdScore.append(why);
+      const detail = el("tr", "score-detail-row");
+      const detailCell = el("td"); detailCell.colSpan = 9;
+      detailCell.append(breakdown(idx));
+      detail.append(detailCell);
+      detail.hidden = !open.has(idx.id);
+      why.addEventListener("click", () => {
+        const show = detail.hidden;
+        detail.hidden = !show;
+        why.setAttribute("aria-expanded", show ? "true" : "false");
+        if (show) open.add(idx.id); else open.delete(idx.id);
+      });
 
       const tdStatus = el("td");
       if (idx.in_backoff) tdStatus.append(el("span", "badge badge-danger", "Backing off"));
@@ -98,7 +165,7 @@
       tdAct.append(reset, toggle);
 
       tr.append(tdPrio, tdName, tdResp, tdSucc, tdBad, tdScore, tdStatus, tdPin, tdAct);
-      tbody.append(tr);
+      tbody.append(tr, detail);
     });
     $("apply-btn").disabled = !Object.keys(pending).length;
   }
