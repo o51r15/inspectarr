@@ -741,6 +741,108 @@ class StateManager:
             log.warning(f"Failed to read calibration history for {model}: {exc}")
             return []
 
+    # --- calibration runs ---------------------------------------------------
+    def create_calibration_run(self, ollama_url: str, models: list[str],
+                               start_after: str | None = None, kind: str = "all") -> int | None:
+        url = normalize_ollama_url(ollama_url)
+        if not url or not models:
+            return None
+        now = _now_iso()
+        try:
+            with self._lock, self._conn() as conn:
+                cur = conn.execute(
+                    "INSERT INTO calibration_runs (ollama_url, created_at, start_after, status, kind) "
+                    "VALUES (?, ?, ?, 'waiting', ?)", (url, now, start_after or now, kind))
+                run_id = cur.lastrowid
+                conn.executemany(
+                    "INSERT INTO calibration_run_items (run_id, position, model, status) "
+                    "VALUES (?, ?, ?, 'queued')",
+                    [(run_id, i, m) for i, m in enumerate(models)])
+                conn.commit()
+            return run_id
+        except Exception as exc:
+            log.warning(f"Failed to create calibration run: {exc}")
+            return None
+
+    def get_calibration_run(self, run_id: int) -> dict | None:
+        try:
+            with self._lock, self._conn() as conn:
+                run = conn.execute("SELECT * FROM calibration_runs WHERE id = ?", (run_id,)).fetchone()
+                if not run:
+                    return None
+                items = conn.execute(
+                    "SELECT * FROM calibration_run_items WHERE run_id = ? ORDER BY position",
+                    (run_id,)).fetchall()
+            out = dict(run)
+            out["items"] = [dict(i) for i in items]
+            return out
+        except Exception as exc:
+            log.warning(f"Failed to read calibration run {run_id}: {exc}")
+            return None
+
+    def list_calibration_runs(self, statuses=("waiting", "running", "paused")) -> list[dict]:
+        try:
+            marks = ",".join("?" * len(statuses))
+            with self._lock, self._conn() as conn:
+                ids = [r[0] for r in conn.execute(
+                    f"SELECT id FROM calibration_runs WHERE status IN ({marks}) "
+                    "ORDER BY status = 'waiting', start_after, id", tuple(statuses)).fetchall()]
+            return [r for r in (self.get_calibration_run(i) for i in ids) if r]
+        except Exception as exc:
+            log.warning(f"Failed to list calibration runs: {exc}")
+            return []
+
+    def last_calibration_run(self) -> dict | None:
+        try:
+            with self._lock, self._conn() as conn:
+                row = conn.execute("SELECT id FROM calibration_runs ORDER BY id DESC LIMIT 1").fetchone()
+            return self.get_calibration_run(row[0]) if row else None
+        except Exception:
+            return None
+
+    def set_calibration_run(self, run_id: int, status: str, note: str | None = None) -> None:
+        finished = _now_iso() if status in ("done", "cancelled") else None
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "UPDATE calibration_runs SET status = ?, note = COALESCE(?, note), "
+                    "finished_at = COALESCE(?, finished_at) WHERE id = ?",
+                    (status, note, finished, run_id))
+                if status == "cancelled":
+                    conn.execute("UPDATE calibration_run_items SET status = 'cancelled' "
+                                 "WHERE run_id = ? AND status IN ('queued', 'running')", (run_id,))
+                conn.commit()
+        except Exception as exc:
+            log.warning(f"Failed to update calibration run {run_id}: {exc}")
+
+    def set_calibration_item(self, run_id: int, position: int, status: str,
+                             score: float | None = None, note: str | None = None) -> None:
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "UPDATE calibration_run_items SET status = ?, score = COALESCE(?, score), "
+                    "note = COALESCE(?, note) WHERE run_id = ? AND position = ?",
+                    (status, score, note, run_id, position))
+                conn.commit()
+        except Exception as exc:
+            log.warning(f"Failed to update calibration item: {exc}")
+
+    def recover_calibration_runs(self) -> int:
+        """After a restart: a run that was mid-way goes back to waiting, and
+        the model it was on starts again. Returns how many were recovered."""
+        try:
+            with self._lock, self._conn() as conn:
+                n = conn.execute("UPDATE calibration_runs SET status = 'waiting', "
+                                 "note = 'Restarted after Inspectarr restarted' "
+                                 "WHERE status = 'running'").rowcount
+                conn.execute("UPDATE calibration_run_items SET status = 'queued' "
+                             "WHERE status = 'running'")
+                conn.commit()
+            return n
+        except Exception as exc:
+            log.warning(f"Failed to recover calibration runs: {exc}")
+            return 0
+
     def delete_validation(self, model: str, ollama_url: str) -> bool:
         """
         Remove a stored validation record.
@@ -1061,6 +1163,32 @@ class StateManager:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_calhist_model
                 ON calibration_history (ollama_url, model, run_at DESC)
+            """)
+            # Calibration runs (Test all, overnight, one model): a list of
+            # models to calibrate one after another. Kept in the database so
+            # a run carries on after a restart (core/calibration_runs.py).
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS calibration_runs (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ollama_url   TEXT NOT NULL,
+                    created_at   TEXT NOT NULL,
+                    start_after  TEXT NOT NULL,
+                    status       TEXT NOT NULL,      -- waiting|running|paused|done|cancelled
+                    kind         TEXT NOT NULL,      -- one|all|new
+                    note         TEXT,
+                    finished_at  TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS calibration_run_items (
+                    run_id   INTEGER NOT NULL,
+                    position INTEGER NOT NULL,
+                    model    TEXT NOT NULL,
+                    status   TEXT NOT NULL,          -- queued|running|done|failed|cancelled
+                    score    REAL,
+                    note     TEXT,
+                    PRIMARY KEY (run_id, position)
+                )
             """)
             # replacements -- did the thing we rejected get replaced, and
             # was the replacement any good? (ROADMAP item 27)

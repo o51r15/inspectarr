@@ -416,11 +416,11 @@ def calibrate(url: str, model: str, indexer_count: int = 20, progress=None) -> d
         out["tests"].append({"name": "Best settings", "passed": True, "detail": out["explanation"]})
         return out
     except Exception as exc:
+        if getattr(exc, "interrupts_calibration", False):
+            raise                     # Pause / Cancel: not a result, the runner handles it
         log.warning(f"Calibration crashed for {model}: {exc}", exc_info=True)
         out["error"] = str(exc)
         out["passed"] = False
         return out
     finally:
         out["duration_ms"] = round((time.time() - started) * 1000)
-        if progress:
-            progress("Done", 1, 1)

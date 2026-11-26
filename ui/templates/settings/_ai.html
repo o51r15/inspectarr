@@ -48,6 +48,8 @@
           <div class="form-section-title flex items-center justify-between gap-8 flex-wrap">
             <span>Models on this server</span>
             <span class="flex gap-8 items-center">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="ai-all-open"
+                      title="Calibrate several models, now or overnight">Calibrate all…</button>
               <button type="button" class="btn btn-ghost btn-sm" data-action="ai-refresh"
                       title="Read the list from the server again">↻ Refresh</button>
             </span>
@@ -79,6 +81,9 @@
             </div>
           </div>
 
+          <div id="ai-banner" class="callout mb-12 d-none" role="status"></div>
+          <div id="ai-all-panel" class="panel-sm mb-12 d-none"></div>
+          <div id="ai-run-bar" class="mb-12 d-none" role="status"></div>
           <p class="hint mb-8" id="ai-run-note" role="status"></p>
           <div id="ai-model-list" class="model-list" aria-live="polite">
             <p class="hint">Loading models…</p>
@@ -102,6 +107,28 @@
               applies the settings Calibrate chose. Nothing switches by itself.
             </p>
           </details>
+        </div>
+
+        {#- Testing models: overnight runs and new models. -#}
+        <div class="form-section" data-level="advanced">
+          <div class="form-section-title">Testing models</div>
+          <div class="toggle-row mb-8">
+            <input type="hidden" name="_rendered" value="ollama_calibrate_new_models">
+            <input type="checkbox" name="ollama_calibrate_new_models" id="ollama_calibrate_new_models"
+                   {{ 'checked' if ai.get('calibrate_new_models', true) else '' }}>
+            <label for="ollama_calibrate_new_models">Calibrate models newly added to the server, overnight</label>
+          </div>
+          <div class="form-group">
+            <label for="ollama_overnight_hour">Overnight tests start at</label>
+            {%- set oh = (ai.get('overnight_hour', 1) or 0)|int %}
+            <select name="ollama_overnight_hour" id="ollama_overnight_hour" class="mw-260">
+              {%- for h in range(24) %}
+              <option value="{{ h }}" {{ 'selected' if h == oh else '' }}>{{ '%02d:00'|format(h) }}</option>
+              {%- endfor %}
+            </select>
+            <span class="hint">Used by "Calibrate all… → Tonight" and for new models. Pick a time
+              when nothing else needs the AI server; testing loads each model in turn.</span>
+          </div>
         </div>
 
         {#- 5-6. Tuning, for people who need it. -#}
