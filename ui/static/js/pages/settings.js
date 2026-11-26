@@ -433,13 +433,46 @@
 
   // ---- Torrent client pane toggle ----
   function toggleTorrentPanes() {
-    const active = document.getElementById('torrent_client').value;
+    // The client is chosen with radio cards (3.6); fall back to qBittorrent
+    // if somehow none is checked, which is also the parser's default.
+    const checked = document.querySelector('input[name="torrent_client"]:checked');
+    const active = checked ? checked.value : 'qbittorrent';
     document.querySelectorAll('.torrent-pane').forEach(p => {
       p.style.display = p.id === 'pane-' + active ? '' : 'none';
     });
     markDirty();
   }
   toggleTorrentPanes();
+
+  // ---- Connection status pills (3.6) ----
+  // One request runs every saved-settings check concurrently on the server
+  // (the same endpoint System → Status uses). Names come back as
+  // "Sonarr" or "Torrent Client (qbittorrent)"; the part before " (" picks
+  // the card.
+  function setStatusPill(el, tone, text) {
+    el.className = 'badge badge-' + tone + ' conn-status';
+    el.textContent = text;
+  }
+
+  function loadConnectionStatus() {
+    const pills = document.querySelectorAll('[data-status-for]');
+    if (!pills.length) return;
+    fetch('/system/status/data')
+      .then(r => r.json())
+      .then(d => {
+        const byName = {};
+        (d.connections || []).forEach(c => { byName[String(c.name).split(' (')[0]] = c; });
+        pills.forEach(el => {
+          const c = byName[el.dataset.statusFor];
+          if (!c) setStatusPill(el, 'neutral', 'Unknown');
+          else if (!c.configured) setStatusPill(el, 'neutral', 'Off');
+          else if (c.ok) setStatusPill(el, 'ok', 'Connected');
+          else setStatusPill(el, 'danger', "Can't connect");
+        });
+      })
+      .catch(() => pills.forEach(el => setStatusPill(el, 'neutral', 'Unknown')));
+  }
+  loadConnectionStatus();
 
   // ---- Test connections ----
   function testConnection(which) {
