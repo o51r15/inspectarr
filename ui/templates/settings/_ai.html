@@ -132,24 +132,46 @@
         </div>
 
         {#- 5-6. Tuning, for people who need it. -#}
-        <div class="form-section" data-level="advanced">
-          <div class="form-section-title flex items-center justify-between">
-            <span>Scoring prompt</span>
-            <div class="flex gap-8 items-center">
-              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="resetSystemPrompt"
-                      title="Go back to the built-in prompt">Reset to default</button>
-              <button type="button" class="btn btn-primary btn-sm" data-action="call" data-fn="saveSystemPrompt">Save prompt</button>
-              <span id="system-prompt-status" class="hint"></span>
-            </div>
+        <div class="form-section" data-level="advanced" id="ai-prompts-section">
+          <div class="form-section-title flex items-center justify-between gap-8 flex-wrap">
+            <span>Scoring instructions</span>
+            <span class="hint" id="ai-prompt-in-use"></span>
           </div>
           <p class="hint mb-12">
-            The instructions sent to the model when it scores indexers. Leave empty, or reset,
-            to use the built-in prompt.
+            What the model is told when it scores your indexers. The <strong>Default</strong> is
+            built in and can't be edited, so updates can keep improving it. <strong>New prompt</strong>
+            makes your own copy to change. Exactly one is used for scoring. Calibrate and the model
+            ranking always use the Default, so scores stay comparable.
           </p>
-          <div class="form-group">
-            <textarea class="mono text-xs pre-wrap" id="ollama-system-prompt" rows="12"
-                      aria-label="Scoring prompt" placeholder="Loading…"></textarea>
+          <div class="flex gap-8 items-center flex-wrap mb-8">
+            <label for="ai-prompt-select" class="sr-only">Prompt</label>
+            <select id="ai-prompt-select" class="mw-320"></select>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="ai-prompt-new"
+                    title="A copy of the Default's instructions to change">New prompt</button>
           </div>
+          <div class="form-group d-none" id="ai-prompt-name-row">
+            <label for="ai-prompt-name">Name (optional)</label>
+            <input type="text" id="ai-prompt-name" maxlength="60" class="mw-320">
+          </div>
+          <div class="form-group">
+            <textarea class="mono text-xs pre-wrap" id="ollama-system-prompt" rows="14"
+                      aria-label="Scoring instructions" placeholder="Loading…"></textarea>
+          </div>
+          <div class="flex gap-8 items-center flex-wrap">
+            <button type="button" class="btn btn-primary btn-sm" data-action="ai-prompt-use">Use for scoring</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="ai-prompt-save">Save</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="ai-prompt-test-open">Test this prompt…</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="ai-prompt-delete">Delete</button>
+            <span id="system-prompt-status" class="hint" role="status"></span>
+          </div>
+          <details class="hint mt-12">
+            <summary>Always added at the end, whichever prompt is used</summary>
+            <p class="m-0 mt-8">Inspectarr needs answers in exactly this shape to read them, so this
+              part can't be changed. Your indexers' data follows it.</p>
+            <pre class="mono text-xs pre-wrap panel-sm mt-8" id="ai-answer-format"></pre>
+          </details>
+          <div id="ai-prompt-test-panel" class="panel-sm mt-12 d-none"></div>
+          <div id="ai-prompt-tests" class="mt-12"></div>
         </div>
 
         <div class="form-section" data-level="advanced">

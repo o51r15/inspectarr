@@ -593,52 +593,8 @@
   }
 
   // ---- System prompt management ----
-  function loadSystemPrompt() {
-    fetch('/config/ollama/system-prompt')
-      .then(r => r.json())
-      .then(d => {
-        if (d.ok) {
-          document.getElementById('ollama-system-prompt').value = d.prompt;
-        }
-      });
-  }
 
-  function saveSystemPrompt() {
-    const prompt = document.getElementById('ollama-system-prompt').value;
-    const el = document.getElementById('system-prompt-status');
-    el.textContent = 'Saving…'; el.style.color = '';
-    fetch('/config/ollama/system-prompt', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({prompt}),
-    })
-    .then(r => r.json())
-    .then(d => {
-      el.textContent = d.message;
-      el.style.color = d.ok ? 'var(--success)' : 'var(--error)';
-    })
-    .catch(() => { el.textContent = 'Request failed'; el.style.color = 'var(--error)'; });
-  }
 
-  function resetSystemPrompt() {
-    fetch('/config/ollama/system-prompt')
-      .then(r => r.json())
-      .then(d => {
-        if (d.ok) {
-          document.getElementById('ollama-system-prompt').value = d.default_prompt;
-          // Save the reset (empty string = use default)
-          fetch('/config/ollama/system-prompt', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({prompt: ''}),
-          })
-          .then(r => r.json())
-          .then(d2 => {
-            const el = document.getElementById('system-prompt-status');
-            el.textContent = d2.message || 'Reset to default';
-            el.style.color = 'var(--success)';
-          });
-        }
-      });
-  }
 
   // ---- Backup management ----
   function loadBackups() {

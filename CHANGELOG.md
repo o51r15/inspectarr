@@ -7,6 +7,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added - Your own scoring instructions
+
+Settings -> AI -> **Scoring instructions** (Advanced) works like DockLlama:
+
+- The **Default** can be read but not edited, so updates can keep improving it.
+- **New prompt** makes Prompt 1, 2, ... as a copy of the Default to change.
+  Exactly one prompt is **used for scoring**; deleting it goes back to the Default.
+- A prompt is only the instructions. The **answer format** (the JSON Inspectarr
+  reads) is always added after them, for every prompt, and shown read-only.
+- **Test this prompt** grades it on the 14 test indexers with each chosen
+  model's calibrated settings, next to that model's Default score. Results are
+  kept per prompt and marked when the prompt has changed since.
+- Calibrate and the model ranking always use the Default, so scores stay comparable.
+
+### Changed
+
+- The old `prowlarr.ollama.system_prompt` setting moves out of config.yaml at
+  start: a copy of the Default is simply removed; anything else becomes a
+  prompt named "from config.yaml" and stays in use.
+- A model that leaves indexers out of its answer now says which ones.
+
 ### Added - Model Calibration and Ranking
 
 **Calibrate** now finds the best way to run each model on your Ollama

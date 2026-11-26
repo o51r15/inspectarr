@@ -741,9 +741,99 @@ class StateManager:
             log.warning(f"Failed to read calibration history for {model}: {exc}")
             return []
 
+    # --- scoring prompts ------------------------------------------------------
+    def list_scoring_prompts(self) -> list[dict]:
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute("SELECT * FROM scoring_prompts ORDER BY number").fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            log.warning(f"Failed to list scoring prompts: {exc}")
+            return []
+
+    def get_scoring_prompt(self, prompt_id: int) -> dict | None:
+        try:
+            with self._lock, self._conn() as conn:
+                row = conn.execute("SELECT * FROM scoring_prompts WHERE id = ?",
+                                   (int(prompt_id),)).fetchone()
+            return dict(row) if row else None
+        except Exception:
+            return None
+
+    def create_scoring_prompt(self, text: str, name: str = "") -> int | None:
+        """Add a prompt as the lowest free number (keeps the list 1, 2, 3)."""
+        now = _now_iso()
+        try:
+            with self._lock, self._conn() as conn:
+                used = {r[0] for r in conn.execute("SELECT number FROM scoring_prompts")}
+                number = next(n for n in range(1, len(used) + 2) if n not in used)
+                cur = conn.execute(
+                    "INSERT INTO scoring_prompts (number, name, text, revision, created_at, updated_at) "
+                    "VALUES (?, ?, ?, 1, ?, ?)", (number, (name or "").strip()[:60], text, now, now))
+                conn.commit()
+                return cur.lastrowid
+        except Exception as exc:
+            log.warning(f"Failed to create scoring prompt: {exc}")
+            return None
+
+    def update_scoring_prompt(self, prompt_id: int, text: str, name: str) -> bool:
+        """Change a prompt. Renaming alone keeps the revision, so earlier
+        test results only go stale when the instructions change."""
+        row = self.get_scoring_prompt(prompt_id)
+        if not row:
+            return False
+        rev = row["revision"] + (1 if text != row["text"] else 0)
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute("UPDATE scoring_prompts SET text = ?, name = ?, revision = ?, updated_at = ? "
+                             "WHERE id = ?", (text, (name or "").strip()[:60], rev, _now_iso(), prompt_id))
+                conn.commit()
+            return True
+        except Exception as exc:
+            log.warning(f"Failed to update scoring prompt {prompt_id}: {exc}")
+            return False
+
+    def delete_scoring_prompt(self, prompt_id: int) -> None:
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute("DELETE FROM scoring_prompts WHERE id = ?", (prompt_id,))
+                conn.execute("DELETE FROM prompt_tests WHERE prompt_id = ?", (prompt_id,))
+                conn.commit()
+        except Exception as exc:
+            log.warning(f"Failed to delete scoring prompt {prompt_id}: {exc}")
+
+    def save_prompt_test(self, prompt_id: int, prompt_rev: int, model: str, ollama_url: str,
+                         score: float | None, complete: bool, detail: str = "") -> None:
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "INSERT INTO prompt_tests (prompt_id, prompt_rev, model, ollama_url, run_at, score, "
+                    "complete, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (prompt_id, prompt_rev, model, normalize_ollama_url(ollama_url) or "", _now_iso(),
+                     score, 1 if complete else 0, (detail or "")[:500]))
+                conn.commit()
+        except Exception as exc:
+            log.warning(f"Failed to save prompt test: {exc}")
+
+    def get_prompt_tests(self, prompt_id: int, ollama_url: str) -> list[dict]:
+        """Latest test of each model with this prompt on this server."""
+        try:
+            with self._lock, self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM prompt_tests WHERE prompt_id = ? AND ollama_url = ? "
+                    "ORDER BY run_at DESC", (prompt_id, normalize_ollama_url(ollama_url) or "")).fetchall()
+            latest = {}
+            for r in rows:
+                latest.setdefault(r["model"], dict(r))
+            return list(latest.values())
+        except Exception as exc:
+            log.warning(f"Failed to read prompt tests: {exc}")
+            return []
+
     # --- calibration runs ---------------------------------------------------
     def create_calibration_run(self, ollama_url: str, models: list[str],
-                               start_after: str | None = None, kind: str = "all") -> int | None:
+                               start_after: str | None = None, kind: str = "all",
+                               prompt_id: int | None = None) -> int | None:
         url = normalize_ollama_url(ollama_url)
         if not url or not models:
             return None
@@ -751,8 +841,9 @@ class StateManager:
         try:
             with self._lock, self._conn() as conn:
                 cur = conn.execute(
-                    "INSERT INTO calibration_runs (ollama_url, created_at, start_after, status, kind) "
-                    "VALUES (?, ?, ?, 'waiting', ?)", (url, now, start_after or now, kind))
+                    "INSERT INTO calibration_runs (ollama_url, created_at, start_after, status, kind, "
+                    "prompt_id) VALUES (?, ?, ?, 'waiting', ?, ?)",
+                    (url, now, start_after or now, kind, prompt_id))
                 run_id = cur.lastrowid
                 conn.executemany(
                     "INSERT INTO calibration_run_items (run_id, position, model, status) "
@@ -1179,6 +1270,34 @@ class StateManager:
                     finished_at  TEXT
                 )
             """)
+            # Scoring instructions people wrote (core/scoring_prompts.py).
+            # The Default is built in and never stored.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scoring_prompts (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    number      INTEGER NOT NULL,
+                    name        TEXT,
+                    text        TEXT NOT NULL,
+                    revision    INTEGER NOT NULL DEFAULT 1,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
+                )
+            """)
+            # "Test this prompt" results: kept per prompt revision, shown only
+            # on that prompt's screen (never in the model ranking).
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS prompt_tests (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    prompt_id   INTEGER NOT NULL,
+                    prompt_rev  INTEGER NOT NULL,
+                    model       TEXT NOT NULL,
+                    ollama_url  TEXT NOT NULL,
+                    run_at      TEXT NOT NULL,
+                    score       REAL,
+                    complete    INTEGER NOT NULL DEFAULT 0,
+                    detail      TEXT
+                )
+            """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS calibration_run_items (
                     run_id   INTEGER NOT NULL,
@@ -1411,6 +1530,15 @@ class StateManager:
                         f"validated_models migration failed ({_col}): {exc}")
 
         self._migrate_validations_per_server()
+
+        # A calibration run can be a prompt test: which prompt it tests.
+        try:
+            with self._lock, self._conn() as conn:
+                conn.execute("ALTER TABLE calibration_runs ADD COLUMN prompt_id INTEGER")
+                conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                log.warning(f"calibration_runs migration failed (prompt_id): {exc}")
 
         # Migrate llm_cache to record which model produced each entry.
         # Pre-migration rows get NULL: their model is genuinely unknown, and

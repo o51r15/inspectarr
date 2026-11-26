@@ -36,7 +36,9 @@ def test_unchanged_submit_preserves_config(client, config_path):
     # Keys with no form field must survive a form save.
     assert after["prowlarr"]["scoring"]["response_time_weight"] == 0.4
     assert after["prowlarr"]["ollama"]["model"] == "phi4:latest"
-    assert after["prowlarr"]["ollama"]["system_prompt"] == "custom prompt"
+    # system_prompt is moved out of config.yaml into a stored prompt at start
+    # (core/scoring_prompts.migrate_config_prompt), so it is gone, not lost.
+    assert "system_prompt" not in after["prowlarr"]["ollama"]
     assert after["remediation"]["severity_overrides"] == {".rar": "LOW"}
     assert after["remediation"]["track_replacements"] is True
 
