@@ -1,0 +1,84 @@
+      <div class="settings-pane" data-pane="notifications">
+        <div class="form-section">
+          <div class="form-section-title">Apprise Notifications</div>
+          <p class="hint mb-12">
+            <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noopener">Apprise</a> supports 100+ notification services.
+            Add one URL per line — e.g. <code>pover://user@token</code>, <code>tgram://bottoken/ChatID</code>, <code>discord://webhook_id/webhook_token</code>.
+          </p>
+          {% set appr = cfg.get('notifications',{}).get('apprise',{}) %}
+          <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="apprise_enabled">
+            <input type="checkbox" name="apprise_enabled" id="apprise_enabled"
+                   {{ 'checked' if appr.get('enabled') else '' }}>
+            <label for="apprise_enabled">Enabled</label>
+          </div>
+          <div class="form-group">
+            <label>Notification URLs (one per line)</label>
+            <textarea class="mono text-xs" name="apprise_urls" rows="4"
+                      placeholder="pover://user@token&#10;tgram://bottoken/ChatID">{{ appr.get('urls',[])|join('\n') }}</textarea>
+          </div>
+          <div class="flex gap-8 items-center mb-12">
+            <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testApprise"
+                    title="Send a test notification to verify your URLs">Test Notification</button>
+            <span id="test-apprise-result" class="hint"></span>
+          </div>
+          <div class="form-group mb-16">
+            <label>Notify On</label>
+            <div class="flex gap-8 flex-wrap mt-4">
+              <input type="hidden" name="_rendered" value="notify_on">
+              {#- Absent or empty-null means the parser's default (action, error),
+                  exactly as core/config.py reads it; only an explicit [] means none.
+                  Showing [] here used to make the first save switch alerts off. #}
+              {% set notify_on = appr.get('notify_on') if appr.get('notify_on') is not none else ['action', 'error'] %}
+              {% for evt in ['action','quarantine','error','startup','dry_run'] %}
+              <label class="flex items-center gap-8 text-sm text">
+                <input type="checkbox" name="notify_on" value="{{ evt }}"
+                       {{ 'checked' if evt in notify_on else '' }}>
+                {{ evt }}
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Notification Digest</div>
+          {% set dig = cfg.get('notifications',{}).get('digest',{}) %}
+          <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="digest_enabled">
+            <input type="checkbox" name="digest_enabled" id="digest_enabled"
+                   {{ 'checked' if dig.get('enabled') else '' }}>
+            <label for="digest_enabled">Batch notifications into a single digest per scan</label>
+          </div>
+          <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="digest_use_ollama">
+            <input type="checkbox" name="digest_use_ollama" id="digest_use_ollama"
+                   {{ 'checked' if dig.get('use_ollama') else '' }}>
+            <label for="digest_use_ollama">Use Ollama to generate digest summaries</label>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Periodic Summary</div>
+          {% set summ = cfg.get('notifications',{}).get('summary',{}) %}
+          <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="summary_enabled">
+            <input type="checkbox" name="summary_enabled" id="summary_enabled"
+                   {{ 'checked' if summ.get('enabled') else '' }}>
+            <label for="summary_enabled">Generate periodic activity summaries</label>
+          </div>
+          <div class="form-row">
+            <div class="form-group mw-200">
+              <label>Schedule</label>
+              <select name="summary_schedule">
+                <option value="daily" {{ 'selected' if summ.get('schedule','daily') == 'daily' else '' }}>Daily</option>
+                <option value="weekly" {{ 'selected' if summ.get('schedule') == 'weekly' else '' }}>Weekly</option>
+              </select>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <input type="hidden" name="_rendered" value="summary_use_ollama">
+            <input type="checkbox" name="summary_use_ollama" id="summary_use_ollama"
+                   {{ 'checked' if summ.get('use_ollama', True) else '' }}>
+            <label for="summary_use_ollama">Use Ollama for natural-language summaries</label>
+          </div>
+        </div>
+      </div>

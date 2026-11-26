@@ -1,0 +1,27 @@
+      <!-- PANE: Backups -->
+      <div class="settings-pane" data-pane="backups">
+        <div class="form-section">
+          <div class="form-section-title flex items-center justify-between">
+            <span>Configuration &amp; Database Backups</span>
+            <button type="button" class="btn btn-primary btn-sm" data-action="call" data-fn="createBackup">Create Backup Now</button>
+          </div>
+          <p class="hint mb-16">
+            Backups include your <code>config.yaml</code> and <code>inspectarr.db</code> SQLite database,
+            bundled into a timestamped zip file stored in the <code>data/backups/</code> directory.
+          </p>
+          <div id="backup-status" class="hint mb-16"></div>
+          <table class="table" id="backups-table">
+            <thead>
+              <tr>
+                <th>Filename</th>
+                <th>Created</th>
+                <th>Size</th>
+                <th class="w-140"></th>
+              </tr>
+            </thead>
+            <tbody id="backups-body">
+              <tr><td colspan="4" class="hint text-center">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
