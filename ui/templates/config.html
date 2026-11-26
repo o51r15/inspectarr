@@ -3,13 +3,13 @@
 {% block page_title %}Settings{% endblock %}
 
 {% block topbar_actions %}
-  {#- Basic/Advanced. Advanced panes and sections carry data-level="advanced"
-      and stay hidden until this is on; the choice is remembered per browser.
+  {#- Basic/Advanced. Sections marked data-level="advanced" (never whole
+      tabs) stay hidden until this is on; the choice is remembered per browser.
       Hidden fields are still submitted, which is safe: saving only writes
       what changed (ui/settings_schema.py). -#}
   <button type="button" class="btn btn-ghost btn-sm" id="advanced-toggle"
           aria-pressed="false" data-action="call" data-fn="toggleAdvanced"
-          title="Show settings most people never need to change">Show advanced</button>
+          title="Show extra settings most people never need to change">Show advanced</button>
 {% endblock %}
 
 {% block content %}
@@ -20,7 +20,8 @@
 
 <div class="settings-root" id="settings-root">
 
-{#- The id and .nav-group-items wrapper are what settings.js's showPane and
+{#- Seven tabs, in the order a new user needs them; none is ever hidden.
+    The id and .nav-group-items wrapper are what settings.js's showPane and
     the AI update dot look for. -#}
 <nav class="subnav mb-24" id="settings-group" aria-label="Settings sections">
   <div class="nav-group-items subnav-track">
@@ -28,12 +29,9 @@
     <a class="subnav-item" href="/config#protection"    data-pane="protection">Protection</a>
     <a class="subnav-item" href="/config#scanning"      data-pane="scanning">Scanning</a>
     <a class="subnav-item" href="/config#notifications" data-pane="notifications">Notifications</a>
-    <a class="subnav-item" href="/config#indexers"      data-pane="indexers">Indexers</a>
+    <a class="subnav-item" href="/config#indexers"      data-pane="indexers">Indexer health</a>
     <a class="subnav-item" href="/config#ai"            data-pane="ai">AI</a>
-    <a class="subnav-item" href="/config#security"      data-pane="security">Security</a>
-    <a class="subnav-item" href="/config#data"          data-pane="data">Data &amp; backups</a>
-    <a class="subnav-item" href="/config#server"        data-pane="server"   data-level="advanced">Server &amp; logs</a>
-    <a class="subnav-item" href="/config#file"          data-pane="file"     data-level="advanced">Config file</a>
+    <a class="subnav-item" href="/config#system"        data-pane="system">System</a>
   </div>
 </nav>
 
@@ -63,11 +61,7 @@
 
 {% include "settings/_ai.html" %}
 
-{% include "settings/_security.html" %}
-
-{% include "settings/_data.html" %}
-
-{% include "settings/_server.html" %}
+{% include "settings/_system.html" %}
 
   </div><!-- /settings-content -->
 </form>

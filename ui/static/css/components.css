@@ -601,3 +601,44 @@ dialog.dialog::backdrop { background: rgba(0, 0, 0, .55); }
 }
 .choice-card:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .choice-card input { accent-color: var(--accent); margin: 0; }
+
+/* ---- Settings redesign: plain-language controls --------------------------- */
+.conn-group-title { font-size: 1rem; font-weight: 600; color: var(--text); margin: 28px 0 4px; }
+.subsection-title { font-size: .9rem; font-weight: 600; color: var(--text); margin: 20px 0 4px; }
+.btn-xs { padding: 2px 8px; font-size: .75rem; line-height: 1.4; }
+
+/* Three-way choice with a sentence under each option (Protection mode). */
+.mode-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.mode-card {
+  display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 4px;
+  align-items: start; cursor: pointer; padding: 14px;
+  border: 1px solid var(--border); border-radius: var(--radius, 8px); background: var(--surface);
+}
+.mode-card input { grid-row: span 2; margin-top: 3px; accent-color: var(--accent); }
+.mode-card-title { font-weight: 600; color: var(--text); }
+.mode-card-text { font-size: .85rem; color: var(--text-muted); }
+.mode-card:has(input:checked) { border-color: var(--accent); background: var(--surface-alt); }
+.mode-card:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* A setting written as a sentence with the numbers inline. */
+.sentence-form { line-height: 2.4; color: var(--text); margin: 0 0 8px; }
+/* Two classes + the type, so this beats the global full-width input rule. */
+.sentence-form input[type="number"] {
+  display: inline-block; width: 80px; margin: 0 4px; padding: 4px 8px; vertical-align: baseline;
+}
+
+.check-list { display: flex; flex-direction: column; gap: 8px; }
+.check-item { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: .9rem; cursor: pointer; }
+.check-item input { accent-color: var(--accent); margin: 0; }
+
+.weights-total { font-weight: 600; margin-left: 6px; }
+
+/* Webhook set-up steps, one card per app. */
+.webhook-apps { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.webhook-card { padding: 14px; }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px;
+         font-size: .875rem; color: var(--text-muted); }
+.steps strong, .steps code { color: var(--text); }
+.copy-field { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.copy-field code { word-break: break-all; }
+[data-copied]::after { content: " \2713 copied"; color: var(--ok-fg, var(--accent)); font-family: inherit; }

@@ -1,204 +1,224 @@
       <!-- PANE: Protection -->
+      {% from "settings/_ui.html" import choice_select %}
+      {#- `remediation:` present but empty parses as None, and .get returns that
+          None rather than the default; `or {}` keeps the page from erroring,
+          exactly as core/config.py does. -#}
+      {% set rem = cfg.get('remediation') or {} %}
+      {% set om = rem.get('operating_mode') or 'automatic' %}
       <div class="settings-pane" data-pane="protection">
+
+        {# ---- 1. What happens ------------------------------------------------ #}
         <div class="form-section">
-          <div class="form-section-title">When something is caught</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>On Arr Failure</label>
-              <select name="on_arr_failure">
-                <option value="delete" {{ 'selected' if cfg.get('on_arr_failure','delete') == 'delete' else '' }}>Delete from qBit anyway</option>
-                <option value="abort"  {{ 'selected' if cfg.get('on_arr_failure') == 'abort' else '' }}>Abort — skip deletion</option>
-              </select>
+          <div class="form-section-title">When Inspectarr catches a bad release</div>
+          <div class="mode-cards" role="radiogroup" aria-label="What Inspectarr does">
+            {% for value, title, text in [
+                 ('monitor', 'Watch only', 'Record what it finds. Nothing is paused or removed. Good for trying Inspectarr out.'),
+                 ('quarantine', 'Hold for my review', 'Pause it and wait for you. You decide on the Activity page whether it stays or goes.'),
+                 ('automatic', 'Remove automatically', 'Remove it from your download client and have Sonarr or Radarr find another copy.')] %}
+            <label class="mode-card">
+              <input type="radio" name="remediation_operating_mode" value="{{ value }}"
+                     data-on-change="describeBands"
+                     {{ 'checked' if (om == value or (value == 'automatic' and om not in ['monitor', 'quarantine'])) else '' }}>
+              <span class="mode-card-title">{{ title }}</span>
+              <span class="mode-card-text">{{ text }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          {% if cfg.get('dry_run') %}
+          {#- dry_run is the same idea as Watch only. It is only shown while it is
+              on (set in the config file), so it can be switched off from here. -#}
+          <div class="callout mt-12">
+            <div class="toggle-row m-0">
+              <input type="hidden" name="_rendered" value="dry_run">
+              <input type="checkbox" name="dry_run" id="dry_run" checked>
+              <label for="dry_run"><strong>Watch only is forced on by your config file</strong>
+                (<code>dry_run: true</code>), whatever you pick above. Untick and save to let your choice above apply.</label>
             </div>
           </div>
-          <div class="toggle-row">
-            <input type="hidden" name="_rendered" value="dry_run">
-            <input type="checkbox" name="dry_run" id="dry_run"
-                   {{ 'checked' if cfg.get('dry_run') else '' }}>
-            <label for="dry_run">Dry Run — flag matches but take no action</label>
-          </div>
+          {% endif %}
         </div>
 
-        <div class="conn-banner" id="qbit-conn-banner">
-          <span class="status-dot stopped" id="qbit-conn-dot"></span>
-          <span class="conn-text" id="qbit-conn-text">Checking qBittorrent connection…</span>
-        </div>
-
-        <div class="section-header">
-          <div class="form-section-title mb-0 border-0 p-0">Rules</div>
-          <button type="button" class="btn btn-ghost btn-sm" id="add-rule-btn" data-action="call" data-fn="addRule">+ Add Rule</button>
-        </div>
-        <input type="hidden" name="_rendered" value="rules">
-        <div class="mt-12" id="rules-container">
-          {% for rule in cfg.get('rules', []) %}
-          {% set idx = loop.index0 %}
-          <div class="rule-card" id="rule-{{ idx }}">
-            <div class="rule-header">
-              <strong class="text">Rule #{{ loop.index }}</strong>
-              <button type="button" class="rule-remove" data-action="call" data-fn="removeRule" data-args='{{ [idx]|tojson }}' title="Remove">×</button>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>Rule Name</label>
-                <input type="text" name="rule_name_{{ idx }}" value="{{ rule.name }}">
-              </div>
-              <div class="form-group">
-                <label>Download client category</label>
-                <select name="rule_category_{{ idx }}" class="rule-category" data-current="{{ rule.category }}">
-                  <option value="{{ rule.category }}" selected>{{ rule.category }}</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>App</label>
-                <select name="rule_app_{{ idx }}">
-                  <option value="sonarr" {{ 'selected' if rule.app == 'sonarr' else '' }}>Sonarr</option>
-                  <option value="radarr" {{ 'selected' if rule.app == 'radarr' else '' }}>Radarr</option>
-                  <option value="lidarr" {{ 'selected' if rule.app == 'lidarr' else '' }}>Lidarr</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Match Mode</label>
-                <select name="rule_match_mode_{{ idx }}">
-                  <option value="any"     {{ 'selected' if rule.conditions.get('match_mode','any') == 'any' else '' }}>Any bad file</option>
-                  <option value="primary" {{ 'selected' if rule.conditions.get('match_mode') == 'primary' else '' }}>Primary file only</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Bad Extensions</label>
-              {% set exts = rule.conditions.get('bad_extensions', []) %}
-              <input type="hidden" name="rule_extensions_{{ idx }}"
-                     id="rule_ext_hidden_{{ idx }}" value="{{ exts | join(',') }}">
-              <div class="input-with-btn">
-                <input class="mw-160" type="text" id="rule_ext_input_{{ idx }}" placeholder=".exe">
-                <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="addExt" data-args='{{ [idx]|tojson }}'>+ Add</button>
-              </div>
-              <div class="ext-tags" id="rule_ext_tags_{{ idx }}">
-                {% for ext in exts %}
-                <span class="ext-tag">{{ ext }}
-                  <button type="button" data-action="call" data-fn="removeExt" data-args='{{ [idx, ext]|tojson }}'>×</button>
-                </span>
-                {% endfor %}
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group mw-220">
-                <label>Min Primary File Size (MB)</label>
-                {% set min_size = rule.conditions.get('min_file_size_mb') %}
-                <input type="number" name="rule_min_size_mb_{{ idx }}"
-                       value="{{ min_size if min_size is not none else '' }}"
-                       placeholder="Leave blank to disable" min="1">
-                <div class="hint">Flag if primary file is smaller than this</div>
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Bad Filename Patterns (regex)</label>
-              {% set patterns = rule.conditions.get('bad_filename_patterns', []) %}
-              <input type="hidden" name="rule_patterns_{{ idx }}"
-                     id="rule_pat_hidden_{{ idx }}" value="{{ patterns | join(',') }}">
-              <div class="input-with-btn">
-                <input class="mw-200" type="text" id="rule_pat_input_{{ idx }}" placeholder="e.g. sample\.">
-                <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="addPattern" data-args='{{ [idx]|tojson }}'>+ Add</button>
-              </div>
-              <div class="ext-tags" id="rule_pat_tags_{{ idx }}">
-                {% for p in patterns %}
-                <span class="ext-tag" data-pattern="{{ p }}">{{ p }}
-                  <button type="button" data-action="call" data-fn="removePattern" data-args='{{ [idx]|tojson }}' data-pass-el>×</button>
-                </span>
-                {% endfor %}
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
+        {# ---- 2. What to catch ----------------------------------------------- #}
         <div class="form-section">
-          <div class="form-section-title">Remediation &amp; Severity</div>
-
-          <div class="form-group mb-16">
-            <label for="remediation_operating_mode">Operating mode</label>
-            <select name="remediation_operating_mode" id="remediation_operating_mode"
-                    data-on-change="describeBands">
-              {# `remediation:` present but empty parses as None, and .get returns that
-   None rather than the default -- chaining .get on it raises and 500s the
-   whole Settings page. core/config.py guards this with `or {}`; so must the
-   template, which the raw-YAML editor makes reachable. #}
-{% set om = (cfg.get('remediation') or {}).get('operating_mode','automatic') %}
-              <option value="monitor" {{ 'selected' if om == 'monitor' else '' }}>
-                Monitor — record findings, never act
-              </option>
-              <option value="quarantine" {{ 'selected' if om == 'quarantine' else '' }}>
-                Quarantine — hold for review, never delete
-              </option>
-              <option value="automatic" {{ 'selected' if om not in ['monitor','quarantine'] else '' }}>
-                Automatic — apply the thresholds below
-              </option>
-            </select>
-            <span class="hint">
-              A ceiling on how far Inspectarr may act. It only ever reduces
-              what happens — it never makes the thresholds below more
-              aggressive, and it never changes their stored values.
-            </span>
+          <div class="section-header">
+            <div class="form-section-title mb-0 border-0 p-0">What to catch</div>
+            <button type="button" class="btn btn-ghost btn-sm" id="add-rule-btn" data-action="call" data-fn="addRule">+ Add a rule</button>
           </div>
-
           <p class="hint mb-12">
-            What happens when a rule matches. Every finding is graded
-            (executables CRITICAL, archives HIGH, undersized primary file
-            HIGH, filename patterns MEDIUM) and the worst one decides the
-            outcome. These two thresholds split that grade into three bands.
+            Each rule watches one category in your download client (for example <code>tv-sonarr</code>)
+            and lists what counts as a bad release there.
           </p>
-          <div class="form-row">
-            <div class="form-group">
-              <label for="remediation_min_severity">Act at or above</label>
-              <select name="remediation_min_severity" id="remediation_min_severity"
-                      data-on-change="describeBands">
-                {% set ms = cfg.get('remediation',{}).get('min_severity','LOW') %}
-                {% for lvl in ['LOW','MEDIUM','HIGH','CRITICAL'] %}
-                  <option value="{{ lvl }}" {{ 'selected' if ms == lvl else '' }}>{{ lvl }}</option>
-                {% endfor %}
-              </select>
-              <span class="hint">Anything below this is recorded but never acted on.</span>
-            </div>
-            <div class="form-group">
-              <label for="remediation_remediate_at">Delete at or above</label>
-              <select name="remediation_remediate_at" id="remediation_remediate_at"
-                      data-on-change="describeBands">
-                {% set ra = cfg.get('remediation',{}).get('remediate_at','LOW') %}
-                {% for lvl in ['LOW','MEDIUM','HIGH','CRITICAL'] %}
-                  <option value="{{ lvl }}" {{ 'selected' if ra == lvl else '' }}>{{ lvl }}</option>
-                {% endfor %}
-              </select>
-              <span class="hint">Between the two, catches are
-                <a href="/quarantine">quarantined</a> instead of deleted.</span>
-            </div>
+          <div class="conn-banner" id="qbit-conn-banner">
+            <span class="status-dot stopped" id="qbit-conn-dot"></span>
+            <span class="conn-text" id="qbit-conn-text">Checking the download client connection…</span>
           </div>
-          <p id="band-explainer" class="hint panel-sm"
-            ></p>
+          <input type="hidden" name="_rendered" value="rules">
+          <div class="mt-12" id="rules-container">
+            {% for rule in cfg.get('rules', []) %}
+            {% set idx = loop.index0 %}
+            <div class="rule-card" id="rule-{{ idx }}">
+              <div class="rule-header">
+                <strong class="text">Rule {{ loop.index }}</strong>
+                <button type="button" class="rule-remove" data-action="call" data-fn="removeRule" data-args='{{ [idx]|tojson }}' title="Remove this rule">×</button>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Name</label>
+                  <input type="text" name="rule_name_{{ idx }}" value="{{ rule.name }}">
+                </div>
+                <div class="form-group">
+                  <label>Download client category</label>
+                  <select name="rule_category_{{ idx }}" class="rule-category" data-current="{{ rule.category }}">
+                    <option value="{{ rule.category }}" selected>{{ rule.category }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label>Ask for a replacement from</label>
+                  <select name="rule_app_{{ idx }}">
+                    <option value="sonarr" {{ 'selected' if rule.app == 'sonarr' else '' }}>Sonarr</option>
+                    <option value="radarr" {{ 'selected' if rule.app == 'radarr' else '' }}>Radarr</option>
+                    <option value="lidarr" {{ 'selected' if rule.app == 'lidarr' else '' }}>Lidarr</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Check</label>
+                  <select name="rule_match_mode_{{ idx }}">
+                    <option value="any"     {{ 'selected' if rule.conditions.get('match_mode','any') == 'any' else '' }}>Every file in the release</option>
+                    <option value="primary" {{ 'selected' if rule.conditions.get('match_mode') == 'primary' else '' }}>Only the main file</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>File types to catch</label>
+                {% set exts = rule.conditions.get('bad_extensions', []) %}
+                <input type="hidden" name="rule_extensions_{{ idx }}"
+                       id="rule_ext_hidden_{{ idx }}" value="{{ exts | join(',') }}">
+                <div class="input-with-btn">
+                  <input class="mw-160" type="text" id="rule_ext_input_{{ idx }}" placeholder=".exe">
+                  <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="addExt" data-args='{{ [idx]|tojson }}'>+ Add</button>
+                </div>
+                <div class="ext-tags" id="rule_ext_tags_{{ idx }}">
+                  {% for ext in exts %}
+                  <span class="ext-tag">{{ ext }}
+                    <button type="button" data-action="call" data-fn="removeExt" data-args='{{ [idx, ext]|tojson }}'>×</button>
+                  </span>
+                  {% endfor %}
+                </div>
+                <span class="hint">Programs and scripts (<code>.exe</code>, <code>.bat</code>, <code>.scr</code>) are never real video or music.</span>
+              </div>
+              <div class="form-row">
+                <div class="form-group mw-260">
+                  <label>Catch it if the main file is smaller than (MB)</label>
+                  {% set min_size = rule.conditions.get('min_file_size_mb') %}
+                  <input type="number" name="rule_min_size_mb_{{ idx }}"
+                         value="{{ min_size if min_size is not none else '' }}"
+                         placeholder="Leave blank to skip" min="1">
+                  <div class="hint">Fakes are often tiny.</div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>File names to catch <span class="hint">(regular expressions, optional)</span></label>
+                {% set patterns = rule.conditions.get('bad_filename_patterns', []) %}
+                <input type="hidden" name="rule_patterns_{{ idx }}"
+                       id="rule_pat_hidden_{{ idx }}" value="{{ patterns | join(',') }}">
+                <div class="input-with-btn">
+                  <input class="mw-200" type="text" id="rule_pat_input_{{ idx }}" placeholder="e.g. sample\.">
+                  <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="addPattern" data-args='{{ [idx]|tojson }}'>+ Add</button>
+                </div>
+                <div class="ext-tags" id="rule_pat_tags_{{ idx }}">
+                  {% for p in patterns %}
+                  <span class="ext-tag" data-pattern="{{ p }}">{{ p }}
+                    <button type="button" data-action="call" data-fn="removePattern" data-args='{{ [idx]|tojson }}' data-pass-el>×</button>
+                  </span>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
 
+        {# ---- 3. Holding for review ------------------------------------------- #}
+        <div class="form-section">
+          <div class="form-section-title">Releases held for review</div>
+          <p class="hint mb-12">Held releases wait on the <a href="/activity/review">Activity</a> page until you decide.</p>
           <div class="form-row">
             <div class="form-group">
-              <label for="remediation_quarantine_timeout">Quarantine timeout (minutes)</label>
-              <input type="number" name="remediation_quarantine_timeout"
-                     id="remediation_quarantine_timeout" min="0" max="100000"
-                     value="{{ cfg.get('remediation',{}).get('quarantine_timeout_minutes',0) }}">
-              <span class="hint">0 = hold indefinitely. A held torrent waits for your decision.</span>
+              <label for="remediation_quarantine_timeout">If nobody decides</label>
+              {{ choice_select("remediation_quarantine_timeout", "remediation_quarantine_timeout",
+                               rem.get('quarantine_timeout_minutes', 0),
+                               [(0, 'Keep holding until I decide'), (60, 'Decide for me after 1 hour'),
+                                (360, 'Decide for me after 6 hours'), (1440, 'Decide for me after 1 day'),
+                                (4320, 'Decide for me after 3 days'), (10080, 'Decide for me after 1 week')],
+                               "minutes") }}
             </div>
             <div class="form-group">
-              <label for="remediation_timeout_action">When the timeout elapses</label>
+              <label for="remediation_timeout_action">When that time is up</label>
               <select name="remediation_timeout_action" id="remediation_timeout_action">
-                {% set ta = cfg.get('remediation',{}).get('quarantine_timeout_action','release') %}
-                <option value="release" {{ 'selected' if ta != 'remediate' else '' }}>Release (resume the download)</option>
-                <option value="remediate" {{ 'selected' if ta == 'remediate' else '' }}>Delete (blocklist and remove)</option>
+                {% set ta = rem.get('quarantine_timeout_action', 'release') %}
+                <option value="release" {{ 'selected' if ta != 'remediate' else '' }}>Let it finish downloading</option>
+                <option value="remediate" {{ 'selected' if ta == 'remediate' else '' }}>Remove it</option>
               </select>
-              <span class="hint">A timer expiring means nobody looked — not that the release was bad.</span>
+              <span class="hint">Time running out means nobody looked, not that the release was bad.</span>
             </div>
           </div>
-          <p class="hint mb-0">
-            Per-extension overrides (for example treating <code>.rar</code> as
-            LOW) are available in the Raw YAML editor under
-            <code>remediation.severity_overrides</code>.
+        </div>
+
+        {# ---- 4. Advanced: how strict -------------------------------------------- #}
+        <div class="form-section" data-level="advanced">
+          <div class="form-section-title">How strict to be</div>
+          <p class="hint mb-12">
+            Every catch is graded by its worst finding: programs and scripts are
+            <strong>critical</strong>, archives and a main file that is too small are
+            <strong>high</strong>, suspicious file names are <strong>medium</strong>.
+            These two settings decide what each grade leads to.
           </p>
+          <div class="form-row">
+            {% set grades = [('LOW', 'Anything suspicious'), ('MEDIUM', 'Medium and worse'),
+                             ('HIGH', 'High and worse'), ('CRITICAL', 'Only critical')] %}
+            <div class="form-group">
+              <label for="remediation_min_severity">Act on</label>
+              <select name="remediation_min_severity" id="remediation_min_severity" data-on-change="describeBands">
+                {% set ms = rem.get('min_severity', 'LOW') %}
+                {% for lvl, label in grades %}
+                <option value="{{ lvl }}" {{ 'selected' if ms == lvl else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="hint">Anything milder is recorded but left alone.</span>
+            </div>
+            <div class="form-group">
+              <label for="remediation_remediate_at">Remove straight away</label>
+              <select name="remediation_remediate_at" id="remediation_remediate_at" data-on-change="describeBands">
+                {% set ra = rem.get('remediate_at', 'LOW') %}
+                {% for lvl, label in grades %}
+                <option value="{{ lvl }}" {{ 'selected' if ra == lvl else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="hint">Anything acted on but milder than this is held for review instead.</span>
+            </div>
+          </div>
+          <p id="band-explainer" class="hint panel-sm"></p>
+          <p class="hint mb-0">
+            To grade a particular file type differently (for example treat <code>.rar</code> as low),
+            add it under <code>remediation.severity_overrides</code> in the
+            <a href="/config#file">config file</a>.
+          </p>
+        </div>
+
+        {# ---- 5. Advanced: when the arr is down --------------------------------- #}
+        <div class="form-section" data-level="advanced">
+          <div class="form-section-title">If Sonarr, Radarr or Lidarr can't be reached</div>
+          <div class="form-group mw-420">
+            <label for="on_arr_failure">When removing a bad release</label>
+            <select name="on_arr_failure" id="on_arr_failure">
+              <option value="delete" {{ 'selected' if cfg.get('on_arr_failure','delete') == 'delete' else '' }}>Remove it from the download client anyway</option>
+              <option value="abort"  {{ 'selected' if cfg.get('on_arr_failure') == 'abort' else '' }}>Leave it alone and try again later</option>
+            </select>
+            <span class="hint">Removing it anyway stops the download, but Sonarr won't know to block that
+              release or look for another. "Try again later" uses the retry settings on the
+              <a href="/config#scanning">Scanning</a> tab; with retries off it just leaves it.</span>
+          </div>
         </div>
       </div>

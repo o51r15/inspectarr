@@ -550,6 +550,16 @@ class Scanner:
                 assessment=assessment, decision=decision,
                 action_detail=f"held by operating_mode={mode} "
                               f"(would have been {raw_decision})")
+            # Watch only is the same promise as dry_run -- "tell me what you
+            # would have done" -- so it sends the same alert. Without this a
+            # catch in monitor mode was recorded silently, and someone trying
+            # Inspectarr out in Watch only mode never heard about it.
+            # (Catches below the severity floor returned earlier and stay
+            # silent in every mode, as before.)
+            try:
+                self.notifier.notify_dry_run(name, bad_files)
+            except Exception as exc:
+                self.log.warning(f"  Watch-only notification failed: {exc}")
             return True, False
 
         if decision == sev.QUARANTINE:
