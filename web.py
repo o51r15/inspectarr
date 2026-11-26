@@ -93,6 +93,11 @@ def create_app(config_path: str) -> Flask:
     # May be None if the config/DB was unavailable at startup — routes fall
     # back to a fresh instance in that case.
     app.config["STATE"] = app.config["SCHEDULER"]._state
+    # Model calibration runs (Settings -> AI). Created here, started by
+    # main() -- or by the first request that needs it -- never in tests.
+    from core.calibration_runs import CalibrationRunner
+    app.config["CAL_RUNNER"] = (CalibrationRunner(app.config["STATE"], config_path)
+                                if app.config["STATE"] else None)
     # L-03: register explicit close so SQLite connection is cleaned up on exit
     if app.config["STATE"]:
         atexit.register(app.config["STATE"].close)
@@ -265,6 +270,10 @@ def main():
     else:
         print("Scheduler is OFF at startup (scheduler_autostart: false) — "
               "start it from Overview.")
+
+    # Calibration runs carry on after a restart, and new models are noticed.
+    if app.config.get("CAL_RUNNER"):
+        app.config["CAL_RUNNER"].start()
 
     # Use waitress (production WSGI) if available, fall back to Flask dev server
     try:

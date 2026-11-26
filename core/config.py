@@ -157,6 +157,12 @@ class OllamaConfig:
     # gpt-oss, say). False / True / "low" / "medium" / "high".
     think: object = None
 
+    # Calibrate models newly installed on the server, overnight, by itself
+    # (DockLlama does the same). Results only; it never switches models.
+    calibrate_new_models: bool = True
+    # The local hour overnight calibrations start (Calibrate all -> Tonight).
+    overnight_hour: int = 1
+
     # Hard cap on indexers per scoring call, independent of the token budget.
     #
     # Measured: qwen2.5-coder:7b scores 25 correctly, echoes the input at 30,
@@ -459,6 +465,9 @@ def _parse_ollama(o_raw: dict) -> "OllamaConfig":
             else o_raw.get("auto_update_check")),
         context_window=_as_int(o_raw.get("context_window"), 8192),
         think=_as_think(o_raw.get("think")),
+        calibrate_new_models=bool(True if o_raw.get("calibrate_new_models") is None
+                                  else o_raw.get("calibrate_new_models")),
+        overnight_hour=max(0, min(23, _as_int(o_raw.get("overnight_hour"), 1))),
         max_indexers_per_call=_as_int(
             o_raw.get("max_indexers_per_call"), 25),
         max_adjustment=_as_float(o_raw.get("max_adjustment"), 30.0),

@@ -441,82 +441,35 @@ def prowlarr_rescore():
 
 
 # ---------------------------------------------------------------------------
-# Model validation
+# Calibration
 #
-# Validation takes minutes: a cold model load plus two scoring calls, one of
-# them at full indexer count. Running that inside the request would hold a
-# waitress worker thread for the whole run, and enough concurrent attempts
-# would starve the pool and freeze the UI. So it runs on a background thread
-# and the browser polls -- the same shape ui/scheduler.py uses for scans.
-#
-# One run at a time: these are expensive, and a second concurrent run against
-# the same Ollama host would only make both slower and the timings meaningless.
+# Calibrating takes minutes, so it never runs inside a request: the
+# CalibrationRunner (core/calibration_runs.py) works through stored runs on
+# its own thread, one model at a time, and the page polls. A run survives a
+# restart; the model in progress starts again.
 # ---------------------------------------------------------------------------
-INFLIGHT_KEY = "validation_inflight"
-
 from core.ollama_models import DEFAULT_CONTEXT
 
-_validation_lock = threading.Lock()
-_validation_state = {"running": False, "model": None, "stage": None,
-                     "done": 0, "total": 3, "result": None, "error": None,
-                     "started_at": None}
+
+def _runner():
+    """The app's CalibrationRunner, started on first use outside tests."""
+    runner = current_app.config.get("CAL_RUNNER")
+    if runner and not runner.started and not current_app.config.get("TESTING"):
+        runner.start()
+    return runner
 
 
-def _validation_worker(app, config_path, url, model, timeout, context_window,
-                       indexer_count, system_prompt, calibration="quick",
-                       max_indexers_per_call=25):
-    from core.model_validator import validate_model
-
-    def progress(stage, done, total):
-        with _validation_lock:
-            _validation_state.update(stage=stage, done=done, total=total)
-
-    from core.ai_turn import ai_turn
-    from core.ollama_models import unload
-
-    try:
-        # One job on the AI at a time: wait for a scoring round to finish,
-        # then hold the AI for the whole calibration so live scoring cannot
-        # load models or change the context underneath the measurements.
-        progress("Waiting for the AI to be free", 0, 1)
-        with ai_turn("calibration", model, wait=None):
-            result = validate_model(url, model, timeout=timeout,
-                                    indexer_count=indexer_count,
-                                    system_prompt=system_prompt,
-                                    progress_cb=progress,
-                                    context_window=context_window,
-                                    calibration=calibration,
-                                    max_indexers_per_call=max_indexers_per_call)
-            # Free the memory unless this is the model in use (DockLlama's
-            # rule): a calibration should not leave a 13 GB model loaded.
-            try:
-                active = ((_load_raw(config_path).get("prowlarr") or {})
-                          .get("ollama") or {}).get("model")
-            except Exception:
-                active = None
-            if model != active:
-                unload(url, model)
-        digest = _ollama_digest(url, model)
-        state = app.config.get("STATE")
-        if state:
-            state.save_validation(model, result, digest=digest,
-                                  ollama_url=url)
-        with _validation_lock:
-            _validation_state.update(running=False, result=result, stage="Done")
-    except Exception as exc:
-        # A crash here must not leave the UI polling forever on running=True.
-        with _validation_lock:
-            _validation_state.update(running=False, error=str(exc),
-                                     stage="Failed")
-    finally:
-        # Always clear the in-flight marker -- a stale one would report a
-        # phantom interruption on the next poll.
-        try:
-            st = app.config.get("STATE")
-            if st:
-                st.set_app_state(INFLIGHT_KEY, "")
-        except Exception:
-            pass
+def _ai_server_or_error():
+    """(url, ollama dict, None) or (None, None, error response)."""
+    raw = _load_raw(current_app.config["CONFIG_PATH"])
+    ollama = (raw.get("prowlarr", {}) or {}).get("ollama", {}) or {}
+    url = (ollama.get("url") or "").strip()
+    # Calibration makes real model calls, so it honours the master switch.
+    if not ollama.get("enabled", bool(url)):
+        return None, None, (jsonify({"ok": False, "message": "AI features are disabled"}), 400)
+    if not url:
+        return None, None, (jsonify({"ok": False, "message": "Set an Ollama URL first"}), 400)
+    return url, ollama, None
 
 
 # ROADMAP item 13's lesson, applied again: identity and update checking are
@@ -706,121 +659,108 @@ def ai_calibration():
 
 @config_bp.route("/config/ai/validate", methods=["POST"])
 def ai_validate():
-    """Start a validation run in the background. Returns immediately."""
-    config_path = current_app.config["CONFIG_PATH"]
+    """Calibrate one model: a run with one model in it. Returns immediately."""
     data = request.get_json(silent=True) or {}
     model = (data.get("model") or "").strip()
-    # Calibrate is the only check. The old "quick" mode proved only that the
-    # configured batch size worked once, which is the claim calibration
-    # exists to replace; it is no longer offered.
-    calibration = "deep"
     if not model:
         return jsonify({"ok": False, "message": "No model specified"}), 400
-
-    with _validation_lock:
-        if _validation_state["running"]:
-            return jsonify({
-                "ok": False,
-                "message": f"Validation already running for "
-                           f"{_validation_state['model']}",
-            }), 409
-
     try:
-        raw = _load_raw(config_path)
-        ollama = (raw.get("prowlarr", {}) or {}).get("ollama", {}) or {}
-        url = (ollama.get("url") or "").strip()
-        # Validation makes real model calls, so it honours the master switch
-        # even though the form fields are read straight from the raw config.
-        if not ollama.get("enabled", bool(url)):
-            return jsonify({"ok": False,
-                            "message": "AI features are disabled"}), 400
-        if not url:
-            return jsonify({"ok": False,
-                            "message": "Set an Ollama URL first"}), 400
-
-        # Validate against the real indexer count so a pass means it works
-        # on this deployment, not in the abstract.
-        state = current_app.config.get("STATE")
-        indexer_count = 20
-        try:
-            if state:
-                rows = state.get_all_indexer_stats()
-                if rows:
-                    indexer_count = len(rows)
-        except Exception:
-            pass
-
-        # Calibrate at the context size this model will actually run with.
-        # The saved value belongs to whichever model is in use: for that
-        # model, use it (capped at the model's limit); for any other, use
-        # what choosing it would set -- 8K, or its maximum if smaller.
-        from core.ollama_models import (context_for_model, effective_context,
-                                        model_profile)
-        configured = _int(ollama.get("context_window"), DEFAULT_CONTEXT)
-        if model == (ollama.get("model") or ""):
-            context_window = effective_context(url, model, configured)
-        else:
-            context_window = context_for_model(
-                (model_profile(url, model) or {}).get("max_context"))
-
-        with _validation_lock:
-            _validation_state.update(
-                running=True, model=model, stage="Starting", done=0, total=3,
-                result=None, error=None, started_at=datetime.now().isoformat(),
-                indexer_count=indexer_count, calibration=calibration)
-
-        if state:
-            try:
-                state.set_app_state(INFLIGHT_KEY, model)
-            except Exception:
-                pass
-
-        t = threading.Thread(
-            target=_validation_worker,
-            args=(current_app._get_current_object(), config_path, url, model,
-                  _int(ollama.get("timeout"), 300),
-                  context_window,
-                  indexer_count,
-                  ollama.get("system_prompt") or "",
-                  calibration,
-                  _int(ollama.get("max_indexers_per_call"), 25)),
-            daemon=True, name=f"inspectarr-validate-{model}")
-        t.start()
-        return jsonify({"ok": True, "message": "Validation started",
-                        "indexer_count": indexer_count,
-                        "context_window": context_window,
-                        "calibration": calibration})
+        url, _ollama, err = _ai_server_or_error()
+        if err:
+            return err
+        runner, state = _runner(), current_app.config.get("STATE")
+        busy = [r for r in state.list_calibration_runs(("running",))]
+        if busy or (runner and runner.progress):
+            who = (runner.progress or {}).get("model") if runner else None
+            return jsonify({"ok": False, "message": f"Already calibrating {who or 'another model'}"}), 409
+        run_id = state.create_calibration_run(url, [model], kind="one")
+        if runner:
+            runner.wake()
+        return jsonify({"ok": True, "message": "Calibration started", "run_id": run_id})
     except Exception as exc:
-        with _validation_lock:
-            _validation_state.update(running=False)
         return jsonify({"ok": False, "message": safe_error(exc)}), 500
 
 
 @config_bp.route("/config/ai/validate/status", methods=["GET"])
 def ai_validate_status():
-    """Poll the in-flight (or most recent) validation run."""
-    with _validation_lock:
-        snapshot = {"ok": True, **_validation_state}
+    """What is being calibrated right now, for the model list."""
+    runner = current_app.config.get("CAL_RUNNER")
+    state = current_app.config.get("STATE")
+    p = dict((runner.progress if runner else None) or {})
+    running_runs = state.list_calibration_runs(("running",)) if state else []
+    waiting_now = []
+    if state and not p:
+        # Same format as stored start_after values (+00:00): mixed Z / +00:00
+        # strings do not compare correctly as text.
+        from datetime import timezone as _tz
+        now = datetime.now(_tz.utc).isoformat()
+        waiting_now = [r for r in state.list_calibration_runs(("waiting",)) if r["start_after"] <= now]
+    running = bool(p) or bool(running_runs) or bool(waiting_now)
+    if not p and (running_runs or waiting_now):
+        r = (running_runs or waiting_now)[0]
+        nxt = next((i for i in r["items"] if i["status"] in ("running", "queued")), None)
+        p = {"run_id": r["id"], "model": nxt["model"] if nxt else None, "stage": "Starting"}
+    return jsonify({"ok": True, "running": running, "model": p.get("model"),
+                    "stage": p.get("stage"), "done": p.get("done", 0), "total": p.get("total", 0),
+                    "position": p.get("position"), "of": p.get("of"), "run_id": p.get("run_id")})
 
-    # B-03: _validation_state lives in the process. If it says nothing is
-    # running but a marker survives in the database, the run was killed
-    # mid-flight (restart, crash) -- say so rather than showing nothing.
-    if not snapshot.get("running") and not snapshot.get("result"):
-        state = current_app.config.get("STATE")
-        if state:
-            try:
-                stale = state.get_app_state(INFLIGHT_KEY)
-                if stale:
-                    state.set_app_state(INFLIGHT_KEY, "")
-                    snapshot["interrupted"] = True
-                    snapshot["model"] = snapshot.get("model") or stale
-                    snapshot["stage"] = "Interrupted"
-                    snapshot["error"] = (
-                        f"Validation of {stale} was interrupted "
-                        f"(the service restarted). Run it again.")
-            except Exception:
-                pass
-    return jsonify(snapshot)
+
+@config_bp.route("/config/ai/runs", methods=["GET", "POST"])
+def ai_runs():
+    """GET: runs waiting, running or paused, the last finished one, and the
+    better-model banner. POST {models, when: now|tonight}: Calibrate all."""
+    state = current_app.config.get("STATE")
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        models = [m for m in (data.get("models") or []) if isinstance(m, str) and m.strip()]
+        if not models:
+            return jsonify({"ok": False, "message": "Tick at least one model"}), 400
+        url, ollama, err = _ai_server_or_error()
+        if err:
+            return err
+        from core.calibration_runs import DEFAULT_OVERNIGHT_HOUR, next_hour
+        start_after = None
+        if data.get("when") == "tonight":
+            start_after = next_hour(_int(ollama.get("overnight_hour"), DEFAULT_OVERNIGHT_HOUR))
+        run_id = state.create_calibration_run(url, models, start_after=start_after, kind="all")
+        runner = _runner()
+        if runner:
+            runner.wake()
+        return jsonify({"ok": True, "run_id": run_id, "start_after": start_after})
+    from core.calibration_runs import BANNER_KEY
+    banner = None
+    try:
+        raw_banner = state.get_app_state(BANNER_KEY) if state else None
+        banner = json.loads(raw_banner) if raw_banner else None
+    except (TypeError, ValueError):
+        banner = None
+    last = state.last_calibration_run() if state else None
+    return jsonify({"ok": True,
+                    "runs": state.list_calibration_runs() if state else [],
+                    "last": last if last and last["status"] in ("done", "cancelled") else None,
+                    "banner": banner})
+
+
+@config_bp.route("/config/ai/runs/<int:run_id>/<action>", methods=["POST"])
+def ai_run_action(run_id, action):
+    """Pause, resume or cancel a run."""
+    if action not in ("pause", "resume", "cancel"):
+        return jsonify({"ok": False, "message": "Unknown action"}), 400
+    runner = _runner()
+    if not runner:
+        return jsonify({"ok": False, "message": "Calibration is not available"}), 503
+    runner.request(run_id, action)
+    return jsonify({"ok": True})
+
+
+@config_bp.route("/config/ai/banner/dismiss", methods=["POST"])
+def ai_banner_dismiss():
+    """Keep the current model: hide the better-model banner."""
+    from core.calibration_runs import BANNER_KEY
+    state = current_app.config.get("STATE")
+    if state:
+        state.set_app_state(BANNER_KEY, "")
+    return jsonify({"ok": True})
 
 
 @config_bp.route("/config/ai/validation/delete", methods=["POST"])

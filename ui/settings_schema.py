@@ -181,6 +181,9 @@ FIELDS: list[Field] = [
       lo=1, hi=100, clamp=True),
     F("ollama_think", ("prowlarr", "ollama", "think"), "str", label="How the model thinks",
       clean=_think),
+    F("ollama_calibrate_new_models", ("prowlarr", "ollama", "calibrate_new_models"), "bool"),
+    F("ollama_overnight_hour", ("prowlarr", "ollama", "overnight_hour"), "int",
+      label="Overnight hour", lo=0, hi=23, clamp=True),
     F("ollama_context_window", ("prowlarr", "ollama", "context_window"), "int",
       lo=512, hi=262144, clamp=True),
     # --- Interface, security, data -----------------------------------------

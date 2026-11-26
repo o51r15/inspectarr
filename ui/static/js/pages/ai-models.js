@@ -27,6 +27,7 @@
     validations: {}, server: "", others: 0,
     hardware: "", hwOptions: [],
     running: null, poll: null, open: {}, history: {},
+    runs: [], last: null, banner: null, allOpen: false,
   };
 
   const $ = (id) => document.getElementById(id);
@@ -55,7 +56,7 @@
         S.details = {};
         (d.details || []).forEach((m) => { S.details[m.name] = m; });
         syncInUseControls();
-        return Promise.all([loadValidations(), loadHardware()]);
+        return Promise.all([loadValidations(), loadHardware(), loadRuns()]);
       })
       .catch(() => { S.loaded = true; S.error = "Could not reach the server"; render(); });
   }
@@ -335,10 +336,13 @@
     if (S.poll) clearInterval(S.poll);
     const tick = () => fetch("/config/ai/validate/status").then((r) => r.json()).then((s) => {
       if (s.running) {
-        S.running = { model: s.model, stage: s.stage, done: s.done, total: s.total };
+        S.running = { model: s.model, stage: s.stage, done: s.done, total: s.total,
+                      position: s.position, of: s.of, run_id: s.run_id };
         render();
+        loadRuns();
         return;
       }
+      loadRuns();
       clearInterval(S.poll); S.poll = null;
       const finished = S.running && S.running.model;
       S.running = null;
@@ -495,15 +499,171 @@
       .catch((e) => setPullUI("Could not start: " + e, 0, false));
   }
 
+
+  // --- runs: Calibrate all, overnight, pause / resume / cancel ------------------
+  function loadRuns() {
+    return fetch("/config/ai/runs").then((r) => r.json()).then((d) => {
+      S.runs = d.runs || [];
+      S.last = d.last || null;
+      S.banner = d.banner || null;
+      renderRunBar();
+      renderBanner();
+      if (S.runs.some((r) => r.status === "running") && !S.poll) poll();
+    }).catch(() => {});
+  }
+
+  function localTime(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? iso : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function itemMark(i) {
+    if (i.status === "done") return "✓ " + esc(i.model) + (i.score != null ? " (" + Math.round(i.score) + ")" : "");
+    if (i.status === "failed") return "✗ " + esc(i.model);
+    if (i.status === "running") return "▶ " + esc(i.model);
+    if (i.status === "cancelled") return "– " + esc(i.model);
+    return esc(i.model);
+  }
+
+  function renderRunBar() {
+    const bar = $("ai-run-bar");
+    if (!bar) return;
+    if (!S.runs.length) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+    bar.style.display = "";
+    bar.innerHTML = S.runs.map((r) => {
+      const total = r.items.length;
+      const done = r.items.filter((i) => i.status === "done" || i.status === "failed").length;
+      let head;
+      if (r.status === "running") {
+        const cur = r.items.find((i) => i.status === "running");
+        head = `Calibrating ${done + 1} of ${total}` + (cur ? ": <strong>" + esc(cur.model) + "</strong>" : "");
+      } else if (r.status === "paused") {
+        head = `Paused after ${done} of ${total}`;
+      } else {
+        const later = new Date(r.start_after) > new Date();
+        head = later ? `Waiting until ${esc(localTime(r.start_after))}: ${total} model${total === 1 ? "" : "s"}`
+                     : `Starting: ${total} model${total === 1 ? "" : "s"}`;
+      }
+      const btns = [];
+      if (r.status === "paused") btns.push(`<button type="button" class="btn btn-ghost btn-xs" data-action="ai-run" data-run="${r.id}" data-what="resume">Resume</button>`);
+      else btns.push(`<button type="button" class="btn btn-ghost btn-xs" data-action="ai-run" data-run="${r.id}" data-what="pause">Pause</button>`);
+      btns.push(`<button type="button" class="btn btn-ghost btn-xs" data-action="ai-run" data-run="${r.id}" data-what="cancel">Cancel</button>`);
+      return `<div class="panel-sm mb-8"><div class="flex items-center justify-between gap-8 flex-wrap">` +
+        `<span>${head}${r.note ? ' <span class="hint">(' + esc(r.note) + ")</span>" : ""}</span>` +
+        `<span class="flex gap-8">${btns.join("")}</span></div>` +
+        `<div class="hint mt-4">${r.items.map(itemMark).join(" · ")}</div></div>`;
+    }).join("");
+  }
+
+  function runAction(id, what) {
+    if (what === "cancel" && !confirm("Cancel this run? The model in progress stops at its next step; " +
+        "results already finished are kept.")) return;
+    fetch(`/config/ai/runs/${id}/${what}`, { method: "POST" }).then(() => setTimeout(loadRuns, 300));
+  }
+
+  function renderBanner() {
+    const box = $("ai-banner");
+    if (!box) return;
+    const b = S.banner;
+    if (!b || !b.model || b.model === S.current) { box.style.display = "none"; box.innerHTML = ""; return; }
+    box.style.display = "";
+    box.innerHTML = `<strong>${esc(b.model)}</strong> did clearly better here: ${Math.round(b.score)}/100` +
+      (b.current_score != null ? ` against ${Math.round(b.current_score)} for ${esc(b.current)}, the model in use` : "") +
+      ".<div class=\"flex gap-8 mt-8\">" +
+      `<button type="button" class="btn btn-ghost btn-sm" data-action="ai-banner" data-what="review" data-model="${esc(b.model)}">Review results</button>` +
+      `<button type="button" class="btn btn-primary btn-sm" data-action="ai-banner" data-what="switch" data-model="${esc(b.model)}">Switch to it</button>` +
+      `<button type="button" class="btn btn-ghost btn-sm" data-action="ai-banner" data-what="keep">Keep current</button></div>`;
+  }
+
+  function bannerAction(what, model) {
+    if (what === "review") {
+      S.open[model] = true; render();
+      const row = document.querySelector(`[data-model-row="${CSS.escape(model)}"]`);
+      if (row) row.scrollIntoView({ block: "center" });
+      if (!S.history[model]) loadHistory(model);
+      return;
+    }
+    const done = () => fetch("/config/ai/banner/dismiss", { method: "POST" }).then(loadRuns);
+    if (what === "switch") useModel(model);
+    done();
+  }
+
+  // Rough time for one model, for the estimate: the last calibration of it
+  // here if there is one, else by size (big models load and think slower).
+  function estimateMinutes(name) {
+    const d = S.details[name] || {};
+    return d.size_gb > 10 ? 15 : 7;
+  }
+
+  function overnightHour() {
+    const el = $("ollama_overnight_hour");
+    return el ? parseInt(el.value, 10) || 0 : 1;
+  }
+
+  function renderAllPanel() {
+    const box = $("ai-all-panel");
+    if (!box) return;
+    if (!S.allOpen) { box.style.display = "none"; box.innerHTML = ""; return; }
+    box.style.display = "";
+    const usable = ordered().filter((n) => group(n) < 5);
+    box.innerHTML = '<p class="m-0 mb-8">Calibrate these models one after another. Each is loaded in turn, ' +
+      "so other apps using this Ollama server will be slower while it runs.</p>" +
+      '<div class="check-list">' + usable.map((n) =>
+        `<label class="block"><input type="checkbox" class="ai-all-pick" value="${esc(n)}" checked> ${esc(n)}` +
+        (mayNotFit(S.details[n]) ? ' <span class="badge badge-warn">may not fit</span>' : "") + "</label>").join("") +
+      "</div>" +
+      '<p class="hint mt-8 mb-8" id="ai-all-estimate"></p>' +
+      '<div class="flex gap-8 flex-wrap">' +
+      '<button type="button" class="btn btn-primary btn-sm" data-action="ai-all-start" data-when="now">Run now</button>' +
+      `<button type="button" class="btn btn-ghost btn-sm" data-action="ai-all-start" data-when="tonight">Tonight at ${String(overnightHour()).padStart(2, "0")}:00</button>` +
+      '<button type="button" class="btn btn-ghost btn-sm" data-action="ai-all-close">Cancel</button></div>';
+    updateEstimate();
+  }
+
+  function picked() {
+    return Array.from(document.querySelectorAll(".ai-all-pick")).filter((c) => c.checked).map((c) => c.value);
+  }
+
+  function updateEstimate() {
+    const el = $("ai-all-estimate");
+    if (!el) return;
+    const p = picked();
+    const mins = p.reduce((a, n) => a + estimateMinutes(n), 0);
+    el.textContent = p.length ? `${p.length} model${p.length === 1 ? "" : "s"}, roughly ` +
+      (mins >= 90 ? Math.round(mins / 60) + " hours" : mins + " minutes") + "." : "Tick at least one model.";
+  }
+
+  function startAll(when) {
+    const models = picked();
+    if (!models.length) return;
+    fetch("/config/ai/runs", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ models, when }),
+    }).then((r) => r.json()).then((d) => {
+      const note = $("ai-run-note");
+      if (!d.ok) { if (note) note.textContent = d.message || "Could not start"; return; }
+      S.allOpen = false; renderAllPanel();
+      if (note) note.textContent = when === "tonight"
+        ? "Queued for " + localTime(d.start_after) + "." : "Calibration started.";
+      loadRuns().then(() => { if (when !== "tonight") poll(); });
+    });
+  }
+
   // --- wiring --------------------------------------------------------------------------
   Actions["ai-refresh"] = () => loadOllamaModels();
   Actions["ai-calibrate"] = (el) => calibrate(el.dataset.model);
   Actions["ai-use"] = (el) => useModel(el.dataset.model);
   Actions["ai-results"] = (el) => toggleResults(el.dataset.model);
   Actions["ai-forget"] = (el) => forget(el.dataset.model);
+  Actions["ai-run"] = (el) => runAction(el.dataset.run, el.dataset.what);
+  Actions["ai-banner"] = (el) => bannerAction(el.dataset.what, el.dataset.model);
+  Actions["ai-all-open"] = () => { S.allOpen = true; renderAllPanel(); };
+  Actions["ai-all-close"] = () => { S.allOpen = false; renderAllPanel(); };
+  Actions["ai-all-start"] = (el) => startAll(el.dataset.when);
 
   document.addEventListener("change", (e) => {
     if (e.target && e.target.id === "ai-hardware") saveHardware(e.target.value);
+    if (e.target && e.target.classList && e.target.classList.contains("ai-all-pick")) updateEstimate();
   });
   document.addEventListener("input", (e) => {
     if (e.target && e.target.id === "ollama-context-slider") onContextSlide();

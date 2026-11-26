@@ -69,6 +69,8 @@ DEFAULTS: dict = {
             "update_check_hours": 24,
             "auto_update_check": True,
             "context_window": 8192,
+            "calibrate_new_models": True,
+            "overnight_hour": 1,
             "max_indexers_per_call": 25,
             "max_adjustment": 30.0,
             "max_mean_deviation": 25.0,
