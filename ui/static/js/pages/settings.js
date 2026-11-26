@@ -196,7 +196,10 @@
   loadValidations();
   (function () {
     const u = document.getElementById('ollama_url');
-    if (u) u.addEventListener('input', syncAiDependentControls);
+    if (u) {
+      u.addEventListener('input', syncAiDependentControls);
+      u.addEventListener('input', syncServerNotice);
+    }
   })();
 
   // Sidebar sub-item clicks: switch pane without a full reload (same page)
@@ -745,19 +748,17 @@
   // entirely. So every state also carries a glyph and a word, and the colour
   // is the enhancement rather than the message.
   //
-  // Two states beyond the obvious four, both of which would otherwise get a
-  // colour that flatters them:
+  // One state beyond the obvious four, which would otherwise get a colour
+  // that flatters it:
   //   forced    -- applied deliberately WITHOUT passing. Not a failure, but
   //                not trustworthy either, so it sits with the red group.
-  //   mismatch  -- passed, but against a different Ollama host. Showing that
-  //                green is precisely the silent carry-over that moving from
-  //                .125 to .97 caused.
+  // Results are stored per server and only the connected server's are
+  // loaded, so there is no "passed somewhere else" state to show.
   const MODEL_STATES = {
-    untested:   {cls: 'ms-none', text: '\u2014 untested'},
+    untested:   {cls: 'ms-none', text: '\u2014 not checked'},
     failed:     {cls: 'ms-bad',  text: '\u2717 failed'},
     forced:     {cls: 'ms-bad',  text: '\u26a0 forced'},
-    mismatch:   {cls: 'ms-bad',  text: '\u26a0 other host'},
-    validated:  {cls: 'ms-warn', text: '\u2713 validated'},
+    validated:  {cls: 'ms-warn', text: '\u2713 passed'},
     calibrated: {cls: 'ms-good', text: '\u2713 calibrated'},
   };
 
@@ -766,7 +767,6 @@
     if (rec.status === 'failed') return 'failed';
     if (rec.status === 'forced') return 'forced';
     if (rec.status !== 'supported') return 'untested';
-    if (rec.host_state === 'mismatch') return 'mismatch';
     return rec.calibrated ? 'calibrated' : 'validated';
   }
 
@@ -776,8 +776,8 @@
 
   // Kept for the detail box, which describes the RECORD rather than the
   // model's usable state.
-  const VAL_MARK = {supported: '✓ validated', failed: '✗ failed',
-                    forced: '⚠ forced'};
+  const VAL_MARK = {supported: '✓ passed', failed: '✗ failed',
+                    forced: '⚠ used without passing'};
 
   // Colour AND text on every option.
   //
@@ -813,11 +813,11 @@
     const box = document.getElementById('validation-detail');
     if (!sel || !box) return;
     const model = sel.value;
-    if (!model) { box.textContent = 'Select a model to see its validation status.'; return; }
+    if (!model) { box.textContent = 'Pick a model to see whether it has been checked on this server.'; return; }
     const rec = _validations[model];
     if (!rec) {
-      box.innerHTML = '<strong>' + escapeHtml(model) + '</strong> — not yet validated. ' +
-                      'Click Validate to test it.';
+      box.innerHTML = '<strong>' + escapeHtml(model) + '</strong> has not been checked on ' +
+                      'this server. Run <strong>Quick check</strong> (about 1-3 minutes).';
       return;
     }
     let rows = (rec.tests || []).map(function (t) {
@@ -828,7 +828,8 @@
     box.innerHTML =
       '<strong>' + escapeHtml(model) + '</strong> — ' +
       (VAL_MARK[rec.status] || rec.status) +
-      (rec.indexer_count ? ' at ' + rec.indexer_count + ' indexers' : '') +
+      (rec.calibrated && rec.max_safe_batch ? ', up to ' + rec.max_safe_batch + ' indexers per call' : '') +
+      (rec.indexer_count ? ', tested with ' + rec.indexer_count + ' indexers' : '') +
       (rec.avg_response_ms ? ', avg ' + Math.round(rec.avg_response_ms / 1000) + 's' : '') +
       (when ? ', ' + when : '') +
       (rows ? '<ul class="reason-ul">' + rows + '</ul>' : '');
@@ -850,14 +851,43 @@
         decorateModelOptions();
         renderValidationDetail();
         renderValidationTable(d.validations || []);
+        renderServerNote(d.server || '', d.other_servers || 0);
       })
       .catch(function () { /* status display only -- never block the pane */ });
+  }
+
+  // Which server everything below the URL describes, and that results from
+  // other servers are kept rather than lost.
+  function renderServerNote(server, others) {
+    const note = document.getElementById('ollama-server-note');
+    if (!note) return;
+    if (!server) {
+      note.textContent = 'Set a server URL and save to see its models.';
+      return;
+    }
+    note.innerHTML = 'Models and check results below are for <code>' + escapeHtml(server) +
+      '</code>.' + (others
+        ? ' Results from ' + others + ' other server' + (others === 1 ? '' : 's') +
+          ' are kept and come back when you switch to ' + (others === 1 ? 'it' : 'one') + '.'
+        : '');
+  }
+
+  // "Save to switch": the model list and results follow the SAVED url, so a
+  // typed-but-unsaved url must not look as if it were already in use.
+  function syncServerNotice() {
+    const input = document.getElementById('ollama_url');
+    const box = document.getElementById('ollama-url-unsaved');
+    if (!input || !box) return;
+    const norm = u => (u || '').trim().replace(/\/+$/, '').toLowerCase();
+    box.style.display = norm(input.value) !== norm(input.dataset.savedUrl) ? '' : 'none';
   }
 
   function renderValidationTable(list) {
     const tbl = document.getElementById('validation-table');
     const body = document.getElementById('validation-tbody');
+    const empty = document.getElementById('validation-empty');
     if (!tbl || !body) return;
+    if (empty) empty.style.display = list.length ? 'none' : '';
     if (!list.length) { tbl.style.display = 'none'; return; }
     tbl.style.display = '';
     function cell(t) {
@@ -879,32 +909,14 @@
       const calCell = v.calibrated
         ? '<td class="mono ms-good" title="Largest batch that scored cleanly '
           + 'twice in a row">\u2713 ' + (v.max_safe_batch || '?') + '/call</td>'
-        : '<td class="mono ms-warn" title="Validated, but the batch ceiling '
-          + 'was never measured. Run Calibrate.">\u2014</td>';
-
-      // Which machine earned this verdict. Blank host means the record
-      // predates host tracking, which is not the same as a wrong host.
-      let hostCell;
-      if (v.host_state === 'mismatch') {
-        hostCell = '<td class="mono ms-bad" title="' + escapeHtml(v.ollama_url || '')
-          + '">other host</td>';
-      } else if (v.host_state === 'match') {
-        hostCell = '<td class="mono ms-good" title="' + escapeHtml(v.ollama_url || '')
-          + '">this host'
-          + (v.gpu_offload_pct === null || v.gpu_offload_pct === undefined ? ''
-             : ' \u00b7 ' + (v.gpu_offload_pct === 0 ? 'CPU'
-                              : v.gpu_offload_pct + '% GPU'))
-          + '</td>';
-      } else {
-        hostCell = '<td class="mono ms-none" title="Recorded before the host '
-          + 'was tracked">unknown</td>';
-      }
+        : '<td class="mono ms-warn" title="Passed, but its batch size was never '
+          + 'measured. Run Calibrate.">\u2014</td>';
 
       return '<tr>' +
         '<td class="mono">' + escapeHtml(v.model) + '</td>' +
         '<td class="' + st.cls + '">' + st.text + '</td>' +
         cell(byName.disc) + cell(byName.schema) + cell(byName.ctx) +
-        calCell + hostCell +
+        calCell +
         '<td class="mono">' + (v.avg_response_ms
             ? Math.round(v.avg_response_ms / 1000) + 's' : '—') + '</td>' +
         '<td class="mono">' + escapeHtml((v.validated_at || '')
@@ -968,11 +980,8 @@
     const cal = BATCH_CAL || {};
 
     if (!cal.calibrated || !cal.max_safe_batch) {
-      note.textContent = cal.host_state === 'mismatch'
-        ? 'Not calibrated on this host \u2014 the stored result came from '
-          + (cal.validated_on || 'another server') + '. Run Calibrate.'
-        : 'Not calibrated. Run Calibrate to measure the largest batch this '
-          + 'model handles reliably here.';
+      note.textContent = 'Not calibrated on this server. Run Calibrate to measure '
+          + 'the largest batch this model handles reliably here.';
       note.style.color = 'var(--warning)';
       return;
     }
@@ -984,7 +993,7 @@
            + (cal.tok_per_s ? ', ' + cal.tok_per_s + ' tok/s' : '') + ')';
     }
     if (v <= safe) {
-      note.textContent = 'Measured safe up to ' + safe + ' on this host' + hw + '.';
+      note.textContent = 'Measured safe up to ' + safe + ' on this server' + hw + '.';
       note.style.color = 'var(--success)';
     } else {
       note.textContent = 'Above the measured ceiling of ' + safe
@@ -1132,6 +1141,8 @@
         status.className = 'hint ' + (res.d.ok ? 'ms-good' : 'ms-bad');
       }
       if (res.d.ok) {
+        const inUse = document.getElementById('ollama-in-use');
+        if (inUse) inUse.innerHTML = 'In use: <code>' + escapeHtml(model) + '</code>';
         // A validated-but-uncalibrated model applies cleanly -- it scores
         // correctly, only its batch ceiling is unmeasured. That does not
         // warrant a dialog; it warrants a sentence. Blocking it would put a
@@ -1161,33 +1172,25 @@
   // passed on another host, and unhelpful for one that had failed outright.
   const APPLY_COPY = {
     untested: {
-      title: 'Apply an untested model?',
+      title: 'Use an unchecked model?',
       known: 'Nothing is known about this model on this server yet.',
-      advice: 'Run <strong>Quick Check</strong> first (about 1-3 minutes) to '
+      advice: 'Run <strong>Quick check</strong> first (about 1-3 minutes) to '
               + 'confirm it can score at all, or <strong>Calibrate</strong> to '
               + 'do that and measure its batch size.',
     },
     failed: {
-      title: 'Apply a model that failed?',
+      title: 'Use a model that failed?',
       known: 'This model was tested and <strong>failed</strong>. It did not '
              + 'score correctly on this server.',
       advice: 'Choosing a different model is usually the right move. The '
               + 'failure detail is in the table below.',
     },
     forced: {
-      title: 'Apply an unvalidated model again?',
+      title: 'Use an unchecked model again?',
       known: 'This model was previously applied <strong>without passing '
              + 'validation</strong>.',
-      advice: 'Run <strong>Quick Check</strong> to find out whether it '
+      advice: 'Run <strong>Quick check</strong> to find out whether it '
               + 'actually works before relying on it.',
-    },
-    mismatch: {
-      title: 'Apply a model validated on another server?',
-      known: 'This model passed \u2014 but on a <strong>different Ollama '
-             + 'host</strong>, so that result does not describe this one.',
-      advice: 'Batch size and reliability differ between machines: the same '
-              + 'model can score cleanly on one host and drop indexers on '
-              + 'another. Run <strong>Calibrate</strong> here.',
     },
   };
 
@@ -1195,19 +1198,13 @@
     const existing = document.getElementById('apply-anyway-backdrop');
     if (existing) existing.remove();
     payload = payload || {};
-    // The server sends status + host_state; derive the same key the badges
+    // The server sends status; derive the same key the badges
     // use so the dialog can never describe a different state than the row.
     let key = 'untested';
     if (payload.status === 'failed') key = 'failed';
     else if (payload.status === 'forced') key = 'forced';
-    else if (payload.host_state === 'mismatch') key = 'mismatch';
     const copy = APPLY_COPY[key] || APPLY_COPY.untested;
-    const known = copy.known
-      + (key === 'mismatch' && payload.validated_on
-         ? ' <br><span class="hint">Validated on <code>'
-           + escapeHtml(payload.validated_on) + '</code>, now using <code>'
-           + escapeHtml(payload.current_host || '?') + '</code>.</span>'
-         : '');
+    const known = copy.known;
     const wrap = document.createElement('div');
     wrap.id = 'apply-anyway-backdrop';
     wrap.setAttribute('role', 'dialog');
