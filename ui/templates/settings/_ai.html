@@ -26,27 +26,21 @@
           </details>
         </div>
 
-        {#- 2. The server. Everything under it is about the SAVED server. -#}
+        {#- 2. Which server. The address itself is set under Connections, with
+            every other service; this only says which one the list below is for. -#}
         <div class="form-section">
           <div class="form-section-title">Ollama server</div>
-          <div class="form-group">
-            <label for="ollama_url">Server URL</label>
-            <div class="flex gap-8 items-center">
-              <input type="text" name="ollama_url" id="ollama_url" class="flex-1"
-                     data-saved-url="{{ ai.get('url','') }}"
-                     placeholder="http://192.168.1.125:11434"
-                     value="{{ ai.get('url','') }}">
-              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testOllama">Test</button>
-            </div>
-            <span id="ollama-test-status" class="hint" role="status"></span>
-          </div>
-          <div id="ollama-url-unsaved" class="callout d-none mb-8" role="status">
-            You changed the server. <strong>Save</strong> to switch to it. Until then, the
-            models and results below are still for the saved server.
-          </div>
+          {% if ai.get('url') %}
           <p class="hint m-0" id="ollama-server-note">
-            Models and check results below are for this server.
+            Models and check results below are for <code>{{ ai.get('url') }}</code>.
           </p>
+          <p class="hint m-0 mt-4">Change the server under <a href="/config#connections">Connections</a>.</p>
+          {% else %}
+          <div class="callout" id="ollama-server-note">
+            No Ollama server yet. Add its address under <a href="/config#connections">Connections</a>,
+            save, then come back here to pick a model.
+          </div>
+          {% endif %}
         </div>
 
         {#- 3. The model: pick, see its result right here, act. -#}

@@ -27,7 +27,7 @@
 
         <p class="hint mb-16">
           Inspectarr needs your download client, and at least one of Sonarr, Radarr or Lidarr
-          so it can block a bad release and ask for another.
+          so it can block a bad release and ask for another one.
         </p>
 
         {# ---------------- Download client ---------------- #}
@@ -136,5 +136,66 @@
             {{ test_row(app) }}
           </div>
         {% endfor %}
+        </div>
+
+        {# ---------------- Optional services ---------------- #}
+        <h3 class="conn-group-title">Optional</h3>
+        <p class="hint mb-16">Inspectarr works without these. Connect them to unlock extra features.</p>
+        <div class="conn-grid">
+          {% set pr = cfg.get('prowlarr', {}) %}
+          <div class="card conn-card">
+            <div class="conn-card-head">
+              <div class="conn-card-title">Prowlarr <span class="hint">Indexer health</span></div>
+              {{ status_pill("Prowlarr") }}
+            </div>
+            <div class="toggle-row">
+              <input type="hidden" name="_rendered" value="prowlarr_enabled">
+              <input type="checkbox" name="prowlarr_enabled" id="prowlarr_enabled"
+                     {{ 'checked' if pr.get('enabled') else '' }}>
+              <label for="prowlarr_enabled">Use Prowlarr</label>
+            </div>
+            <p class="hint m-0">Lets Inspectarr rate your indexers and put the reliable ones first.
+              Set it up under <a href="/config#indexers">Indexer health</a>.</p>
+            <div class="form-group">
+              <label for="prowlarr_url">URL</label>
+              <input type="text" name="prowlarr_url" id="prowlarr_url" value="{{ pr.get('url','') }}"
+                     placeholder="http://192.168.1.100:9696">
+            </div>
+            {% call creds("API key", pr.get('api_key')) %}
+            <div class="form-group">
+              <label for="prowlarr_api_key">API key</label>
+              <input type="password" name="prowlarr_api_key" id="prowlarr_api_key" value="{{ pr.get('api_key','') }}" autocomplete="off">
+              <div class="hint">In Prowlarr: Settings → General → Security → API Key.</div>
+            </div>
+            {% endcall %}
+            <div class="conn-test">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testProwlarr">Test</button>
+              <span id="prowlarr-status" class="hint" role="status"></span>
+            </div>
+          </div>
+
+          {% set ol = cfg.get('prowlarr', {}).get('ollama', {}) %}
+          <div class="card conn-card">
+            <div class="conn-card-head">
+              <div class="conn-card-title">Ollama <span class="hint">AI</span></div>
+              {{ status_pill("Ollama") }}
+            </div>
+            <p class="hint m-0">A local AI server for indexer opinions and written summaries.
+              Turn AI on and pick a model under <a href="/config#ai">AI</a>.</p>
+            <div class="form-group">
+              <label for="ollama_url">URL</label>
+              <input type="text" name="ollama_url" id="ollama_url"
+                     data-saved-url="{{ ol.get('url','') }}"
+                     value="{{ ol.get('url','') }}" placeholder="http://192.168.1.100:11434">
+            </div>
+            <div id="ollama-url-unsaved" class="callout d-none" role="status">
+              You changed the server. <strong>Save</strong> to switch to it; until then the AI tab
+              still shows the saved server's models.
+            </div>
+            <div class="conn-test">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="testOllama">Test</button>
+              <span id="ollama-test-status" class="hint" role="status"></span>
+            </div>
+          </div>
         </div>
       </div>

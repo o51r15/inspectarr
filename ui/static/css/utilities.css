@@ -71,7 +71,11 @@
 .mw-160 { max-width: 160px; }
 .mw-200 { max-width: 200px; }
 .mw-220 { max-width: 220px; }
+.mw-260 { max-width: 260px; }
+.mw-320 { max-width: 320px; }
+.mw-420 { max-width: 420px; }
 .w-140 { width: 140px; }
+.w-72 { width: 72px; }
 .minh-500 { min-height: 500px; }
 .overflow-x-auto { overflow-x: auto; }
 .align-top, .align-top > td { vertical-align: top; }

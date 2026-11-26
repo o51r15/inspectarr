@@ -1,77 +1,107 @@
       <!-- PANE: Scanning -->
+      {% from "settings/_ui.html" import choice_select %}
+      {% set sc = cfg.get('scanning', {}) %}
+      {% set pol = sc.get('polling', {}) %}
+      {% set wh = sc.get('webhooks', {}) %}
+      {% set rt = cfg.get('retry', {}) %}
       <div class="settings-pane" data-pane="scanning">
+
         <div class="form-section">
-          <div class="form-section-title">Scan Triggers</div>
-          <p class="hint mb-12">
-            Configure how inspectarr detects new torrents. Polling and webhooks can be used independently or together.
-          </p>
-
-          <div class="grid grid-2 gap-24">
-            <div class="panel">
-              <div class="font-semibold mb-8">Polling</div>
-              <div class="toggle-row mb-12">
-                <input type="hidden" name="_rendered" value="polling_enabled">
-                <input type="checkbox" name="polling_enabled" id="polling_enabled"
-                       {{ 'checked' if cfg.get('scanning',{}).get('polling',{}).get('enabled', True) else '' }}>
-                <label for="polling_enabled">Enabled</label>
-              </div>
-              <div class="form-group">
-                <label>Interval (seconds)</label>
-                <input type="number" name="polling_interval_seconds"
-                       value="{{ cfg.get('scanning',{}).get('polling',{}).get('interval_seconds', cfg.get('poll_interval_seconds', 300)) }}"
-                       min="60">
-                <div class="hint">How often to poll qBittorrent for new torrents</div>
-              </div>
-            </div>
-
-            <div class="panel">
-              <div class="font-semibold mb-8">Event-Driven (Webhooks)</div>
-              <div class="toggle-row mb-12">
-                <input type="hidden" name="_rendered" value="webhooks_enabled">
-                <input type="checkbox" name="webhooks_enabled" id="webhooks_enabled"
-                       {{ 'checked' if cfg.get('scanning',{}).get('webhooks',{}).get('enabled') else '' }}>
-                <label for="webhooks_enabled">Enabled</label>
-              </div>
-              <div class="form-group">
-                <label>Scan Delay (seconds)</label>
-                <input type="number" name="webhooks_scan_delay"
-                       value="{{ cfg.get('scanning',{}).get('webhooks',{}).get('scan_delay_seconds', 60) }}"
-                       min="5" max="600">
-                <div class="hint">Wait for torrent to connect to swarm before scanning</div>
-              </div>
-              <div class="form-group">
-                <label>Shared Secret</label>
-                <input type="text" name="webhooks_secret" autocomplete="off"
-                       value="{{ cfg.get('scanning',{}).get('webhooks',{}).get('secret', '') }}"
-                       placeholder="Optional — leave blank for no auth">
-                <div class="hint">Set in *arr webhook headers as X-Webhook-Secret</div>
-              </div>
-              <div class="hint mt-8">
-                Webhook URLs:<br>
-                <code class="text-xs">POST /webhook/sonarr</code> &nbsp;
-                <code class="text-xs">POST /webhook/radarr</code> &nbsp;
-                <code class="text-xs">POST /webhook/lidarr</code>
-              </div>
-            </div>
+          <div class="form-section-title">Check for new downloads</div>
+          <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="polling_enabled">
+            <input type="checkbox" name="polling_enabled" id="polling_enabled"
+                   {{ 'checked' if pol.get('enabled', True) else '' }}>
+            <label for="polling_enabled">Check my download client on a schedule</label>
+          </div>
+          <div class="form-group mw-320">
+            <label for="polling_interval_seconds">How often</label>
+            {{ choice_select("polling_interval_seconds", "polling_interval_seconds",
+                             pol.get('interval_seconds', cfg.get('poll_interval_seconds', 300)),
+                             [(60, 'Every minute'), (120, 'Every 2 minutes'), (300, 'Every 5 minutes'),
+                              (600, 'Every 10 minutes'), (900, 'Every 15 minutes'),
+                              (1800, 'Every 30 minutes'), (3600, 'Every hour')], "seconds") }}
+            <span class="hint">More often catches bad releases sooner. Every 5 minutes suits most people.</span>
           </div>
         </div>
 
+        <div class="form-section">
+          <div class="form-section-title">Instant checks <span class="hint">(optional)</span></div>
+          <div class="toggle-row mb-12">
+            <input type="hidden" name="_rendered" value="webhooks_enabled">
+            <input type="checkbox" name="webhooks_enabled" id="webhooks_enabled"
+                   {{ 'checked' if wh.get('enabled') else '' }}>
+            <label for="webhooks_enabled">Let Sonarr and Radarr tell Inspectarr the moment they grab something</label>
+          </div>
+          <p class="hint mb-12">Works alongside scheduled checks. Set it up once in each app:</p>
+
+          {% set base = request.host_url %}
+          <div class="webhook-apps">
+            {% for app, title in [('sonarr', 'Sonarr'), ('radarr', 'Radarr'), ('lidarr', 'Lidarr')] %}
+            {% if cfg.get('arrs', {}).get(app, {}).get('enabled') %}
+            <div class="card webhook-card">
+              <div class="conn-card-title mb-8">{{ title }}</div>
+              <ol class="steps">
+                <li>In {{ title }}, open <strong>Settings → Connect</strong>, press <strong>+</strong> and choose <strong>Webhook</strong>.</li>
+                <li>Name it <code>Inspectarr</code> and tick <strong>On Grab</strong> only.</li>
+                <li>Set <strong>URL</strong> to
+                  <span class="copy-field">
+                    <code id="webhook-url-{{ app }}">{{ base }}webhook/{{ app }}</code>
+                    <button type="button" class="btn btn-ghost btn-xs" data-action="call" data-fn="copyText"
+                            data-args='{{ ["webhook-url-" ~ app]|tojson }}'>Copy</button>
+                  </span>
+                  and <strong>Method</strong> to <code>POST</code>.</li>
+                <li>If you set a secret below: under <strong>Headers</strong> add
+                  <code>X-Webhook-Secret</code> with your secret as the value.</li>
+                <li>Press <strong>Test</strong>, then <strong>Save</strong>.</li>
+              </ol>
+            </div>
+            {% endif %}
+            {% endfor %}
+          </div>
+
+          <div class="form-group mt-12">
+            <label for="webhooks_secret">Secret <span class="hint">(recommended)</span></label>
+            <div class="flex gap-8 items-center">
+              <input type="text" name="webhooks_secret" id="webhooks_secret" class="flex-1 mono" autocomplete="off"
+                     value="{{ wh.get('secret', '') }}" placeholder="None: anyone on your network could trigger a check">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="generateSecret">Make one</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="call" data-fn="copyText"
+                      data-args='["webhooks_secret"]'>Copy</button>
+            </div>
+            <span class="hint">A saved secret shows as dots. To see one again, make a new one, copy it into each app, then save here.</span>
+          </div>
+          {% if wh.get('enabled') and not wh.get('secret') %}
+          <div class="callout mt-8">Instant checks are on without a secret, so anything on your network can trigger a check. Make a secret and add it to each app.</div>
+          {% endif %}
+        </div>
+
         <div class="form-section" data-level="advanced">
-          <div class="form-section-title">Retry</div>
-          <div class="toggle-row">
+          <div class="form-section-title">Timing and retries</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="webhooks_scan_delay">After an instant notice, wait (seconds)</label>
+              <input type="number" name="webhooks_scan_delay" id="webhooks_scan_delay" min="5" max="600"
+                     value="{{ wh.get('scan_delay_seconds', 60) }}">
+              <span class="hint">Gives the download a moment to start, so there are files to look at.</span>
+            </div>
+          </div>
+          <div class="toggle-row mb-12">
             <input type="hidden" name="_rendered" value="retry_enabled">
             <input type="checkbox" name="retry_enabled" id="retry_enabled"
-                   {{ 'checked' if cfg.get('retry',{}).get('enabled', True) else '' }}>
-            <label for="retry_enabled">Enabled</label>
+                   {{ 'checked' if rt.get('enabled', True) else '' }}>
+            <label for="retry_enabled">If removing a release fails, try again</label>
           </div>
-          <div class="form-row form-row-3">
+          <div class="form-row">
             <div class="form-group">
-              <label>Max Attempts</label>
-              <input type="number" name="retry_max_attempts" value="{{ cfg.get('retry',{}).get('max_attempts', 10) }}" min="1">
+              <label for="retry_max_attempts">Give up after (tries)</label>
+              <input type="number" name="retry_max_attempts" id="retry_max_attempts" min="1"
+                     value="{{ rt.get('max_attempts', 10) }}">
             </div>
             <div class="form-group">
-              <label>Interval (seconds)</label>
-              <input type="number" name="retry_interval_seconds" value="{{ cfg.get('retry',{}).get('interval_seconds', 600) }}" min="60">
+              <label for="retry_interval_seconds">Wait between tries (seconds)</label>
+              <input type="number" name="retry_interval_seconds" id="retry_interval_seconds" min="60"
+                     value="{{ rt.get('interval_seconds', 600) }}">
             </div>
           </div>
         </div>

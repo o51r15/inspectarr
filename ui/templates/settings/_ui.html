@@ -1,0 +1,18 @@
+{#- Shared controls for the Settings panes. Import with:
+    {% from "settings/_ui.html" import choice_select %} -#}
+
+{% macro choice_select(name, id, value, options, unit) -%}
+  {#- A dropdown of common values. A stored value that is not one of them is
+      shown as "Custom (…)" and submitted unchanged, so opening and saving
+      Settings never rounds someone's setting to the nearest choice. -#}
+  {%- set ns = namespace(found=false) -%}
+  <select name="{{ name }}" id="{{ id }}">
+    {%- for v, label in options %}
+    {%- if value|string == v|string %}{% set ns.found = true %}{% endif %}
+    <option value="{{ v }}" {{ 'selected' if value|string == v|string else '' }}>{{ label }}</option>
+    {%- endfor %}
+    {%- if not ns.found %}
+    <option value="{{ value }}" selected>Custom ({{ value }} {{ unit }})</option>
+    {%- endif %}
+  </select>
+{%- endmacro %}

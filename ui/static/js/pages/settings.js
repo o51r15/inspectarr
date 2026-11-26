@@ -20,7 +20,7 @@
   // notification options, is meaningless without it -- disable rather than
   // hide, so the capability stays discoverable and it is obvious what
   // unlocks it.
-  const AI_FIELDS = ['ollama_url', 'ollama_timeout', 'ollama_cache_ttl_hours',
+  const AI_FIELDS = ['ollama_timeout', 'ollama_cache_ttl_hours',
                      'ollama_update_check_hours', 'ollama-model-select',
                      'ollama-apply-btn', 'ollama-validate-btn',
                      'ollama-calibrate-btn', 'ollama_context_window',
@@ -116,12 +116,13 @@
   // ---- Pane switching — tab bar + URL hash ----
   const paneNames = {
     connections: 'Connections', protection: 'Protection', scanning: 'Scanning',
-    notifications: 'Notifications', security: 'Security', data: 'Data & backups',
-    indexers: 'Indexers', ai: 'AI', server: 'Server & logs', file: 'Config file',
+    notifications: 'Notifications', indexers: 'Indexer health', ai: 'AI',
+    system: 'System', file: 'Config file',
   };
-  // Names from before Phase 3, so bookmarks and old links keep working.
+  // Earlier tab names, so bookmarks and old links keep working.
   const paneAliases = {
-    rules: 'protection', general: 'scanning', advanced: 'server', backups: 'data', yaml: 'file',
+    rules: 'protection', general: 'scanning', advanced: 'system', backups: 'system',
+    data: 'system', security: 'system', server: 'system', yaml: 'file',
   };
 
   function resolvePane(pane) {
@@ -191,6 +192,7 @@
                               || (window.location.hash || '').replace('#', '') || 'connections');
 
   syncAiEnabled();
+  sumWeights();
   resumeValidationIfRunning();
   describeBands();
   loadValidations();
@@ -532,10 +534,61 @@
   }
 
   // ---- Scoring weights reset ----
+  // The four scoring shares must add up to 1.0; say so as they are typed.
+  function sumWeights() {
+    const out = document.getElementById('weights-total');
+    const els = document.querySelectorAll('[data-weight]');
+    if (!out || !els.length) return;
+    let total = 0;
+    els.forEach(el => { total += parseFloat(el.value) || 0; });
+    const ok = Math.abs(total - 1) < 0.001;
+    out.textContent = 'Total now: ' + total.toFixed(2) + (ok ? ' \u2713' : ' (should be 1.00)');
+    out.className = 'weights-total ' + (ok ? 'ms-good' : 'ms-warn');
+  }
+
+  function copyText(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const text = ('value' in el ? el.value : el.textContent).trim();
+    const done = () => {
+      const was = el.getAttribute('data-copied');
+      if (!was) {
+        el.setAttribute('data-copied', '1');
+        setTimeout(() => el.removeAttribute('data-copied'), 1200);
+      }
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done).catch(() => {});
+    } else {
+      // Plain http on a LAN is not a "secure context", so the Clipboard API
+      // is unavailable there; fall back to selecting and copying.
+      const ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) { /* ignore */ }
+      ta.remove();
+    }
+  }
+
+  // A new random webhook secret, shown in full until saved.
+  function generateSecret() {
+    const el = document.getElementById('webhooks_secret');
+    if (!el) return;
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    el.value = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    el.dispatchEvent(new Event('input', {bubbles: true}));
+  }
+
+  function openConfigFile() {
+    history.replaceState(null, '', '/config#file');
+    showPane('file');
+  }
+
   function resetScoringDefaults() {
     document.querySelectorAll('[name^="scoring_"]').forEach(el => {
       if (el.dataset.default) el.value = el.dataset.default;
     });
+    sumWeights();
     // Mark form dirty
     const savebar = document.getElementById('savebar');
     if (savebar) savebar.classList.add('dirty');
@@ -643,7 +696,7 @@
   const origShowPane = showPane;
   showPane = function(pane) {
     origShowPane(pane);
-    if (resolvePane(pane) === 'data') loadBackups();
+    if (resolvePane(pane) === 'system') loadBackups();
     if (pane === 'ai') {
       loadOllamaModels(); loadSystemPrompt(); loadBatchCalibration();
     }
@@ -697,7 +750,7 @@
     // the bands without it would say "Deleted: CRITICAL" on a box that is
     // configured never to delete anything, which is the most misleading
     // thing this page could tell you.
-    const modeEl = document.getElementById('remediation_operating_mode');
+    const modeEl = document.querySelector('input[name="remediation_operating_mode"]:checked');
     const mode = modeEl ? modeEl.value : 'automatic';
 
     let recorded = order.slice(0, mi);
@@ -709,29 +762,26 @@
       recorded = order.slice();
       held = [];
       deleted = [];
-      capNote = '<br><em>Operating mode is <strong>Monitor</strong>: nothing ' +
-                'is paused or deleted, whatever the thresholds say. The ' +
-                'thresholds are kept and take effect again when you switch ' +
-                'back.</em>';
+      capNote = '<br><em><strong>Watch only</strong> is on: nothing is paused or ' +
+                'removed, whatever these say. They take effect again when you ' +
+                'switch back.</em>';
     } else if (mode === 'quarantine') {
       held = held.concat(deleted);
       deleted = [];
-      capNote = '<br><em>Operating mode is <strong>Quarantine</strong>: ' +
-                'nothing is deleted automatically. Anything at or above ' +
-                (clamped ? order[mi] : remEl.value) +
-                ' is held for review instead.</em>';
+      capNote = '<br><em><strong>Hold for my review</strong> is on: nothing is ' +
+                'removed automatically; it is held for you instead.</em>';
     }
 
     const fmt = a => a.length ? a.join(', ') : 'nothing';
     el.innerHTML =
       '<strong>Recorded only:</strong> ' + fmt(recorded) +
-      ' &nbsp;|&nbsp; <strong>Quarantined:</strong> ' + fmt(held) +
-      ' &nbsp;|&nbsp; <strong>Deleted:</strong> ' + fmt(deleted) +
-      (clamped ? '<br><em>Delete threshold is below the act threshold - ' +
-                 'treating both as ' + order[mi] + '.</em>' : '') +
+      ' &nbsp;|&nbsp; <strong>Held for review:</strong> ' + fmt(held) +
+      ' &nbsp;|&nbsp; <strong>Removed:</strong> ' + fmt(deleted) +
+      (clamped ? '<br><em>"Remove straight away" is milder than "Act on", so both ' +
+                 'are treated as ' + order[mi] + '.</em>' : '') +
       (mode === 'automatic' && !order.slice(mi, ri).length ?
-        '<br><em>No quarantine band - every catch that is acted on is ' +
-        'deleted immediately.</em>' : '') +
+        '<br><em>Nothing is held for review: everything acted on is removed ' +
+        'straight away.</em>' : '') +
       capNote;
   }
 
@@ -861,10 +911,7 @@
   function renderServerNote(server, others) {
     const note = document.getElementById('ollama-server-note');
     if (!note) return;
-    if (!server) {
-      note.textContent = 'Set a server URL and save to see its models.';
-      return;
-    }
+    if (!server) return;            // the template already says "add one under Connections"
     note.innerHTML = 'Models and check results below are for <code>' + escapeHtml(server) +
       '</code>.' + (others
         ? ' Results from ' + others + ' other server' + (others === 1 ? '' : 's') +
@@ -1363,7 +1410,7 @@
   }
 
   // Re-fire deferred hooks for the initial pane (wrapper + functions defined above)
-  if (_initialPane === 'data') loadBackups();
+  if (_initialPane === 'system') loadBackups();
   if (_initialPane === 'ai') {
     loadOllamaModels(); loadSystemPrompt(); loadBatchCalibration();
   }
