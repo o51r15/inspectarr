@@ -129,3 +129,75 @@ def test_legacy_poll_interval_is_not_written_and_survives(client, config_path, b
     assert _save(client, _form(client)).status_code == 302
     after = read_config(config_path)
     assert after["poll_interval_seconds"] == 123          # left exactly as it was
+
+
+# --- a key the file does not mention stays unmentioned, unless it changes ----
+
+def _write_text(path, data):
+    import yaml
+    from core.config import invalidate_config_cache
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(yaml.safe_dump(data, sort_keys=False))
+    invalidate_config_cache()
+
+
+def test_trimmed_config_is_byte_identical_after_unchanged_save(client, config_path):
+    """A hand-trimmed file must not grow deluge:, transmission:, defaults..."""
+    minimal = {
+        "qbittorrent": {"url": "http://qbit.test:8080", "username": "u", "password": "p"},
+        "on_arr_failure": "delete",
+        "logging": {"log_file": "./data/inspectarr.log.json"},
+        "state": {"db_file": "./data/inspectarr.db"},
+    }
+    _write_text(config_path, minimal)
+    before = open(config_path, encoding="utf-8").read()
+    assert _save(client, _form(client)).status_code == 302
+    assert open(config_path, encoding="utf-8").read() == before
+
+
+def test_changing_an_unmentioned_setting_writes_it(client, config_path):
+    minimal = {"qbittorrent": {"url": "http://q", "username": "u", "password": "p"},
+               "logging": {"log_file": "./data/inspectarr.log.json"},
+               "state": {"db_file": "./data/inspectarr.db"}}
+    _write_text(config_path, minimal)
+    fields = _form(client)
+    fields["retry_max_attempts"] = "4"
+    assert _save(client, fields).status_code == 302
+    assert read_config(config_path)["retry"] == {"max_attempts": 4}
+
+
+def test_ai_can_be_switched_off_when_enabled_was_implied(client, config_path, base_config):
+    """With no `enabled:` key the parser turns AI on because a URL is set.
+    Unticking must therefore write `enabled: false`, not skip it as a default."""
+    from tests.conftest import write_config
+    from core.config import load_config
+    ollama = base_config["prowlarr"]["ollama"]
+    ollama.pop("enabled")
+    ollama["url"] = "http://ai.test:11434"
+    write_config(config_path, base_config)
+    fields = _form(client)
+    assert "ollama_enabled" in fields                     # shown ticked, as the parser sees it
+    fields.poplist("ollama_enabled")
+    assert _save(client, fields).status_code == 302
+    assert read_config(config_path)["prowlarr"]["ollama"]["enabled"] is False
+    assert load_config(config_path).prowlarr.ollama.enabled is False
+
+
+def test_legacy_interval_alone_is_kept_in_effect(client, config_path, base_config):
+    from tests.conftest import write_config
+    from core.config import load_config
+    del base_config["scanning"]
+    base_config["poll_interval_seconds"] = 123
+    write_config(config_path, base_config)
+    assert _save(client, _form(client)).status_code == 302
+    assert load_config(config_path).scanning.polling.interval_seconds == 123
+    assert "scanning" not in read_config(config_path)
+
+
+def test_notify_on_in_another_order_is_not_a_change(client, config_path, base_config):
+    from tests.conftest import write_config
+    base_config["notifications"]["apprise"]["notify_on"] = ["quarantine", "error", "action"]
+    write_config(config_path, base_config)
+    assert _save(client, _form(client)).status_code == 302
+    assert read_config(config_path)["notifications"]["apprise"]["notify_on"] == \
+        ["quarantine", "error", "action"]
