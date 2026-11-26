@@ -10,6 +10,26 @@ from typing import Optional
 log = logging.getLogger("inspectarr")
 
 
+_REBUILD_DDL = """
+CREATE TABLE validated_models_rebuild (
+    model           TEXT NOT NULL,
+    ollama_url      TEXT NOT NULL,
+    validated_at    TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    passed          INTEGER NOT NULL DEFAULT 0,
+    indexer_count   INTEGER,
+    avg_response_ms INTEGER,
+    model_digest    TEXT,
+    results_json    TEXT,
+    tok_per_s       REAL,
+    gpu_offload_pct INTEGER,
+    max_safe_batch  INTEGER,
+    calibrated      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (model, ollama_url)
+)
+"""
+
+
 def normalize_ollama_url(url: str | None) -> str | None:
     """
     Canonical form of an Ollama base URL, for comparing two of them.
@@ -30,32 +50,6 @@ def normalize_ollama_url(url: str | None) -> str | None:
         host, sep, path = rest.partition("/")
         return f"{scheme.lower()}://{host.lower()}{sep}{path}"
     return u.lower()
-
-
-def validation_host_state(record: dict | None, ollama_url: str | None) -> str:
-    """
-    Does this stored verdict describe the host we are about to use?
-
-      "match"    -- earned against this host
-      "unknown"  -- recorded before hosts were tracked (NULL column)
-      "mismatch" -- earned against a DIFFERENT host
-
-    "unknown" is deliberately not "mismatch". Every record written before
-    this column existed has a NULL url, and treating those as mismatched
-    would invalidate an entire install's validation history on upgrade --
-    the same reason a NULL model_digest reads as "validated before digests
-    were recorded" rather than as "changed".
-
-    Callers decide what each state means for them. The model gate treats
-    "unknown" as acceptable and "mismatch" as not, because a mismatch is
-    positive evidence that the measurement came from other hardware.
-    """
-    if not record:
-        return "unknown"
-    stored = normalize_ollama_url(record.get("ollama_url"))
-    if not stored:
-        return "unknown"
-    return "match" if stored == normalize_ollama_url(ollama_url) else "mismatch"
 
 
 class StateManager:
@@ -632,9 +626,14 @@ class StateManager:
         already ran validate_model does not have to repeat itself.
         """
         import json as _json
+        url = normalize_ollama_url(ollama_url or result.get("ollama_url"))
+        if not url:
+            # A verdict that cannot say which server earned it would be
+            # deleted by the next upgrade anyway; refuse it up front.
+            log.warning(f"Not saving validation for {model}: no Ollama URL")
+            return False
         try:
             status = "supported" if result.get("passed") else "failed"
-            url = ollama_url or result.get("ollama_url")
             with self._lock, self._conn() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO validated_models "
@@ -646,7 +645,7 @@ class StateManager:
                     (model, _now_iso(), status, 1 if result.get("passed") else 0,
                      result.get("indexer_count"), result.get("avg_response_ms"),
                      digest, _json.dumps(result),
-                     normalize_ollama_url(url), result.get("tok_per_s"),
+                     url, result.get("tok_per_s"),
                      result.get("gpu_offload_pct"),
                      result.get("max_safe_batch"),
                      1 if result.get("calibrated") else 0),
@@ -667,6 +666,10 @@ class StateManager:
         validation cleanly overwrites it.
         """
         import json as _json
+        url = normalize_ollama_url(ollama_url)
+        if not url:
+            log.warning(f"Not marking {model} forced: no Ollama URL")
+            return False
         try:
             with self._lock, self._conn() as conn:
                 conn.execute(
@@ -675,8 +678,7 @@ class StateManager:
                     " avg_response_ms, model_digest, results_json, ollama_url) "
                     "VALUES (?, ?, 'forced', 0, NULL, NULL, ?, ?, ?)",
                     (model, _now_iso(), digest,
-                     _json.dumps({"forced": True}),
-                     normalize_ollama_url(ollama_url)),
+                     _json.dumps({"forced": True}), url),
                 )
                 conn.commit()
             return True
@@ -684,19 +686,29 @@ class StateManager:
             log.warning(f"Failed to mark {model} forced: {exc}")
             return False
 
-    def get_validations(self) -> list[dict]:
-        """Every validation on record, most recent first."""
+    def get_validations(self, ollama_url: str = None) -> list[dict]:
+        """Validations on record, most recent first.
+
+        With ollama_url, only that server's: results from other servers are
+        kept, and come back when that server is configured again.
+        """
         try:
             with self._lock, self._conn() as conn:
-                rows = conn.execute(
-                    "SELECT * FROM validated_models ORDER BY validated_at DESC"
-                ).fetchall()
+                if ollama_url is None:
+                    rows = conn.execute(
+                        "SELECT * FROM validated_models ORDER BY validated_at DESC"
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM validated_models WHERE ollama_url = ? "
+                        "ORDER BY validated_at DESC",
+                        (normalize_ollama_url(ollama_url) or "",)).fetchall()
             return [dict(r) for r in rows]
         except Exception as exc:
             log.warning(f"Failed to read validations: {exc}")
             return []
 
-    def delete_validation(self, model: str) -> bool:
+    def delete_validation(self, model: str, ollama_url: str) -> bool:
         """
         Remove a stored validation record.
 
@@ -706,24 +718,82 @@ class StateManager:
         """
         try:
             with self._lock, self._conn() as conn:
-                conn.execute("DELETE FROM validated_models WHERE model = ?",
-                             (model,))
+                conn.execute("DELETE FROM validated_models "
+                             "WHERE model = ? AND ollama_url = ?",
+                             (model, normalize_ollama_url(ollama_url) or ""))
                 conn.commit()
             return True
         except Exception as exc:
             log.warning(f"Failed to delete validation for {model}: {exc}")
             return False
 
-    def get_validation(self, model: str) -> dict | None:
+    def get_validation(self, model: str, ollama_url: str) -> dict | None:
+        """This model's verdict on this server, or None if it has none here."""
         try:
             with self._lock, self._conn() as conn:
                 row = conn.execute(
-                    "SELECT * FROM validated_models WHERE model = ?", (model,)
-                ).fetchone()
+                    "SELECT * FROM validated_models WHERE model = ? AND ollama_url = ?",
+                    (model, normalize_ollama_url(ollama_url) or "")).fetchone()
             return dict(row) if row else None
         except Exception as exc:
             log.warning(f"Failed to read validation for {model}: {exc}")
             return None
+
+    # Columns of validated_models, in table order, shared by the rebuild.
+    _VALIDATION_COLS = ("model", "ollama_url", "validated_at", "status", "passed",
+                        "indexer_count", "avg_response_ms", "model_digest",
+                        "results_json", "tok_per_s", "gpu_offload_pct",
+                        "max_safe_batch", "calibrated")
+
+    def _migrate_validations_per_server(self):
+        """
+        Key validated_models by (model, server) instead of by model alone.
+
+        A verdict describes a model ON A SERVER: the same model can pass on a
+        GPU host and fail on a CPU one. Keyed by model alone, validating on one
+        server overwrote that model's result from every other, so switching
+        servers lost history and the UI showed other servers' verdicts.
+
+        Rows with no recorded server (written before servers were tracked)
+        cannot be attributed to any server and are deleted, by the owner's
+        decision. The pre-upgrade database backup still holds them.
+
+        Runs once: skipped when the primary key already includes ollama_url.
+        One explicit transaction, so a failure leaves the old table intact.
+        """
+        with self._lock, self._conn() as conn:
+            info = conn.execute("PRAGMA table_info(validated_models)").fetchall()
+            if not info:
+                return
+            pk = [r["name"] for r in sorted(info, key=lambda r: r["pk"]) if r["pk"]]
+            if "ollama_url" in pk:
+                return
+            have = {r["name"] for r in info}
+            cols = [c for c in self._VALIDATION_COLS if c in have]
+            col_list = ", ".join(cols)
+            try:
+                if conn.in_transaction:
+                    conn.commit()
+                conn.execute("BEGIN")
+                total = conn.execute("SELECT COUNT(*) FROM validated_models").fetchone()[0]
+                conn.execute("DROP TABLE IF EXISTS validated_models_rebuild")
+                conn.execute(_REBUILD_DDL)
+                conn.execute(
+                    f"INSERT OR REPLACE INTO validated_models_rebuild ({col_list}) "
+                    f"SELECT {col_list} FROM validated_models "
+                    f"WHERE ollama_url IS NOT NULL AND trim(ollama_url) != ''")
+                kept = conn.execute(
+                    "SELECT COUNT(*) FROM validated_models_rebuild").fetchone()[0]
+                conn.execute("DROP TABLE validated_models")
+                conn.execute("ALTER TABLE validated_models_rebuild RENAME TO validated_models")
+                conn.commit()
+                log.info(f"validated_models now keyed per server: kept {kept} of "
+                         f"{total} record(s); removed {total - kept} with no "
+                         f"recorded server")
+            except Exception as exc:
+                conn.rollback()
+                log.warning(f"validated_models per-server migration failed; "
+                            f"left unchanged: {exc}")
 
     def ping(self) -> bool:
         """
@@ -927,7 +997,8 @@ class StateManager:
             """)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS validated_models (
-                    model           TEXT PRIMARY KEY,
+                    model           TEXT NOT NULL,
+                    ollama_url      TEXT NOT NULL,
                     validated_at    TEXT NOT NULL,
                     status          TEXT NOT NULL,
                     passed          INTEGER NOT NULL DEFAULT 0,
@@ -935,11 +1006,11 @@ class StateManager:
                     avg_response_ms INTEGER,
                     model_digest    TEXT,
                     results_json    TEXT,
-                    ollama_url      TEXT,
                     tok_per_s       REAL,
                     gpu_offload_pct INTEGER,
                     max_safe_batch  INTEGER,
-                    calibrated      INTEGER NOT NULL DEFAULT 0
+                    calibrated      INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (model, ollama_url)
                 )
             """)
             # replacements -- did the thing we rejected get replaced, and
@@ -1161,6 +1232,8 @@ class StateManager:
                 if "duplicate column" not in str(exc).lower():
                     log.warning(
                         f"validated_models migration failed ({_col}): {exc}")
+
+        self._migrate_validations_per_server()
 
         # Migrate llm_cache to record which model produced each entry.
         # Pre-migration rows get NULL: their model is genuinely unknown, and
