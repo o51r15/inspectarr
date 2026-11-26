@@ -135,12 +135,11 @@ FIELDS: list[Field] = [
     F("retry_max_attempts", ("retry", "max_attempts"), "int", label="Retry attempts", lo=0),
     F("retry_interval_seconds", ("retry", "interval_seconds"), "int", label="Retry interval (seconds)", lo=1),
     # --- Notifications ------------------------------------------------------
-    F("apprise_enabled", ("notifications", "apprise", "enabled"), "bool"),
-    F("apprise_urls", ("notifications", "apprise", "urls"), "secret_lines"),
-    F("notify_on", ("notifications", "apprise", "notify_on"), "list"),
+    # Where to send, and what, is per place (notifications.apprise.targets),
+    # saved by its own endpoints (/config/notify/...), not by this form. The
+    # summary is on when any place asked for it.
     F("digest_enabled", ("notifications", "digest", "enabled"), "bool"),
     F("digest_use_ollama", ("notifications", "digest", "use_ollama"), "bool"),
-    F("summary_enabled", ("notifications", "summary", "enabled"), "bool"),
     F("summary_schedule", ("notifications", "summary", "schedule"), "str"),
     F("summary_use_ollama", ("notifications", "summary", "use_ollama"), "bool"),
     # --- Indexers (Prowlarr) ------------------------------------------------
@@ -408,7 +407,8 @@ def rules_from_form(form) -> list:
 # which stored URL it stands for. Reordering or deleting lines still works.
 
 SECRET_MASK = "•" * 8
-APPRISE_PATH = ("notifications", "apprise", "urls")
+APPRISE_PATH = ("notifications", "apprise", "urls")          # old configs, before targets
+TARGETS_PATH = ("notifications", "apprise", "targets")
 SECRET_PATHS = tuple(f.path for f in FIELDS if f.kind in ("secret", "password"))
 _SCHEME = re.compile(r"[A-Za-z][\w+.-]*")
 _MASKED_URL = re.compile(
@@ -472,6 +472,16 @@ def mask_secrets(tree) -> None:
                 urls[i] = mask_url(url, i + 1)
     elif isinstance(urls, str) and urls:
         _assign(tree, APPRISE_PATH, mask_url(urls, 1))
+    # Places to send to: each service's secret fields (tokens, passwords,
+    # webhook URLs). Matched back by the place's id on save.
+    from core.notify_targets import secret_keys
+    for target in _get(tree, TARGETS_PATH) or []:
+        fields = target.get("fields") if isinstance(target, dict) else None
+        if not isinstance(fields, dict):
+            continue
+        for key in secret_keys(str(target.get("service") or "")):
+            if fields.get(key):
+                fields[key] = SECRET_MASK
 
 
 def masked_copy(cfg: dict) -> dict:
@@ -497,6 +507,30 @@ def restore_secrets(tree, current: dict) -> None:
                 urls[i] = unmask_url(url, stored)
     elif isinstance(urls, str):
         _assign(tree, APPRISE_PATH, unmask_url(urls, stored))
+    restore_target_secrets(_get(tree, TARGETS_PATH), _get(current, TARGETS_PATH))
+
+
+def restore_target_secrets(targets, stored_targets) -> None:
+    """A masked field of a place to send to gets its stored value back, found
+    by the place's id and service. A mask with nothing behind it (the id was
+    changed, or the service) is refused rather than saved as bullets."""
+    by_id = {}
+    for t in stored_targets or []:
+        if isinstance(t, dict) and t.get("id") is not None:
+            by_id[str(t.get("id"))] = t
+    for target in targets or []:
+        fields = target.get("fields") if isinstance(target, dict) else None
+        if not isinstance(fields, dict):
+            continue
+        for key, value in list(fields.items()):
+            if value != SECRET_MASK:
+                continue
+            old = by_id.get(str(target.get("id")))
+            old_value = ((old or {}).get("fields") or {}).get(key)
+            if not old or old.get("service") != target.get("service") or not old_value:
+                raise FieldError(f"Notification place {target.get('id')}: '{key}' stands for a saved "
+                                 "value that no longer exists. Type it in again.")
+            fields[key] = old_value
 
 
 def resolve_secret(submitted, path: tuple, config_path: str) -> str:
@@ -505,10 +539,3 @@ def resolve_secret(submitted, path: tuple, config_path: str) -> str:
         return submitted or ""
     from core.config import load_raw_config
     return _get(load_raw_config(config_path), path) or ""
-
-
-def resolve_urls(lines, config_path: str) -> list:
-    """For the Apprise Test button: masked lines become the stored URLs."""
-    from core.config import load_raw_config
-    stored = _get(load_raw_config(config_path), APPRISE_PATH)
-    return [unmask_url(line.strip(), stored) for line in lines if line and line.strip()]

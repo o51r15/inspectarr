@@ -78,11 +78,6 @@ def test_pane_not_on_the_page_is_left_alone():
     assert updates == {"qbittorrent": {"url": "http://x"}}
 
 
-def test_unticking_every_notify_on_saves_empty_list():
-    updates = form_to_updates(MultiDict([(RENDERED, "notify_on")]))
-    assert updates == {"notifications": {"apprise": {"notify_on": []}}}
-
-
 def test_bad_number_is_refused_and_nothing_written(client, config_path):
     before = read_config(config_path)
     fields = _form(client)

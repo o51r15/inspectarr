@@ -49,8 +49,11 @@ def test_unchanged_submit_preserves_config(client, config_path):
     assert after["rules"] == before["rules"]
     assert after["arrs"] == before["arrs"]
     assert after["qbittorrent"] == before["qbittorrent"]
-    assert set(after["notifications"]["apprise"]["notify_on"]) == \
-        set(before["notifications"]["apprise"]["notify_on"])        # B-14
+    # Notification events now live on each place to send to (notify_targets)
+    # and the form no longer owns them, so a form save can't drop one (B-14:
+    # it used to strip "quarantine"). test_notify_targets covers the places.
+    assert after["notifications"]["apprise"]["targets"] == \
+        before["notifications"]["apprise"].get("targets", [])
 
 
 def test_second_unchanged_save_is_a_no_op(client, config_path):
