@@ -7,6 +7,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed - AI Model Checks Are Kept Per Ollama Server
+
+Model check results (Quick check and Calibrate) are now stored separately
+for each Ollama server. Before, checking a model on one server overwrote
+that model's result from every other server, and Settings showed other
+servers' results as if they applied to the one you're connected to.
+
+- The AI tab shows only the models installed on the connected server, and
+  only that server's results. Results from other servers are kept and come
+  back when you switch to that server again.
+- **On upgrade:** check results that never recorded which server they came
+  from are removed, because they can't be matched to any server. If the
+  model you use now was only checked before servers were tracked, it shows
+  as "not checked". Scoring keeps working; run **Quick check** before
+  switching to a different model.
+- The AI tab is laid out top to bottom: the on/off switch, the server, the
+  model (with its result and the Quick check, Calibrate and **Use this
+  model** buttons together), then the results on this server. Typing a new
+  server address shows "Save to switch", because the list follows the saved
+  server.
+
+### Changed - Settings Reorganised
+
+- Settings is grouped into tabs by task: Connections, Protection, Scanning,
+  Notifications, Indexers, AI, Security, and Data & backups. **Show
+  advanced** adds Server & logs and the raw config file, and shows a few
+  extra tuning sections inside the other tabs. Your choice is remembered.
+- Connections shows one card per service, with a status (**Connected**,
+  **Can't connect**, **Off**), its own **Test** button, and credentials
+  folded away once they're saved. The download client is picked with three
+  buttons instead of a dropdown.
+- The raw YAML editor is the **Config file** tab, with its own Save button.
+- Old links such as `/config#rules` still open the right tab.
+
 ### Changed - Settings Keeps What You Wrote
 
 Saving Settings now changes only the settings you changed. Everything else

@@ -28,10 +28,10 @@
     <a class="subnav-item" href="/config#protection"    data-pane="protection">Protection</a>
     <a class="subnav-item" href="/config#scanning"      data-pane="scanning">Scanning</a>
     <a class="subnav-item" href="/config#notifications" data-pane="notifications">Notifications</a>
+    <a class="subnav-item" href="/config#indexers"      data-pane="indexers">Indexers</a>
     <a class="subnav-item" href="/config#ai"            data-pane="ai">AI</a>
     <a class="subnav-item" href="/config#security"      data-pane="security">Security</a>
     <a class="subnav-item" href="/config#data"          data-pane="data">Data &amp; backups</a>
-    <a class="subnav-item" href="/config#indexers"      data-pane="indexers" data-level="advanced">Indexers</a>
     <a class="subnav-item" href="/config#server"        data-pane="server"   data-level="advanced">Server &amp; logs</a>
     <a class="subnav-item" href="/config#file"          data-pane="file"     data-level="advanced">Config file</a>
   </div>
@@ -59,13 +59,13 @@
 
 {% include "settings/_notifications.html" %}
 
+{% include "settings/_indexers.html" %}
+
 {% include "settings/_ai.html" %}
 
 {% include "settings/_security.html" %}
 
 {% include "settings/_data.html" %}
-
-{% include "settings/_indexers.html" %}
 
 {% include "settings/_server.html" %}
 
