@@ -325,10 +325,16 @@ def prowlarr_indexers():
         state    = _get_state(cfg)   # IMP-2: shared app-wide StateManager
         scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
         results = scorer.score_all(skip_ai=True)
+        previous = state.get_previous_scores()
         for r in results:
             r.pop("_raw", None)
+            prev = previous.get(r["id"]) or {}
+            r["previous_score"] = prev.get("previous")
+            r["previous_at"] = prev.get("previous_at")
         ai_available = cfg.prowlarr.ollama.is_active()
-        return jsonify({"ok": True, "indexers": results, "ai_available": ai_available})
+        return jsonify({"ok": True, "indexers": results, "ai_available": ai_available,
+                        "last_reorder": state.get_app_state("last_prowlarr_reorder"),
+                        "reorder_interval_hours": cfg.prowlarr.reorder_interval_hours})
     except Exception as exc:
         return jsonify({"ok": False, "message": safe_error(exc)})
 
@@ -352,7 +358,17 @@ def prowlarr_indexers_ai():
         prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
         state    = _get_state(cfg)   # IMP-2: shared app-wide StateManager
         scorer  = IndexerScorer(prowlarr, state, cfg.prowlarr)
-        results = scorer.score_all(skip_ai=False)
+        # Never alongside "Rescore & reorder" or the scheduled reorder: a
+        # second AI pass finishing after a reorder is how the page came to
+        # show scores the order wasn't built from.
+        from core.indexer_jobs import SCORING_LOCK
+        if not SCORING_LOCK.acquire(blocking=False):
+            return jsonify({"ok": False, "busy": True,
+                            "message": "Scoring is already running; its scores will show when it finishes."})
+        try:
+            results = scorer.score_all(skip_ai=False)
+        finally:
+            SCORING_LOCK.release()
         for r in results:
             r.pop("_raw", None)
         return jsonify({"ok": True, "indexers": results})

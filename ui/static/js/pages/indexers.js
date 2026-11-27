@@ -94,9 +94,21 @@
     return box;
   }
 
+  function change(idx) {
+    if (idx.previous_score == null || idx.health_score == null) return null;
+    const d = Math.round((idx.health_score - idx.previous_score) * 10) / 10;
+    if (Math.abs(d) < 0.1) return null;
+    const up = d > 0;
+    const span = el("span", "score-change " + (up ? "text-ok" : "text-danger"), (up ? "▲ " : "▼ ") + Math.abs(d));
+    span.title = "Was " + idx.previous_score + (idx.previous_at ? " on " + new Date(idx.previous_at).toLocaleString() : "");
+    span.setAttribute("aria-label", (up ? "Up " : "Down ") + Math.abs(d) + " from " + idx.previous_score);
+    return span;
+  }
+
   function renderTable(indexers) {
     const tbody = $("indexer-tbody");
     tbody.replaceChildren();
+    rowsInOrder = indexers;
     indexers.forEach((idx) => {
       const tr = el("tr", idx.ignored ? "is-pinned" : "");
 
@@ -125,6 +137,13 @@
       why.append(scoreCell(idx.health_score));
       if (idx.ai_scored) why.append(el("span", "badge badge-neutral ml-4", "AI"));
       tdScore.append(why);
+      const moved = change(idx);
+      if (moved) tdScore.append(moved);
+      if (outOfOrder(idx)) {
+        const up = el("span", "badge badge-warn ml-4", "↑");
+        up.title = "Scores higher than an indexer above it. It moves up at the next reorder.";
+        tdScore.append(up);
+      }
       const detail = el("tr", "score-detail-row");
       const detailCell = el("td"); detailCell.colSpan = 9;
       detailCell.append(breakdown(idx));
@@ -170,19 +189,48 @@
     $("apply-btn").disabled = !Object.keys(pending).length;
   }
 
-  async function loadIndexers({ withAi = false } = {}) {
+  /* The page shows stored scores only. It used to start its own AI pass on
+     Refresh, which could finish after a reorder and leave scores on screen
+     that the order wasn't built from. AI scoring happens in Rescore & reorder
+     and the scheduled reorder, one at a time. */
+  async function loadIndexers() {
     const msg = $("indexer-msg");
     const r = await api("/config/prowlarr/indexers");
     if (!r.ok) { msg.hidden = false; msg.textContent = "Couldn't load indexers: " + (r.message || "Prowlarr did not answer"); return; }
     msg.hidden = true;
     renderTable(r.indexers || []);
     $("indexer-table").hidden = false;
-    if (withAi && r.ai_available) {
-      showToast("Getting AI scores…", "info");
-      const ai = await api("/config/prowlarr/indexers/ai");
-      if (ai.ok) { renderTable(ai.indexers || []); showToast("AI scores applied", "success"); }
-      else showToast("AI scoring unavailable right now", "warning");
+    renderOrderBasis(r);
+  }
+
+  /* What the order is, and when it was last set from the scores. */
+  function renderOrderBasis(r) {
+    const box = $("order-basis");
+    if (!box) return;
+    const parts = ["Listed in Prowlarr priority order: the lowest number is searched first."];
+    if (r.last_reorder) {
+      const last = new Date(r.last_reorder);
+      const next = new Date(last.getTime() + (r.reorder_interval_hours || 24) * 3600e3);
+      parts.push("Inspectarr last set this order from the health scores " + (timeAgo(r.last_reorder) || "") +
+                 " (" + last.toLocaleString() + "); the next automatic reorder is " + next.toLocaleString() + ".");
+    } else {
+      parts.push("Inspectarr hasn't reordered them yet.");
     }
+    const behind = (r.indexers || []).filter(outOfOrder).length;
+    if (behind) parts.push(behind + " indexer(s) now score higher than one above them and move up at the next reorder (marked ↑).");
+    box.textContent = parts.join(" ");
+  }
+
+  /* Marked ↑ when its score is higher than an unpinned indexer listed above
+     it: the order is from an earlier reorder, and it will move up. */
+  let rowsInOrder = [];
+  function outOfOrder(idx) {
+    if (idx.ignored || idx.health_score == null) return false;
+    for (const other of rowsInOrder) {
+      if (other.id === idx.id) return false;
+      if (!other.ignored && other.health_score != null && other.health_score + 0.5 < idx.health_score) return true;
+    }
+    return false;
   }
 
   async function resetIndexer(idx) {
@@ -259,14 +307,66 @@
     });
   }
 
-  Actions["refresh-indexers"] = () => loadIndexers({ withAi: true });
+  Actions["refresh-indexers"] = () => loadIndexers();
 
-  Actions["rescore-reorder"] = async (btn) => {
-    btn.disabled = true;
-    const r = await post("/indexers/rescore-reorder");
-    btn.disabled = false;
-    if (report(r, "Rescored and reordered")) loadIndexers();
-  };
+  /* ---------------- Rescore & reorder: a background job ---------------- */
+  let jobTimer = null;
+  const JOB_BUTTONS = '[data-action="rescore-reorder"], [data-action="trigger-scoring"]';
+
+  function mins(s) {
+    s = Math.max(0, Math.round(s));
+    return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s";
+  }
+
+  function renderJob(job) {
+    const box = $("rescore-panel");
+    if (!box) return;
+    const running = job && job.state === "running";
+    document.querySelectorAll(JOB_BUTTONS).forEach((b) => { b.disabled = running; });
+    if (!job || !job.state) { box.hidden = true; return; }
+    const finished = job.finished_at ? new Date(job.finished_at) : null;
+    // A finished job stays on show for 30 minutes, then the panel goes.
+    if (!running && (!finished || Date.now() - finished.getTime() > 30 * 60e3)) { box.hidden = true; return; }
+    box.hidden = false;
+    box.className = "rescore-panel " + (running ? "is-running" : job.state === "done" ? "is-done" : "is-failed");
+    const title = el("div", "rescore-title");
+    if (running) title.append(el("span", "spinner"));
+    title.append(el("strong", null, running ? "Rescore & reorder is running" :
+                     job.state === "done" ? "Rescore & reorder finished" : "Rescore & reorder didn't finish"));
+    const lines = [el("div", null, job.stage || "")];
+    const started = job.started_at ? new Date(job.started_at) : null;
+    if (running && started) {
+      let t = "Running for " + mins((Date.now() - started.getTime()) / 1000);
+      if (job.ai_estimate_s) t += "; the AI part took about " + mins(job.ai_estimate_s) + " when this model was calibrated";
+      lines.push(el("div", "hint", t + ". You can leave this page; it carries on, and this panel shows its progress when you come back."));
+    } else if (finished) {
+      lines.push(el("div", "hint", finished.toLocaleString() + (started ? ", took " + mins((finished - started) / 1000) : "")));
+    }
+    if (job.message) lines.push(el("div", "hint", job.message));
+    box.replaceChildren(title, ...lines);
+  }
+
+  async function watchJob(announce) {
+    const r = await api("/indexers/rescore/status");
+    const job = r.ok ? r.job : null;
+    renderJob(job);
+    clearTimeout(jobTimer);
+    if (job && job.state === "running") {
+      jobTimer = setTimeout(() => watchJob(true), 3000);
+    } else if (announce && job && job.state) {
+      showToast(job.stage || "Finished", job.state === "done" ? "success" : "error", 6000);
+      loadIndexers(); loadSchedule(); loadHealthChart();
+    }
+  }
+
+  async function startJob(url) {
+    document.querySelectorAll(JOB_BUTTONS).forEach((b) => { b.disabled = true; });
+    const r = await post(url);
+    if (!r.ok && !r.started) showToast(r.msg || r.message || "Couldn't start", "warning", 5000);
+    watchJob(true);
+  }
+
+  Actions["rescore-reorder"] = () => startJob("/indexers/rescore-reorder");
 
   Actions["sync-apps"] = async (btn) => {
     btn.disabled = true;
@@ -282,13 +382,7 @@
     else btn.disabled = false;
   };
 
-  Actions["trigger-scoring"] = async (btn) => {
-    btn.disabled = true;
-    showToast("Scoring started — this can take a minute with AI on.", "info");
-    const r = await post("/indexers/trigger-scoring");
-    btn.disabled = false;
-    if (report(r, "Scoring finished")) { loadIndexers(); loadSchedule(); loadHealthChart(); }
-  };
+  Actions["trigger-scoring"] = () => startJob("/indexers/trigger-scoring");
 
   /* ---------------- AI scoring tab ---------------- */
 
@@ -333,6 +427,7 @@
     loadIndexers();
     loadSchedule();
     loadHealthChart();
+    watchJob(false);          // a job started elsewhere, or before this page loaded
   }
   if (data.tab === "ai-scoring") {
     api("/config/ollama/update-check").then((d) => {

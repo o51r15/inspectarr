@@ -2004,6 +2004,23 @@ class StateManager:
         # Clamp to ±10 so trend never dominates the score
         return round(max(-10.0, min(10.0, slope)), 2)
 
+    def get_previous_scores(self) -> dict[int, dict]:
+        """Per indexer: its latest recorded score and the last one that was
+        different from it (with when), for the up/down arrows on the page.
+        Scores are recorded every scan, mostly unchanged, so "the one before"
+        would nearly always equal the current one."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT indexer_id, health_score, scored_at FROM score_history "
+                "ORDER BY indexer_id, id DESC").fetchall()
+        out: dict[int, dict] = {}
+        for r in rows:
+            iid = r["indexer_id"]
+            entry = out.setdefault(iid, {"latest": r["health_score"], "previous": None, "previous_at": None})
+            if entry["previous"] is None and abs(r["health_score"] - entry["latest"]) >= 0.05:
+                entry["previous"], entry["previous_at"] = r["health_score"], r["scored_at"]
+        return out
+
     def get_score_history_all(self, limit: int = 30) -> list[dict]:
         """Return the last `limit` score snapshots per indexer, for charting."""
         with self._lock, self._conn() as conn:
