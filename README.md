@@ -140,18 +140,23 @@ Dark and light themes with toggle. Works on desktop and mobile.
 Settings are saved to `config.yaml` and take effect on the next scan cycle — no restart needed.
 
 <p align="center">
-  <img src="assets/screenshots/dashboard.jpg" alt="Dashboard" width="900">
-  <br><em>Dashboard — scheduler status, scan stats, run history</em>
+  <img src="assets/screenshots/dashboard.jpg" alt="Overview page" width="900">
+  <br><em>Overview — releases waiting for you, what was caught this week, connections</em>
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/indexers.jpg" alt="Indexer Health" width="900">
-  <br><em>Indexer Health — scores, response times, actions</em>
+  <img src="assets/screenshots/indexers.jpg" alt="Indexers page, Health tab" width="900">
+  <br><em>Indexers — health scores with changes since the last score, and which indexers move up at the next reorder</em>
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/llm-logs-reasoning.jpg" alt="LLM Logs — AI scoring report card with reasoning" width="900">
-  <br><em>LLM Logs — AI scoring report card with per-indexer reasoning</em>
+  <img src="assets/screenshots/llm-logs-reasoning.jpg" alt="Indexers page, AI scoring tab with reasoning" width="900">
+  <br><em>AI scoring — the rules score, the AI's score and its reasoning for each indexer</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/notifications.jpg" alt="Notification settings" width="900">
+  <br><em>Notifications — each place you send messages to, and what it gets</em>
 </p>
 
 ---
@@ -198,7 +203,7 @@ All weights, multipliers, and thresholds are configurable. See the [wiki](https:
 
 <p align="center">
   <img src="assets/screenshots/llm-logs-trend-chart.jpg" alt="AI Score trend chart" width="900">
-  <br><em>AI Score trends — track how LLM scores change over time per indexer</em>
+  <br><em>AI score trend — one indexer's AI score against its rules score over time</em>
 </p>
 
 ---
