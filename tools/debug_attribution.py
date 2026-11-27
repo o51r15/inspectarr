@@ -8,16 +8,20 @@ to confirm the attribution pipeline works end to end after a config or code
 change, instead of staging a full bad-torrent scan.
 
 Usage:
-    python3 debug_attribution.py <infohash> [--app radarr|sonarr|lidarr]
-    python3 debug_attribution.py <infohash>           # tries all enabled arrs
+    python3 tools/debug_attribution.py <infohash> [--app radarr|sonarr|lidarr]
+    python3 tools/debug_attribution.py <infohash>           # tries all enabled arrs
 
 Examples:
-    python3 debug_attribution.py 29beae3eed4f7614c0ab777e441eac4167e62120 --app radarr
+    python3 tools/debug_attribution.py 29beae3eed4f7614c0ab777e441eac4167e62120 --app radarr
 """
+import os
 import sys
 import argparse
 
-from core.config import load_config
+# Run from anywhere: Inspectarr's code is one folder up.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.config import load_config  # noqa: E402
 from core.scanner import _build_arr_client, _normalize_indexer_name
 from core.prowlarr import ProwlarrClient
 

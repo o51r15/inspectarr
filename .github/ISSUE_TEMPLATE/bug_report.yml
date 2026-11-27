@@ -1,0 +1,61 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. **Remove API keys, passwords and
+        private addresses** from anything you paste. For a security problem, use
+        [private vulnerability reporting](https://github.com/o51r15/inspectarr/security/advisories/new) instead.
+  - type: input
+    id: version
+    attributes:
+      label: Inspectarr version
+      description: Shown at the bottom of the menu (for example v2.1.0), or the image tag you run.
+      placeholder: v2.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run it?
+      options:
+        - Docker (compose or run), :latest
+        - Docker, :dev
+        - Unraid template
+        - From source
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Download client
+      options: [qBittorrent, Transmission, Deluge]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: From the Activity → Events page or `docker logs inspectarr`. Redact keys and addresses.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Anything else that might matter
+      description: Sonarr/Radarr/Prowlarr versions, the Ollama model if AI is on, operating mode.

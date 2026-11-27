@@ -104,9 +104,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Only create a GitHub Release on version tags
+      # Only create a GitHub Release on version tags. The notes are that
+      # version's section of CHANGELOG.md (written for people), not GitHub's
+      # generated list of pull requests.
+      - name: Release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          awk -v t="## [${tag}]" 'index($0, t) == 1 { f = 1; next } f && /^## \[/ { exit } f' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)." > release-notes.md
+          fi
+          {
+            echo
+            echo "**Docker:** \`docker pull ghcr.io/${GITHUB_REPOSITORY}:${tag#v}\` or \`:latest\`"
+          } >> release-notes.md
+          cat release-notes.md
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          generate_release_notes: true
+          body_path: release-notes.md
