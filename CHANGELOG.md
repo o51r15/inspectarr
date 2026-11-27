@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [v2.2.0] - 2026-11-26
+
+The Indexers page now keeps its order in step with the scores it shows, runs
+**Rescore & reorder** in the background with visible progress, and explains
+where each indexer stands and where it is heading.
+
 ### Fixed - Indexer order matching the scores on screen
 
 - **Reorder uses the scores from its own scoring pass.** Other passes (the
