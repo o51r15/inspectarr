@@ -104,6 +104,10 @@ def create_app(config_path: str) -> Flask:
     if app.config["STATE"]:
         from core.scoring_prompts import migrate_config_prompt
         migrate_config_prompt(app.config["STATE"], config_path)
+    # A rescore left "running" by a restart is reported as stopped.
+    if app.config["STATE"]:
+        from core.indexer_jobs import recover as recover_rescore
+        recover_rescore(app.config["STATE"])
     # Old notification settings (urls + notify_on) become places to send to.
     from core.notify_targets import migrate_config as migrate_notify_targets
     migrate_notify_targets(config_path)

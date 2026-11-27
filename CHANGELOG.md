@@ -7,6 +7,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Fixed - Indexer order matching the scores on screen
+
+- **Reorder uses the scores from its own scoring pass.** Other passes (the
+  page asking for AI scores, the scheduled reorder) could finish after a
+  reorder and replace the stored scores, so the page showed an indexer at 92%
+  listed below ones at 75%. Only one scoring-and-reorder pass runs at a time,
+  and the page no longer starts an AI pass of its own when it loads.
+- **Rescore & reorder and Run now run in the background.** A panel above the
+  table shows what is happening (scoring with AI, reordering, sending to the
+  apps), how long it has run and how long the AI part usually takes. Leave
+  the page and come back: the panel and the disabled buttons follow the job.
+  A run cut short by a restart says so.
+
+### Added
+
+- **Up and down arrows** next to each health score: the change since its
+  previous different score, green up or red down, with the old value and
+  when on hover.
+- **What the order is based on**: the Indexers page says the list is in
+  Prowlarr priority order, when Inspectarr last set it from the scores and
+  when the next automatic reorder is. Indexers that now score higher than one
+  above them are marked **↑** until the next reorder.
+
 ## [v2.1.0] - 2026-11-26
 
 ### Added - Notifications, the DockLlama way

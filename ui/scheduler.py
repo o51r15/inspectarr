@@ -409,28 +409,15 @@ class Scheduler:
 
             from core.prowlarr import ProwlarrClient
             from core.indexer_scorer import IndexerScorer
-            prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
-            scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
-            scored   = scorer.score_all(skip_ai=False)   # rescore (with AI if configured) before auto-reorder
-            verdict  = getattr(scorer, "last_ai_verdict", None)
-            rejected = bool(verdict and not verdict.get("accepted"))
-            if rejected:
-                self._state.write_log({
-                    "level": "ERROR", "event": "ai_scoring_rejected",
-                    "reason": verdict.get("reason"),
-                    "mean_deviation": verdict.get("mean_deviation"),
-                    "zero_fraction": verdict.get("zero_fraction"),
-                    "indexers": verdict.get("n"),
-                })
-                self._notify_ai_rejected(config, verdict)
-            changed  = scorer.reorder()
-            self.last_reorder = now
-            self._state.set_app_state("last_prowlarr_reorder", now.isoformat())
-            self._state.write_log({
-                "level": "INFO", "event": "prowlarr_auto_reorder",
-                "indexers_moved": changed,
-            })
-            return scored, rejected
+            from core.indexer_jobs import SCORING_LOCK
+            # One scoring-and-reorder pass at a time: if "Rescore & reorder"
+            # is running, this one waits for the next scan.
+            if not SCORING_LOCK.acquire(blocking=False):
+                return None, False
+            try:
+                return self._reorder_locked(config, now, ProwlarrClient, IndexerScorer)
+            finally:
+                SCORING_LOCK.release()
         except Exception as exc:
             if self._state:
                 try:
@@ -442,6 +429,34 @@ class Scheduler:
                     print(f"DB logging failed (auto_reorder): {db_exc}", file=sys.stderr)
         # Nothing usable to hand back -- the caller scores for itself.
         return None, False
+
+    def _reorder_locked(self, config, now, ProwlarrClient, IndexerScorer):
+        """The reorder itself, run while holding SCORING_LOCK. Errors go to
+        _maybe_reorder, which logs them."""
+        prowlarr = ProwlarrClient(config.prowlarr.url, config.prowlarr.api_key)
+        scorer   = IndexerScorer(prowlarr, self._state, config.prowlarr)
+        scored   = scorer.score_all(skip_ai=False)   # rescore (with AI if configured) before auto-reorder
+        verdict  = getattr(scorer, "last_ai_verdict", None)
+        rejected = bool(verdict and not verdict.get("accepted"))
+        if rejected:
+            self._state.write_log({
+                "level": "ERROR", "event": "ai_scoring_rejected",
+                "reason": verdict.get("reason"),
+                "mean_deviation": verdict.get("mean_deviation"),
+                "zero_fraction": verdict.get("zero_fraction"),
+                "indexers": verdict.get("n"),
+            })
+            self._notify_ai_rejected(config, verdict)
+        # The order comes from this pass's scores, not whatever is stored by
+        # the time the reorder runs.
+        changed  = scorer.reorder(scored)
+        self.last_reorder = now
+        self._state.set_app_state("last_prowlarr_reorder", now.isoformat())
+        self._state.write_log({
+            "level": "INFO", "event": "prowlarr_auto_reorder",
+            "indexers_moved": changed,
+        })
+        return scored, rejected
 
     def _maybe_summary(self):
         """

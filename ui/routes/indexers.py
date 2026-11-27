@@ -66,30 +66,41 @@ def indexers_view(tab=None):
     )
 
 
+def _job():
+    """The one RescoreJob for this app (core/indexer_jobs.py)."""
+    from core.indexer_jobs import RescoreJob
+    job = current_app.config.get("RESCORE_JOB")
+    if job is None:
+        job = RescoreJob(current_app.config.get("STATE"), current_app.config["CONFIG_PATH"])
+        current_app.config["RESCORE_JOB"] = job
+    return job
+
+
+def _start_job(sync: bool):
+    from core.config import load_config
+    if not load_config(current_app.config["CONFIG_PATH"]).prowlarr.enabled:
+        return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
+    started, msg = _job().start(sync=sync)
+    return jsonify({"ok": started, "started": started, "msg": msg}), (202 if started else 409)
+
+
 @indexers_bp.route("/indexers/rescore-reorder", methods=["POST"])
 def indexers_rescore_reorder():
-    """Rescore all indexers and reorder in Prowlarr (no sync to apps)."""
-    config_path = current_app.config["CONFIG_PATH"]
+    """Rescore all indexers and reorder in Prowlarr (no sync to apps), in the
+    background. Progress: GET /indexers/rescore/status."""
     try:
-        from core.config import load_config
-        from core.prowlarr import ProwlarrClient
-        from core.indexer_scorer import IndexerScorer
-        from .config import _get_state
-
-        cfg = load_config(config_path)
-        if not cfg.prowlarr.enabled:
-            return jsonify({"ok": False, "msg": "Prowlarr is not enabled"}), 400
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-        state    = _get_state(cfg)
-        scorer   = IndexerScorer(prowlarr, state, cfg.prowlarr)
-        scorer.score_all(skip_ai=False)
-        changed  = scorer.reorder()
-        return jsonify({
-            "ok": True, "changed": changed,
-            "msg": f"{changed} indexer(s) rescored and reordered.",
-        })
+        return _start_job(sync=False)
     except Exception as exc:
         return jsonify({"ok": False, "msg": str(exc)}), 500
+
+
+@indexers_bp.route("/indexers/rescore/status", methods=["GET"])
+def indexers_rescore_status():
+    """The current or last rescore job, for any page that wants to show it."""
+    from core.indexer_jobs import status
+    job = status(current_app.config.get("STATE"))
+    job["running_here"] = _job().running()
+    return jsonify({"ok": True, "job": job})
 
 
 @indexers_bp.route("/indexers/sync-only", methods=["POST"])
@@ -270,36 +281,8 @@ def indexers_scoring_status():
 
 @indexers_bp.route("/indexers/trigger-scoring", methods=["POST"])
 def indexers_trigger_scoring():
-    """Manually trigger a full score + reorder + sync cycle."""
-    config_path = current_app.config["CONFIG_PATH"]
+    """Score, reorder and send the order to the apps now, in the background."""
     try:
-        from core.config import load_config
-        from core.prowlarr import ProwlarrClient
-        from core.indexer_scorer import IndexerScorer
-        from .config import _get_state
-        from datetime import datetime, timezone
-
-        cfg = load_config(config_path)
-        if not cfg.prowlarr.enabled:
-            return jsonify({"ok": False, "msg": "Prowlarr not enabled"}), 400
-
-        prowlarr = ProwlarrClient(cfg.prowlarr.url, cfg.prowlarr.api_key)
-        state = _get_state(cfg)
-        scorer = IndexerScorer(prowlarr, state, cfg.prowlarr)
-        scored = scorer.score_all(skip_ai=False)
-        changed = scorer.reorder()
-        synced = prowlarr.sync_to_apps()
-
-        # Update the last reorder timestamp
-        now = datetime.now(timezone.utc)
-        state.set_app_state("last_prowlarr_reorder", now.isoformat())
-        scheduler = current_app.config.get("SCHEDULER")
-        if scheduler:
-            scheduler.last_reorder = now
-
-        return jsonify({
-            "ok": True, "changed": changed, "synced": synced,
-            "msg": f"Scored, {changed} reordered, sync {'sent' if synced else 'failed'}.",
-        })
+        return _start_job(sync=True)
     except Exception as exc:
         return jsonify({"ok": False, "msg": str(exc)}), 500

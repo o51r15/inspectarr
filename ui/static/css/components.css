@@ -683,3 +683,9 @@ dialog.dialog::backdrop { background: rgba(0, 0, 0, .55); }
 .score-notes { margin: var(--space-2) 0 0; padding-left: 1.2em; }
 .score-notes li { margin-top: 4px; }
 .ml-4 { margin-left: 4px; }
+.score-change { font-size: var(--fs-xs); margin-left: 6px; white-space: nowrap; }
+.rescore-panel { margin: 0 var(--space-3) var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--inset); }
+.rescore-panel.is-running { border-color: var(--info-border, var(--border)); }
+.rescore-panel.is-done { border-color: var(--ok-border); }
+.rescore-panel.is-failed { border-color: var(--danger-border); }
+.rescore-title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }

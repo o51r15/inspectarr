@@ -251,12 +251,16 @@ class IndexerScorer:
             self.state.record_score_history(s["id"], s["health_score"])
         return scored
 
-    def reorder(self) -> int:
+    def reorder(self, scored: list[dict] | None = None) -> int:
         """
-        Reorder torrent indexers in Prowlarr using cached health scores.
+        Reorder torrent indexers in Prowlarr by health score.
 
-        Uses the most recent scores from the database (written by score_all).
-        Does NOT rescore — call score_all() first if fresh scores are needed.
+        `scored` is the result of the score_all() pass this reorder follows:
+        pass it, so the order is built from exactly the scores that pass
+        produced. Without it the stored scores are used -- and another
+        scoring pass (the page, the scheduler) may have replaced them in the
+        meantime, which is how an indexer showing 92 ended up below 75s.
+        Does NOT rescore.
 
         The best-scoring indexer is assigned `base_priority`, the next
         `base_priority + 1`, and so on. Ignored indexers keep their current
@@ -272,6 +276,7 @@ class IndexerScorer:
 
         cached      = self.state.get_cached_scores()
         stats_by_id = {s["indexer_id"]: s for s in self.state.get_all_indexer_stats()}
+        this_pass   = {s["id"]: s.get("health_score") for s in (scored or [])}
 
         scored = []
         for idx in indexers:
@@ -282,7 +287,7 @@ class IndexerScorer:
                 "id":           iid,
                 "name":         idx["name"],
                 "priority":     idx.get("priority", 0),
-                "health_score": cache.get("health_score"),
+                "health_score": this_pass[iid] if iid in this_pass else cache.get("health_score"),
                 "ignored":      bool(db_stats.get("ignored", False)),
                 "_raw":         idx,
             })
