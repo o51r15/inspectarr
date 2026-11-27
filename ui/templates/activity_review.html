@@ -56,8 +56,8 @@
     {% if mode == 'automatic' %}
       {{ empty("Nothing to review",
                "In automatic mode, bad releases are removed straight away, so nothing waits here. "
-               ~ "To review lower-risk catches yourself, raise “Delete at or above” in Settings → Rules.",
-               href="/config#rules", cta="Open Rules", icon_name="check") }}
+               ~ "To review lower-risk catches yourself, set “Remove straight away” to a stricter grade under Settings → Protection.",
+               href="/config#protection", cta="Open Protection", icon_name="check") }}
     {% else %}
       {{ empty("Nothing to review", "You're all caught up. New catches will appear here.", icon_name="check") }}
     {% endif %}
