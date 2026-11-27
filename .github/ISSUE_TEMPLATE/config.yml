@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or help setting up
+    url: https://github.com/o51r15/inspectarr/discussions
+    about: Ask in Discussions; answers there help the next person too.
+  - name: Documentation
+    url: https://github.com/o51r15/inspectarr/wiki
+    about: Installation, configuration, rules, scoring, notifications and troubleshooting.
+  - name: Report a security problem
+    url: https://github.com/o51r15/inspectarr/security/advisories/new
+    about: Privately, please. Not as a public issue.
