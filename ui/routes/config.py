@@ -604,7 +604,7 @@ def ai_set_model():
             "ok": True,
             "forced": not validated,
             "applied": applied,
-            "message": (f"{model} applied without validation"
+            "message": (f"{model} applied without calibration"
                         if not validated else f"{model} applied"),
         })
     except Exception as exc:
@@ -1172,21 +1172,21 @@ def ollama_update_check():
             "ok": True, "update_available": False, "model": model,
             "digest": current[:12],
             "reason": None,
-            "message": ("Not validated yet" if not record
-                        else "Validated before digests were recorded"),
+            "message": ("Not calibrated yet" if not record
+                        else "Calibrated before model builds were recorded"),
         }
     elif known == current:
         result = {"ok": True, "update_available": False, "model": model,
                   "digest": current[:12], "reason": None,
-                  "message": "Model unchanged since validation"}
+                  "message": "Model unchanged since calibration"}
 
     else:
         result = {
             "ok": True, "update_available": True, "model": model,
             "reason": "local",
             "digest": current[:12], "validated_digest": known[:12],
-            "message": (f"{model} has changed since it was validated "
-                        f"({known[:12]} -> {current[:12]}). Re-validate to "
+            "message": (f"{model} has changed since it was calibrated "
+                        f"({known[:12]} -> {current[:12]}). Re-calibrate to "
                         f"confirm it still scores correctly."),
         }
 
