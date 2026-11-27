@@ -935,7 +935,7 @@
           badge.style.display = '';
           badge.textContent = d.reason === 'upstream'
             ? 'Newer build available upstream'
-            : 'Model changed since validation';
+            : 'Model changed since calibration';
           badge.title = d.message || '';
         }
         // Only offer the button for the case a pull actually fixes.

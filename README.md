@@ -26,7 +26,9 @@ Sonarr, Radarr, and Lidarr can blocklist individual releases — but only *after
 
 Inspectarr watches your torrent client's categories, finds downloads that match bad-file
 rules (`.exe` in a TV category, undersized files, suspicious filenames), blocklists
-them in Sonarr / Radarr / Lidarr, deletes the torrent, and notifies you via [Apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Discord, email, and 100+ services).
+them in Sonarr / Radarr / Lidarr, deletes the torrent, and tells you on your phone or
+by email: ntfy, Pushover, Telegram, Discord, Gotify, email, or any of the 100+ services
+[Apprise](https://github.com/caronc/apprise) supports.
 Supports **qBittorrent**, **Transmission**, and **Deluge** — select your client in Settings
 and Inspectarr handles the rest. Scans can be triggered by a polling schedule, incoming
 webhooks from your *arr apps, or both at the same time. Findings are graded by
@@ -38,8 +40,9 @@ It also scores your Prowlarr torrent indexers by health — response time, failu
 rate, malicious content, and grab success — then automatically reorders them so
 your best indexers are searched first. Indexers that consistently score below a
 configurable threshold are automatically disabled and re-enabled after a cooldown.
-Optionally uses a local [Ollama](https://ollama.com) LLM for AI-powered scoring
-with content-hash caching to minimize redundant calls.
+Click any score to see what it is made of. Optionally, a local [Ollama](https://ollama.com)
+model can adjust the scores: Inspectarr calibrates and ranks the models on your server,
+limits how far the AI may move a score, and never lets the AI switch an indexer off on its own.
 
 ---
 
@@ -52,14 +55,15 @@ with content-hash caching to minimize redundant calls.
 - **Severity grading** — every finding is graded (executables CRITICAL, archives HIGH, undersized primary file HIGH, filename patterns MEDIUM) and aggregated with MAX, so a pile of minor findings cannot dilute one dangerous file
 - **Quarantine mode** — a middle band between "just record it" and "delete it": matching torrents are paused and held on a review queue until you decide. Optional timeout with a configurable action. Off by default — both thresholds ship at LOW, which reproduces the previous behaviour exactly
 - **Webhook + polling** — receive push events from Sonarr/Radarr/Lidarr or poll on a schedule, or both
-- **Prowlarr indexer health scoring** — weighted failure rates, logarithmic response time curve, malicious content tracking, grab success rate, historical trend analysis
-- **AI-powered scoring** — optional Ollama integration with a dedicated Settings → AI pane, in-UI model selector and content-hash LLM caching. Ships **disabled**; one master switch turns every AI path off at once
-- **Model validation** — before a model can be selected it is tested against the real scoring path for discrimination, schema compliance and context capacity at your actual indexer count. Results are kept per model so you can compare them
+- **Prowlarr indexer health scoring** — weighted failure rates, logarithmic response time curve, malicious content tracking, grab success rate, historical trend analysis. Click any score to see its parts: Speed, Searches, Downloads and Safety
+- **AI-adjusted scoring** — optional Ollama integration with a dedicated Settings → AI pane and content-hash LLM caching. The AI starts from Inspectarr's own score and may move it only within a limit you set; it can never disable an indexer on its own, and every change is shown with its reason. Ships **disabled**; one master switch turns every AI path off at once
+- **Model calibration and ranking** — **Calibrate** grades each model on 14 test indexers with known answers and finds the best thinking level, context size and batch size for your server; the AI tab ranks every model by score and speed. **Calibrate all** runs now or overnight, with pause and cancel
+- **Your own scoring instructions** — the built-in prompt stays locked; make your own copy, choose one for scoring, and test it against the Default on any calibrated model
 - **Replacement tracking** — after deleting a bad release, watches whether the *arr finds a replacement, which indexer served it, and whether that one passes inspection too. Answers the question a health score cannot: does this indexer's rubbish get replaced by something good, or by nothing at all
 - **Grab attribution** — tracks which indexer served each torrent, increments malicious-hit counters automatically
 - **Auto-reorder** — demotes bad indexers, promotes good ones, syncs to all connected apps
 - **Auto-manage indexers** — automatically disable indexers that consistently score below a health threshold, re-enable after a configurable cooldown
-- **Apprise notifications** — Pushover, Telegram, Discord, email, and [100+ services](https://github.com/caronc/apprise/wiki) with optional Ollama-narrated digests and periodic log summaries (daily/weekly)
+- **Notifications** — add places to send messages, each with its own events: ntfy (Inspectarr makes a private topic and shows a QR code to scan), Pushover, Telegram, Discord, Gotify, email, or any [Apprise URL](https://github.com/caronc/apprise/wiki). Send test, pause, and a plain-language reason when a message can't be delivered. Alerts when Inspectarr stops or restarts after a crash, plus optional AI-written digests and daily/weekly summaries
 - **Full web UI** — dashboard, scheduler, torrents, indexer health, quarantine review, stats, settings, backups, system status, update checker
 - **Health endpoint** — `GET /api/health` for container orchestration; the fast path makes no outbound calls, `?deps=1` opts in to dependency checks
 - **Mobile responsive** — works on phone and tablet
@@ -125,10 +129,10 @@ Dark and light themes with toggle. Works on desktop and mobile.
 |---|---|
 | **Dashboard** | Scheduler status, scan stats, last flagged torrent, run history |
 | **Torrents** | Browse qBittorrent — filter, pause, resume, delete, detail view |
-| **Indexers** | Health scores, rescore, reorder & sync, per-indexer ignore/reset |
+| **Indexers** | Health scores (click one for its parts and what the AI changed), rescore, reorder & sync, per-indexer pin/reset |
 | **Quarantine** | Review queue for held torrents — release, keep paused, or delete + blocklist |
 | **Stats** | Grab attribution — total grabs, malicious hits, % malicious per indexer |
-| **Settings** | Connections, rules + operating mode + remediation thresholds, indexers, AI (Ollama + model validation), notifications, general, advanced, backups |
+| **Settings** | Connections, Protection (rules, operating mode, thresholds), Scanning, Notifications, Indexer health, AI (calibration, model ranking, scoring instructions), System |
 | **System** | Status, scheduled tasks, update checker, LLM logs |
 | **Events** | Paginated log viewer with level filter and JSON export |
 | **LLM Logs** | AI scoring report card with per-indexer reasoning, score trend charts, run history |
@@ -167,20 +171,28 @@ python3 inspectarr.py --config /path     # alternate config file
 
 ## Indexer Health Scoring
 
-Each torrent indexer gets a **0–100% health score** from six signals:
+Each torrent indexer gets a **0–100% health score** from four parts and two adjustments.
+Click a score on the Indexers page to see them for that indexer:
 
-| Signal | What it measures | Weight |
+| Part | What it measures | Default weight |
 |---|---|---|
-| Response time | Logarithmic curve — gentle on fast, harsh on slow | 0.25 |
-| Failure rate | Weighted by type: auth 3×, grab 2×, query 1×, RSS 0.5× | 0.30 |
-| Malicious rate | Flagged hits ÷ total grabs (normalized across volumes) | 0.20 |
-| Grab success | Distinct grab success rate | 0.25 |
-| Backoff penalty | Flat −20 if indexer is in Prowlarr backoff | — |
-| Trend | Linear regression over last 30 snapshots, ±10 | — |
+| Speed | Response time on a logarithmic curve — gentle on fast, harsh on slow | 0.25 |
+| Searches | Failure rate, weighted by type: auth 3×, grab 2×, query 1×, RSS 0.5× | 0.30 |
+| Downloads | Grab success rate | 0.25 |
+| Safety | Bad releases caught ÷ total grabs | 0.20 |
+| *Paused* | Flat −20 while Prowlarr has the indexer in backoff | — |
+| *Trend* | Linear regression over the last 30 scores, ±10 | — |
 
-When [Ollama](https://ollama.com) is configured, the LLM receives all per-indexer data and returns its own score with reasoning. Results are cached by content hash with a configurable TTL (`cache_ttl_hours`), cutting Ollama calls 60–80% on stable homelabs. Select your model from **Settings → Indexers → AI Model**. Falls back to deterministic scoring silently on any failure.
+When [Ollama](https://ollama.com) is configured, the model receives the per-indexer data and may
+adjust Inspectarr's score, with a one-line reason. Pick and calibrate models in **Settings → AI**.
+The AI's change is limited (30 points either way by default, adjustable), shown in the score's
+breakdown, and never enough on its own to disable an indexer: that needs Inspectarr's own score
+below the line too. Results are cached by content hash with a configurable TTL
+(`cache_ttl_hours`). Any AI failure falls back to Inspectarr's own score.
 
-Indexers that consistently score below a configurable threshold are automatically disabled in Prowlarr and re-enabled after a cooldown period. Manual override is available from the Indexers page.
+Indexers that score below a configurable threshold for a set number of runs are automatically
+disabled in Prowlarr and re-enabled after a cooldown period. Manual override is available from the
+Indexers page.
 
 All weights, multipliers, and thresholds are configurable. See the [wiki](https://github.com/o51r15/inspectarr/wiki/Prowlarr-Indexer-Scoring) for the full breakdown.
 
