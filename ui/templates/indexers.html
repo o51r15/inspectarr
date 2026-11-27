@@ -79,7 +79,7 @@
 <div class="stack">
   {% if stats_error %}<div class="alert alert-danger">{{ icon('alert') }} <span>{{ stats_error }}</span></div>{% endif %}
   {% if not prowlarr_enabled %}
-    <div class="alert alert-info">{{ icon('info') }} <span>Connect Prowlarr in <a href="/config#indexers">Settings → Prowlarr</a> to track which indexer each download came from.</span></div>
+    <div class="alert alert-info">{{ icon('info') }} <span>Connect Prowlarr in <a href="/config#connections">Settings → Connections</a> to track which indexer each download came from.</span></div>
   {% endif %}
 
   {% if stats_rows %}

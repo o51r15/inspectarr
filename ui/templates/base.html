@@ -58,12 +58,12 @@
         {% if operating_mode == 'monitor' %}
         <div class="mode-banner mode-banner-monitor" role="status">
           {{ icon('eye') }} <span><strong>Watching only.</strong> Findings are recorded, but nothing is paused or deleted.</span>
-          <a href="/config#rules">Change</a>
+          <a href="/config#protection">Change</a>
         </div>
         {% elif operating_mode == 'quarantine' %}
         <div class="mode-banner mode-banner-quarantine" role="status">
           {{ icon('hand') }} <span><strong>Review mode.</strong> Nothing is deleted automatically; catches wait for you under Activity.</span>
-          <a href="/config#rules">Change</a>
+          <a href="/config#protection">Change</a>
         </div>
         {% endif %}
       {% endif %}

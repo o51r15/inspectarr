@@ -20,6 +20,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   the page and come back: the panel and the disabled buttons follow the job.
   A run cut short by a restart says so.
 
+### Fixed - Links and wording that named old settings
+
+- The empty **Needs review** page told you to raise "Delete at or above" in
+  Settings → Rules. It now says to set **Remove straight away** under
+  Settings → Protection, and its button opens that tab.
+- The mode banner's **Change** link, the Prowlarr hint on **Indexers → Stats**
+  and the scan-interval hint on **System → Tasks** now name and open the
+  current tabs (Protection, Connections and Scanning).
+
 ### Added
 
 - **Up and down arrows** next to each health score: the change since its
